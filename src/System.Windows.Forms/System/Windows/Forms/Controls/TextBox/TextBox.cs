@@ -846,7 +846,7 @@ public partial class TextBox : TextBoxBase
     /// </summary>
     private void DrawPlaceholderText(HDC hdc)
     {
-        TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.Top | TextFormatFlags.EndEllipsis;
+        TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.Top;
         Rectangle rectangle = ClientRectangle;
 
         if (RightToLeft == RightToLeft.Yes)
