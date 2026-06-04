@@ -24417,6 +24417,10 @@ public partial class DataGridView
     /// </summary>
     protected virtual bool ProcessDataGridViewKey(KeyEventArgs e)
     {
+        // Skip DataGridView key processing to respect the currently focused child control.
+        if (_suppressDataGridViewKeyProcessing)
+            return false;
+
         switch (e.KeyCode)
         {
             case Keys.Tab:

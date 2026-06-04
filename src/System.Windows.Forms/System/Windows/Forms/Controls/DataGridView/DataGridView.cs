@@ -368,6 +368,8 @@ public partial class DataGridView : Control, ISupportInitialize
 
     private ToolTipBuffer _toolTipBuffer;
 
+    private bool _suppressDataGridViewKeyProcessing => ContainsFocus && !Focused && (EditingControl is null || !EditingControl.ContainsFocus);
+
 #if DEBUG
     // set to false when the grid is not in sync with the underlying data store
     // in virtual mode, and OnCellValueNeeded cannot be called.
