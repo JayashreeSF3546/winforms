@@ -165,10 +165,10 @@ public partial class RadioButton : ButtonBase
                     PInvokeCore.SendMessage(this, PInvoke.BM_SETCHECK, (WPARAM)(BOOL)value);
                 }
 
+                OnCheckedChanged(EventArgs.Empty);
                 Invalidate();
                 Update();
                 PerformAutoUpdates(tabbedInto: false);
-                OnCheckedChanged(EventArgs.Empty);
             }
         }
     }
@@ -365,6 +365,11 @@ public partial class RadioButton : ButtonBase
             using var nameVariant = (VARIANT)Name;
             AccessibilityObject.RaiseAutomationPropertyChangedEvent(UIA_PROPERTY_ID.UIA_NamePropertyId, nameVariant, nameVariant);
             AccessibilityObject.RaiseAutomationEvent(UIA_EVENT_ID.UIA_AutomationPropertyChangedEventId);
+        }
+
+        if ((!Checked || (Checked && Focused)) && DataBindings[nameof(Checked)] is Binding binding && binding.DataSourceUpdateMode == DataSourceUpdateMode.OnValidation)
+        {
+            binding.WriteValue();
         }
 
         ((EventHandler?)Events[s_checkedChangedEvent])?.Invoke(this, e);
