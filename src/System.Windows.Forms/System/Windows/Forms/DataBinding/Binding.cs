@@ -3,6 +3,8 @@
 
 using System.ComponentModel;
 using System.Globalization;
+using System.Reflection;
+using System.Linq.Expressions;
 
 namespace System.Windows.Forms;
 
@@ -43,6 +45,14 @@ public partial class Binding
     // binding stuff
     private ControlUpdateMode _controlUpdateMode = ControlUpdateMode.OnPropertyChanged;
     private BindingCompleteEventHandler? _onComplete;
+
+    // Stores handler instances so we can unhook correctly (avoid leaks)
+    private EventHandler? _valueChangedHandler;
+    private CancelEventHandler? _validateHandler;
+
+    // storage for created delegate + event when attaching to a specific "PropertyNameChanged" event
+    private EventDescriptor? _propChangeEvent;
+    private Delegate? _propChangeDelegate;
 
     /// <summary>
     ///  Initializes a new instance of the <see cref="Binding"/> class
@@ -437,29 +447,67 @@ public partial class Binding
             {
                 if (_propInfo is not null)
                 {
-                    EventHandler handler = new(Target_PropertyChanged);
-                    _propInfo.AddValueChanged(BindableComponent, handler);
+                    // Try to attach to a strongly-typed "{PropertyName}Changed" event if present.
+                    string changeEventName = _propInfo.Name + "Changed";
+                    EventDescriptor? ed = TypeDescriptor.GetEvents(BindableComponent).Find(changeEventName, true);
+                    if (ed is not null)
+                    {
+                        try
+                        {
+                            _propChangeDelegate = CreateDelegateForPropertyChange(ed.EventType);
+                            if (_propChangeDelegate is not null)
+                            {
+                                ed.AddEventHandler(BindableComponent, _propChangeDelegate);
+                                _propChangeEvent = ed;
+                            }
+                        }
+                        catch
+                        {
+                            // ignore and fall back to AddValueChanged
+                            _propChangeDelegate = null;
+                            _propChangeEvent = null;
+                        }
+                    }
+
+                    if (_propChangeDelegate is null)
+                    {
+                        // Original code path
+                        _valueChangedHandler ??= new EventHandler(Target_PropertyChanged);
+                        _propInfo.AddValueChanged(BindableComponent, _valueChangedHandler);
+                    }
                 }
 
                 if (_validateInfo is not null)
                 {
-                    CancelEventHandler handler = new(Target_Validate);
-                    _validateInfo.AddEventHandler(BindableComponent, handler);
+                    _validateHandler ??= new CancelEventHandler(Target_Validate);
+                    _validateInfo.AddEventHandler(BindableComponent, _validateHandler);
                 }
             }
         }
         else
         {
-            if (_propInfo is not null)
+            // Unbind: remove any delegate attached to the specific "PropertyNameChanged" event
+            if (_propChangeEvent is not null && _propChangeDelegate is not null)
             {
-                EventHandler handler = new(Target_PropertyChanged);
-                _propInfo.RemoveValueChanged(BindableComponent, handler);
+                _propChangeEvent.RemoveEventHandler(BindableComponent, _propChangeDelegate);
+                _propChangeEvent = null;
+                _propChangeDelegate = null;
             }
 
-            if (_validateInfo is not null)
+            // Remove original handler if used
+            if (_propInfo is not null)
             {
-                CancelEventHandler handler = new(Target_Validate);
-                _validateInfo.RemoveEventHandler(BindableComponent, handler);
+                if (_valueChangedHandler is not null)
+                {
+                    _propInfo.RemoveValueChanged(BindableComponent, _valueChangedHandler);
+                    _valueChangedHandler = null;
+                }
+            }
+
+            if (_validateInfo is not null && _validateHandler is not null)
+            {
+                _validateInfo.RemoveEventHandler(BindableComponent, _validateHandler);
+                _validateHandler = null;
             }
         }
     }
@@ -1124,6 +1172,46 @@ public partial class Binding
         {
             e.Cancel = true;
         }
+    }
+
+
+    private Delegate? CreateDelegateForPropertyChange(Type delegateType)
+    {
+        MethodInfo? invoke = delegateType.GetMethod("Invoke");
+        if (invoke is null)
+        {
+            return null;
+        }
+
+        ParameterInfo[] parameters = invoke.GetParameters();
+        if (parameters.Length < 2 || invoke.ReturnType != typeof(void))
+        {
+            return null;
+        }
+
+        Type senderType = parameters[0].ParameterType;
+        Type argsType = parameters[1].ParameterType;
+
+        // Target method to call: Target_PropertyChanged(object?, EventArgs)
+        MethodInfo? targetMethod = typeof(Binding).GetMethod("Target_PropertyChanged", BindingFlags.NonPublic | BindingFlags.Instance);
+        if (targetMethod is null)
+        {
+            return null;
+        }
+
+        // Parameters for the lambda must match the event delegate signature
+        ParameterExpression senderParam = Expression.Parameter(senderType, "sender");
+        ParameterExpression argsParam = Expression.Parameter(argsType, "e");
+
+        // Convert sender to object and args to EventArgs (if necessary)
+        Expression senderAsObject = Expression.Convert(senderParam, typeof(object));
+        Expression argsAsEventArgs = argsType == typeof(EventArgs) ? (Expression)argsParam : Expression.Convert(argsParam, typeof(EventArgs));
+
+        // Call Target_PropertyChanged(this, (object)sender, (EventArgs)args)
+        Expression call = Expression.Call(Expression.Constant(this), targetMethod, senderAsObject, argsAsEventArgs);
+
+        LambdaExpression lambda = Expression.Lambda(delegateType, call, senderParam, argsParam);
+        return lambda.Compile();
     }
 
     [MemberNotNullWhen(true, nameof(_bindingManagerBase))]
