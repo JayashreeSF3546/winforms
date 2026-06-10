@@ -18,21 +18,33 @@ public class ByteViewer : TableLayoutPanel
     private const int DEFAULT_COLUMN_COUNT = 16;
     private const int DEFAULT_ROW_COUNT = 25;
     private const int COLUMN_COUNT = 16;
-    private const int BORDER_GAP = 2;
-    private const int INSET_GAP = 3;
-    private const int CELL_HEIGHT = 21;
-    private const int CELL_WIDTH = 25;
-    private const int CHAR_WIDTH = 8;
-    private const int ADDRESS_WIDTH = 69;  // this is ceiling(sizeof("DDDDDDDD").width) + 1
-    private const int HEX_WIDTH = CELL_WIDTH * COLUMN_COUNT;
-    private const int DUMP_WIDTH = CHAR_WIDTH * COLUMN_COUNT;
-    private const int HEX_DUMP_GAP = 5;
-    private const int ADDRESS_START_X = BORDER_GAP + INSET_GAP;
-    private const int CLIENT_START_Y = BORDER_GAP + INSET_GAP;
-    private const int LINE_START_Y = CLIENT_START_Y + CELL_HEIGHT / 8;
-    private const int HEX_START_X = ADDRESS_START_X + ADDRESS_WIDTH;
-    private const int DUMP_START_X = HEX_START_X + HEX_WIDTH + HEX_DUMP_GAP;
-    private const int SCROLLBAR_START_X = DUMP_START_X + DUMP_WIDTH + HEX_DUMP_GAP;
+
+    // Base (unscaled) layout metrics. These are scaled at runtime to match the display DPI.
+    private const int BASE_BORDER_GAP = 2;
+    private const int BASE_INSET_GAP = 3;
+    private const int BASE_CELL_HEIGHT = 21;
+    private const int BASE_CELL_WIDTH = 25;
+    private const int BASE_CHAR_WIDTH = 8;
+    private const int BASE_ADDRESS_WIDTH = 69;  // this is ceiling(sizeof("DDDDDDDD").width) + 1
+    private const int BASE_HEX_DUMP_GAP = 5;
+
+    // DPI-scaled layout values (updated at runtime)
+    private float _dpiScale = 1.0f;
+    private int _borderGap;
+    private int _insetGap;
+    private int _cellHeight;
+    private int _cellWidth;
+    private int _charWidth;
+    private int _addressWidth;
+    private int _hexWidth;
+    private int _dumpWidth;
+    private int _hexDumpGap;
+    private int _addressStartX;
+    private int _clientStartY;
+    private int _lineStartY;
+    private int _hexStartX;
+    private int _dumpStartX;
+    private int _scrollbarStartX;
 
     private static readonly Font s_addressFont = new("Microsoft Sans Serif", 8.0f);
     private static readonly Font s_hexDumpFont = new("Courier New", 8.0f);
@@ -73,6 +85,29 @@ public class ByteViewer : TableLayoutPanel
         _realDisplayMode = DisplayMode.Hexdump;
         DoubleBuffered = true;
         SetStyle(ControlStyles.ResizeRedraw, true);
+    }
+
+    private void UpdateScaling()
+    {
+        _dpiScale = DeviceDpi / 96f;
+
+        _borderGap = (int)Math.Round(BASE_BORDER_GAP * _dpiScale);
+        _insetGap = (int)Math.Round(BASE_INSET_GAP * _dpiScale);
+        _cellHeight = (int)Math.Round(BASE_CELL_HEIGHT * _dpiScale);
+        _cellWidth = (int)Math.Round(BASE_CELL_WIDTH * _dpiScale);
+        _charWidth = (int)Math.Round(BASE_CHAR_WIDTH * _dpiScale);
+        _addressWidth = (int)Math.Round(BASE_ADDRESS_WIDTH * _dpiScale);
+        _hexDumpGap = (int)Math.Round(BASE_HEX_DUMP_GAP * _dpiScale);
+
+        _hexWidth = _cellWidth * _columnCount;
+        _dumpWidth = _charWidth * _columnCount;
+
+        _addressStartX = _borderGap + _insetGap;
+        _clientStartY = _borderGap + _insetGap;
+        _lineStartY = _clientStartY + _cellHeight / 8;
+        _hexStartX = _addressStartX + _addressWidth;
+        _dumpStartX = _hexStartX + _hexWidth + _hexDumpGap;
+        _scrollbarStartX = _dumpStartX + _dumpWidth + _hexDumpGap;
     }
 
     // Stole this code from XmlScanner
@@ -128,7 +163,7 @@ public class ByteViewer : TableLayoutPanel
         Debug.Assert(success && charCount == 8);
 
         using SolidBrush foreground = new(ForeColor);
-        g.DrawString(hexChars, font, foreground, ADDRESS_START_X, LINE_START_Y + line * CELL_HEIGHT);
+        g.DrawString(hexChars, font, foreground, _addressStartX, _lineStartY + line * _cellHeight);
     }
 
     /// <summary>
@@ -142,27 +177,27 @@ public class ByteViewer : TableLayoutPanel
             g.FillRectangle(
                 brush,
                 new Rectangle(
-                    HEX_START_X,
-                    CLIENT_START_Y,
-                    HEX_WIDTH + HEX_DUMP_GAP + DUMP_WIDTH + HEX_DUMP_GAP,
-                    _rowCount * CELL_HEIGHT));
+                    _hexStartX,
+                    _clientStartY,
+                    _hexWidth + _hexDumpGap + _dumpWidth + _hexDumpGap,
+                    _rowCount * _cellHeight));
         }
 
         using Pen pen = new(SystemColors.ControlDark);
         g.DrawRectangle(
             pen,
             new Rectangle(
-                HEX_START_X,
-                CLIENT_START_Y,
-                HEX_WIDTH + HEX_DUMP_GAP + DUMP_WIDTH + HEX_DUMP_GAP - 1,
-                _rowCount * CELL_HEIGHT - 1));
+                _hexStartX,
+                _clientStartY,
+                _hexWidth + _hexDumpGap + _dumpWidth + _hexDumpGap - 1,
+                _rowCount * _cellHeight - 1));
 
         g.DrawLine(
             pen,
-            DUMP_START_X - HEX_DUMP_GAP,
-            CLIENT_START_Y,
-            DUMP_START_X - HEX_DUMP_GAP,
-            CLIENT_START_Y + _rowCount * CELL_HEIGHT - 1);
+            _dumpStartX - _hexDumpGap,
+            _clientStartY,
+            _dumpStartX - _hexDumpGap,
+            _clientStartY + _rowCount * _cellHeight - 1);
     }
 
     // Char.IsPrintable is going away because it's a mostly meaningless concept.
@@ -193,7 +228,7 @@ public class ByteViewer : TableLayoutPanel
         Font font = s_hexDumpFont;
 
         using Brush foreground = new SolidBrush(ForeColor);
-        g.DrawString(charsToDraw, font, foreground, DUMP_START_X, LINE_START_Y + line * CELL_HEIGHT);
+        g.DrawString(charsToDraw, font, foreground, _dumpStartX, _lineStartY + line * _cellHeight);
     }
 
     /// <summary>
@@ -221,7 +256,7 @@ public class ByteViewer : TableLayoutPanel
         ReadOnlySpan<char> result = charsBuffer[..charsWritten];
 
         using Brush foreground = new SolidBrush(ForeColor);
-        g.DrawString(result, font, foreground, HEX_START_X + BORDER_GAP, LINE_START_Y + line * CELL_HEIGHT);
+        g.DrawString(result, font, foreground, _hexStartX + _borderGap, _lineStartY + line * _cellHeight);
 
         /* ISSUE a-gregka: If perf problem, could be done this way to eliminate drawing twice on repaint
            The current solution good enough for a dialog box
@@ -439,9 +474,12 @@ public class ByteViewer : TableLayoutPanel
         _scrollbarWidth = SystemInformation.VerticalScrollBarWidth;
 
         // For backwards compatibility
+        UpdateScaling();
+
+        // For backwards compatibility
         Size = new Size(
-            SCROLLBAR_START_X + _scrollbarWidth + BORDER_GAP + INSET_GAP,
-            2 * (BORDER_GAP + INSET_GAP) + _rowCount * (CELL_HEIGHT));
+            _scrollbarStartX + _scrollbarWidth + _borderGap + _insetGap,
+            2 * (_borderGap + _insetGap) + _rowCount * (_cellHeight));
 
         _scrollBar = new VScrollBar();
         _scrollBar.ValueChanged += ScrollChanged;
@@ -510,6 +548,24 @@ public class ByteViewer : TableLayoutPanel
     }
 
     /// <summary>
+    /// Handle DPI changes (PerMonitorV2) by recomputing layout.
+    /// Uses WM_DPICHANGED so it works on targets without OnDpiChanged override.
+    /// </summary>
+    protected override void WndProc(ref Message m)
+    {
+        int WM_DPICHANGED = 0x02E0;
+        if (m.Msg == WM_DPICHANGED)
+        {
+            // Recompute DPI-scaled metrics and any state that depends on DPI, then repaint.
+            UpdateScaling();
+            InitState();
+            Invalidate();
+        }
+
+        base.WndProc(ref m);
+    }
+
+    /// <summary>
     ///  Paint handler for the control.
     /// </summary>
     protected override void OnPaint(PaintEventArgs e)
@@ -546,7 +602,8 @@ public class ByteViewer : TableLayoutPanel
         // Must call this first since we might return
         base.OnLayout(e);
 
-        int rows = (ClientSize.Height - 2 * (BORDER_GAP + INSET_GAP)) / CELL_HEIGHT;
+        // Use DPI-scaled client start and cell height
+        int rows = (ClientSize.Height - 2 * (_borderGap + _insetGap)) / _cellHeight;
         if (rows >= 0 && rows != _rowCount)
         {
             _rowCount = rows;
@@ -560,8 +617,8 @@ public class ByteViewer : TableLayoutPanel
         {
             // For backwards compatibility
             Size = new Size(
-                SCROLLBAR_START_X + _scrollbarWidth + BORDER_GAP + INSET_GAP,
-                2 * (BORDER_GAP + INSET_GAP) + _rowCount * (CELL_HEIGHT));
+                _scrollbarStartX + _scrollbarWidth + _borderGap + _insetGap,
+                2 * (_borderGap + _insetGap) + _rowCount * (_cellHeight));
         }
 
         if (_scrollBar is not null)
