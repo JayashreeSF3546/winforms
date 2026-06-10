@@ -796,7 +796,7 @@ public class ContainerControl : ScrollableControl, IContainerControl
         base.OnChildLayoutResuming(child, performLayout);
 
         // do not scale children if AutoScaleMode is set to Dpi
-        if (AutoScaleMode == AutoScaleMode.Dpi)
+        if (AutoScaleMode == AutoScaleMode.Dpi && !HasAutoSizeCheckBoxOrRadioButtonInSubtree(child))
         {
             return;
         }
@@ -2016,6 +2016,27 @@ public class ContainerControl : ScrollableControl, IContainerControl
         }
 
         base.WndProc(ref m);
+    }
+
+    /// <summary>
+    /// Returns true if this control subtree contains an AutoSize CheckBox or RadioButton.
+    /// </summary>
+    private bool HasAutoSizeCheckBoxOrRadioButtonInSubtree(Control control)
+    {
+        if (control.AutoSize && control is CheckBox or RadioButton)
+        {
+            return true;
+        }
+
+        foreach (Control child in control.Controls)
+        {
+            if (HasAutoSizeCheckBoxOrRadioButtonInSubtree(child))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     [EditorBrowsable(EditorBrowsableState.Advanced)]
