@@ -307,7 +307,7 @@ public unsafe partial class WebBrowserBase : Control
     //
     protected internal override unsafe bool ProcessMnemonic(char charCode)
     {
-        if (!CanSelect)
+        if (!CanSelect || !ContainsFocus)
         {
             return false;
         }
