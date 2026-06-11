@@ -799,6 +799,21 @@ public abstract partial class TextBoxBase : Control
             // if it doesn't take multiline and word wrap into account. For better accuracy and/or wrapping use
             // GetPreferredSize instead.
             int height = FontHeight;
+            try
+            {
+                const string descenderTest = "gjpqy";
+
+                // Use SingleLine + NoPrefix for accurate single-line measurement.
+                var flags = TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
+                Size measured = TextRenderer.MeasureText(descenderTest, Font, Size.Empty, flags);
+                height = Math.Max(height, measured.Height);
+            }
+            catch
+            {
+                // If measurement fails for any reason, fall back to FontHeight.
+                height = FontHeight;
+            }
+
             if (_borderStyle != BorderStyle.None)
             {
                 height += SystemInformation.GetBorderSizeForDpi(DeviceDpiInternal).Height * 4 + 3;
