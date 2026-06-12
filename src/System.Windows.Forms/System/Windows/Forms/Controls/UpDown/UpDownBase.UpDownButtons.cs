@@ -284,7 +284,7 @@ public abstract partial class UpDownBase
                         ? ModernControlButtonState.Pressed
                         : (Enabled ? (_mouseOver == ButtonID.Up ? ModernControlButtonState.Hover : ModernControlButtonState.Normal)
                                    : ModernControlButtonState.Disabled),
-                    true);
+                    Application.IsDarkModeEnabled);
 
                 DrawModernControlButton(
                     cachedGraphics,
@@ -294,7 +294,7 @@ public abstract partial class UpDownBase
                         ? ModernControlButtonState.Pressed
                         : (Enabled ? (_mouseOver == ButtonID.Down ? ModernControlButtonState.Hover : ModernControlButtonState.Normal)
                                    : ModernControlButtonState.Disabled),
-                    true);
+                    Application.IsDarkModeEnabled);
 
                 e.GraphicsInternal.DrawImageUnscaled(
                     _cachedBitmap,
