@@ -101,6 +101,25 @@ public partial class Control
                     // you could end up with a control half reparented.
                     value.AssignParent(Owner);
                 }
+                catch
+                {
+                    // AssignParent may throw for invalid parents, leaving the control partially added.
+                    // Roll back the failed add to keep the collection and parent state consistent.
+                    if (InnerList.Contains(value))
+                    {
+                        InnerList.Remove(value);
+                    }
+
+                    // AssignParent may have already changed the parent before throwing.
+                    // Restore the previous parent to keep Parent and Controls collection in sync.
+                    if (value._parent == Owner)
+                    {
+                        value._parent = oldParent;
+                    }
+
+                    value._tabIndex = _savedTabIndex;
+                    throw;
+                }
                 finally
                 {
                     if (oldParent != value._parent && (Owner._state & States.Created) != 0)
