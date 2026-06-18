@@ -72,6 +72,8 @@ public partial class Control
             // Add the control
             InnerList.Add(value);
 
+            int _savedTabIndex = value._tabIndex;
+
             if (value._tabIndex == -1)
             {
                 // Find the next highest tab index
