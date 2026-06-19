@@ -24417,9 +24417,12 @@ public partial class DataGridView
     /// </summary>
     protected virtual bool ProcessDataGridViewKey(KeyEventArgs e)
     {
-        // Skip DataGridView key processing to respect the currently focused child control.
-        if (_suppressDataGridViewKeyProcessing)
+        // Skip DataGridView navigation key processing to respect the currently focused child control.
+        Keys key = e.KeyData & Keys.KeyCode;
+        if (_suppressDataGridViewKeyProcessing && (key is Keys.Up or Keys.Down or Keys.Left or Keys.Right))
+        {
             return false;
+        }
 
         switch (e.KeyCode)
         {
