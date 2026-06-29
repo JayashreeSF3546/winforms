@@ -4464,7 +4464,15 @@ public partial class Form : ContainerControl
 
         if (IsMdiContainer)
         {
-            e.GraphicsInternal.FillRectangle(SystemBrushes.AppWorkspace, ClientRectangle);
+            if (Padding != Padding.Empty)
+            {
+                using var brush = new SolidBrush(BackColor);
+                e.GraphicsInternal.FillRectangle(brush, ClientRectangle);
+            }
+            else
+            {
+                e.GraphicsInternal.FillRectangle(SystemBrushes.AppWorkspace, ClientRectangle);
+            }
         }
     }
 
