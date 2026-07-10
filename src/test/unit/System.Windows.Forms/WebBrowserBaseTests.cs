@@ -1027,7 +1027,6 @@ public class WebBrowserBaseTests
 
         form.Controls.Add(webBrowser);
         form.Show();
-        webBrowser.CreateControl();
 
         bool processed = webBrowser.InvokeProcessMnemonic('B');
 
