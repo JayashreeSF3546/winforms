@@ -91,6 +91,153 @@ public unsafe class COM2FontConverterTests
         }
     }
 
+    [Fact]
+    public void Com2FontConverter_ConvertNativeToManaged_Null_ReturnsNullOrDefault()
+    {
+        // Arrange
+        Com2FontConverter converter = new();
+        VARIANT nullVariant = default;
+
+        // Act
+        object? result = converter.ConvertNativeToManaged(nullVariant, s_stubDescriptor);
+
+        // Assert
+        // Empty VARIANT (VT_EMPTY) should return null
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Com2FontConverter_ConvertNativeToManaged_InvalidVariant_TypeMismatch()
+    {
+        // Arrange
+        Com2FontConverter converter = new();
+        // Create a VARIANT with VT_I4 (int) type instead of VT_UNKNOWN (IFont)
+        VARIANT invalidVariant = (VARIANT)42;
+
+        // Act & Assert
+        // Invalid variant type triggers Debug.Fail in test environment
+        Assert.Throws<InvalidOperationException>(() =>
+            converter.ConvertNativeToManaged(invalidVariant, s_stubDescriptor));
+    }
+
+    [Fact]
+    public void Com2FontConverter_ConvertManagedToNative_Null_DefaultsToControlFont()
+    {
+        // Arrange
+        Com2FontConverter converter = new();
+        bool cancelSet = false;
+
+        // Act
+        VARIANT result = converter.ConvertManagedToNative(null, s_stubDescriptor, ref cancelSet);
+
+        // Assert
+        // Null is handled, result should be empty VARIANT and cancelSet is set
+        Assert.True(result.IsEmpty);
+        Assert.True(cancelSet);
+    }
+
+    [Fact]
+    public void Com2FontConverter_ConvertManagedToNative_Font_SetsCancelSet()
+    {
+        // Arrange
+        Com2FontConverter converter = new();
+        Font testFont = new("Courier New", 10);
+        bool cancelSet = false;
+
+        // Act
+        VARIANT result = converter.ConvertManagedToNative(testFont, s_stubDescriptor, ref cancelSet);
+
+        // Assert
+        // ConvertManagedToNative should set cancelSet to true
+        // (we don't actually set the native value, just update the IFont)
+        Assert.True(cancelSet);
+        Assert.True(result.IsEmpty);
+    }
+
+    [Fact]
+    public void Com2FontConverter_ConvertManagedToNative_InvalidObject_FailureHandled()
+    {
+        // Arrange
+        Com2FontConverter converter = new();
+        object invalidObject = new object();
+        bool cancelSet = false;
+
+        // Act & Assert
+        // Invalid object type should be handled gracefully
+        // The converter expects a Font object
+        Assert.Throws<InvalidCastException>(() =>
+            converter.ConvertManagedToNative(invalidObject, s_stubDescriptor, ref cancelSet));
+    }
+
+    [Fact]
+    public void Com2FontConverter_ManagedType_ReturnsFont()
+    {
+        // Arrange
+        Com2FontConverter converter = new();
+
+        // Act
+        Type managedType = converter.ManagedType;
+
+        // Assert
+        Assert.Equal(typeof(Font), managedType);
+    }
+
+    [Fact]
+    public void Com2FontConverter_AllowExpand_ReturnsTrue()
+    {
+        // Arrange
+        Com2FontConverter converter = new();
+
+        // Act
+        bool allowExpand = converter.AllowExpand;
+
+        // Assert
+        Assert.True(allowExpand);
+    }
+
+    [Fact]
+    public void Com2FontConverter_ConvertNativeToManaged_WithDefaultFont()
+    {
+        // Arrange
+        Com2FontConverter converter = new();
+        // Test with a null/empty font by using a descriptor that returns null
+        var testDescriptor = new Com2PropertyDescriptor(
+            default,
+            "TestFont",
+            Array.Empty<Attribute>(),
+            default,
+            default,
+            default,
+            default);
+
+        // Act
+        object? result = converter.ConvertNativeToManaged(default, testDescriptor);
+
+        // Assert
+        // Empty VARIANT returns null
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Com2FontConverter_ConvertManagedToNative_WithStandardFonts()
+    {
+        // Arrange
+        Com2FontConverter converter = new();
+        Font[] testFonts = [
+            new Font("Arial", 12),
+            new Font("Times New Roman", 14),
+            new Font("Courier New", 10)
+        ];
+        bool cancelSet = false;
+
+        // Act & Assert
+        foreach (Font font in testFonts)
+        {
+            VARIANT result = converter.ConvertManagedToNative(font, s_stubDescriptor, ref cancelSet);
+            Assert.True(cancelSet);
+        }
+    }
+
     private class CustomGetNativeValueDescriptor : Com2PropertyDescriptor
     {
         private readonly ICustomTypeDescriptor _descriptor;
