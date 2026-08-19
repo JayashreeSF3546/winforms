@@ -4084,4 +4084,180 @@ public partial class DataGridViewTests : IDisposable
         dataGridView.Dispose();
         toolTipDisposeCount.Should().Be(1);
     }
+
+    [WinFormsFact]
+    public void DataGridView_ClipboardCopyMode_GetDefault_ReturnsExpected()
+    {
+        using DataGridView control = new();
+
+        Assert.Equal(
+            DataGridViewClipboardCopyMode.EnableWithAutoHeaderText,
+            control.ClipboardCopyMode);
+    }
+
+    [WinFormsTheory]
+    [InlineData(DataGridViewClipboardCopyMode.Disable)]
+    [InlineData(DataGridViewClipboardCopyMode.EnableWithAutoHeaderText)]
+    [InlineData(DataGridViewClipboardCopyMode.EnableWithoutHeaderText)]
+    [InlineData(DataGridViewClipboardCopyMode.EnableAlwaysIncludeHeaderText)]
+    public void DataGridView_ClipboardCopyMode_SetValidValue_GetReturnsExpected(
+    DataGridViewClipboardCopyMode value)
+    {
+        using DataGridView control = new();
+
+        control.ClipboardCopyMode = value;
+
+        Assert.Equal(value, control.ClipboardCopyMode);
+    }
+
+    [WinFormsTheory]
+    [InlineData((DataGridViewClipboardCopyMode)(-1))]
+    [InlineData((DataGridViewClipboardCopyMode)4)]
+    public void DataGridView_ClipboardCopyMode_SetInvalidValue_ThrowsInvalidEnumArgumentException(
+    DataGridViewClipboardCopyMode value)
+    {
+        using DataGridView control = new();
+
+        Assert.Throws<InvalidEnumArgumentException>(
+            () => control.ClipboardCopyMode = value);
+    }
+
+    [WinFormsFact]
+    public void DataGridView_GetClipboardContent_ClipboardCopyModeDisable_ThrowsNotSupportedException()
+    {
+        using DataGridView control = new()
+        {
+            ClipboardCopyMode = DataGridViewClipboardCopyMode.Disable
+        };
+
+        Assert.Throws<NotSupportedException>(control.GetClipboardContent);
+    }
+
+    [WinFormsFact]
+    public void DataGridView_GetClipboardContent_FullRowSelect_NoSelectedRows_ReturnsNull()
+    {
+        using DataGridView control = new()
+        {
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
+        };
+
+        control.Columns.Add("Column1", "Column1");
+        control.Rows.Add("Value1");
+
+        Assert.Null(control.GetClipboardContent());
+    }
+
+    [WinFormsFact]
+    public void DataGridView_GetClipboardContent_FullColumnSelect_SelectedColumn_ReturnsDataObject()
+    {
+        using DataGridView control = new()
+        {
+            SelectionMode = DataGridViewSelectionMode.FullColumnSelect,
+            ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
+        };
+
+        DataGridViewTextBoxColumn column = new()
+        {
+            Name = "Column1",
+            HeaderText = "Column1",
+            SortMode = DataGridViewColumnSortMode.Programmatic
+        };
+
+        control.Columns.Add(column);
+        control.Rows.Add("Value1");
+
+        control.Columns[0].Selected = true;
+
+        using NoAssertContext context = new();
+
+        DataObject result = control.GetClipboardContent();
+
+        Assert.NotNull(result);
+    }
+
+    [WinFormsFact]
+    public void DataGridView_GetClipboardContent_CellSelect_NoSelectedCells_ReturnsNull()
+    {
+        using DataGridView control = new()
+        {
+            SelectionMode = DataGridViewSelectionMode.CellSelect,
+            ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
+        };
+
+        control.Columns.Add("Column1", "Column1");
+        control.Rows.Add("Value1");
+
+        Assert.Null(control.GetClipboardContent());
+    }
+
+    [WinFormsFact]
+    public void DataGridView_GetClipboardContent_CellSelect_SelectedCell_ReturnsDataObject()
+    {
+        using DataGridView control = new()
+        {
+            SelectionMode = DataGridViewSelectionMode.CellSelect,
+            ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
+        };
+
+        control.Columns.Add("Column1", "Column1");
+        control.Rows.Add("Value1");
+
+        control[0, 0].Selected = true;
+
+        using NoAssertContext context = new();
+
+        DataObject result = control.GetClipboardContent();
+
+        Assert.NotNull(result);
+    }
+
+    [WinFormsFact]
+    public void DataGridView_GetClipboardContent_RowHeaderSelect_SelectedRow_ReturnsDataObject()
+    {
+        using DataGridView control = new()
+        {
+            SelectionMode = DataGridViewSelectionMode.RowHeaderSelect,
+            ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
+        };
+
+        control.Columns.Add("Column1", "Column1");
+        int rowIndex = control.Rows.Add("Value1");
+
+        control.Rows[rowIndex].Selected = true;
+
+        using NoAssertContext context = new();
+
+        DataObject result = control.GetClipboardContent();
+
+        Assert.NotNull(result);
+    }
+
+    [WinFormsFact]
+    public void DataGridView_GetClipboardContent_ColumnHeaderSelect_SelectedColumn_ReturnsDataObject()
+    {
+        using DataGridView control = new()
+        {
+            SelectionMode = DataGridViewSelectionMode.ColumnHeaderSelect,
+            ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
+        };
+
+        DataGridViewTextBoxColumn column = new()
+        {
+            Name = "Column1",
+            HeaderText = "Column1",
+            SortMode = DataGridViewColumnSortMode.Programmatic
+        };
+
+        control.Columns.Add(column);
+        control.Rows.Add("Value1");
+
+        control.Columns[0].Selected = true;
+
+        using NoAssertContext context = new();
+
+        DataObject result = control.GetClipboardContent();
+
+        Assert.NotNull(result);
+    }
 }

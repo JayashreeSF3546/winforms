@@ -1391,6 +1391,219 @@ public class ClipboardTests
         data.Should().BeSameAs(person);
     }
 
+    [WinFormsFact]
+    public void Clipboard_SetDataObject_WithDataObject_SetsExpectedData()
+    {
+        const string format = "WinForms.ClipboardTests.SetDataObject";
+        const string expected = "DataObject value";
+
+        DataObject dataObject = new();
+        dataObject.SetData(format, autoConvert: false, expected);
+
+        try
+        {
+            Clipboard.Clear();
+
+            Clipboard.SetDataObject(
+                data: dataObject,
+                copy: false,
+                retryTimes: 0,
+                retryDelay: 0);
+
+            Assert.True(Clipboard.ContainsData(format));
+            Assert.Equal(expected, Clipboard.GetData(format));
+        }
+        finally
+        {
+            Clipboard.Clear();
+        }
+    }
+
+    [WinFormsTheory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("   ")]
+    [InlineData("\t")]
+    [InlineData("\r\n")]
+    public void Clipboard_ContainsData_NullEmptyOrWhiteSpaceFormat_ReturnsFalse(
+    string? format)
+    {
+        bool result = Clipboard.ContainsData(format);
+
+        Assert.False(result);
+    }
+
+    [WinFormsFact]
+    public void Clipboard_ContainsData_ExistingCustomFormat_ReturnsTrue()
+    {
+        const string format =
+            "WinForms.ClipboardTests.ContainsData.ExistingFormat";
+
+        try
+        {
+            Clipboard.Clear();
+
+            DataObject dataObject = new();
+            dataObject.SetData(
+                format,
+                autoConvert: false,
+                data: "Custom clipboard data");
+
+            Clipboard.SetDataObject(
+                data: dataObject,
+                copy: false,
+                retryTimes: 0,
+                retryDelay: 0);
+
+            bool result = Clipboard.ContainsData(format);
+
+            Assert.True(result);
+        }
+        finally
+        {
+            Clipboard.Clear();
+        }
+    }
+
+    [WinFormsFact]
+    public void Clipboard_ContainsData_MissingCustomFormat_ReturnsFalse()
+    {
+        const string existingFormat =
+            "WinForms.ClipboardTests.ContainsData.Existing";
+        const string missingFormat =
+            "WinForms.ClipboardTests.ContainsData.Missing";
+
+        try
+        {
+            Clipboard.Clear();
+
+            DataObject dataObject = new();
+            dataObject.SetData(
+                existingFormat,
+                autoConvert: false,
+                data: "Existing data");
+
+            Clipboard.SetDataObject(
+                data: dataObject,
+                copy: false,
+                retryTimes: 0,
+                retryDelay: 0);
+
+            bool result = Clipboard.ContainsData(missingFormat);
+
+            Assert.False(result);
+        }
+        finally
+        {
+            Clipboard.Clear();
+        }
+    }
+
+    [WinFormsFact]
+    public void Clipboard_ContainsData_EmptyClipboard_ReturnsFalse()
+    {
+        const string format =
+            "WinForms.ClipboardTests.ContainsData.EmptyClipboard";
+
+        try
+        {
+            Clipboard.Clear();
+
+            bool result = Clipboard.ContainsData(format);
+
+            Assert.False(result);
+        }
+        finally
+        {
+            Clipboard.Clear();
+        }
+    }
+
+    [WinFormsFact]
+    public void Clipboard_TryGetData_StringFormat_ReturnsTypedValue()
+    {
+        try
+        {
+            Clipboard.Clear();
+
+            Clipboard.SetText("Hello");
+
+            Assert.True(
+                Clipboard.TryGetData<string>(
+                    DataFormats.UnicodeText,
+                    out string? value));
+
+            Assert.Equal("Hello", value);
+        }
+        finally
+        {
+            Clipboard.Clear();
+        }
+    }
+
+    [WinFormsFact]
+    public void Clipboard_TryGetData_MissingFormat_ReturnsFalse()
+    {
+        try
+        {
+            Clipboard.Clear();
+
+            Clipboard.SetText("Hello");
+
+            Assert.False(
+                Clipboard.TryGetData<string>(
+                    "MissingFormat",
+                    out string? value));
+
+            Assert.Null(value);
+        }
+        finally
+        {
+            Clipboard.Clear();
+        }
+    }
+
+    [WinFormsFact]
+    public void Clipboard_TryGetData_EmptyClipboard_ReturnsFalse()
+    {
+        try
+        {
+            Clipboard.Clear();
+
+            bool result = Clipboard.TryGetData<string>(
+                "NonExistingFormat",
+                out string? value);
+
+            Assert.False(result);
+            Assert.Null(value);
+        }
+        finally
+        {
+            Clipboard.Clear();
+        }
+    }
+
+    [WinFormsFact]
+    public void Clipboard_TryGetData_NoClipboardData_ReturnsFalse()
+    {
+        try
+        {
+            Clipboard.Clear();
+
+            Assert.False(
+                Clipboard.TryGetData<string>(
+                    "MissingFormat",
+                    out string? data));
+
+            Assert.Null(data);
+        }
+        finally
+        {
+            Clipboard.Clear();
+        }
+    }
+
     [Serializable]
     internal class SerializablePerson
     {
