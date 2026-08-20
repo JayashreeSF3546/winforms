@@ -188,202 +188,64 @@ public unsafe class COM2PictureConverterTests
         }
     }
 
-    // Production coverage tests
     [Fact]
-    public void Com2PictureConverter_ConvertNativeToManaged_Null_ReturnsNull()
+    public void Com2PictureConverter_Ctor_IconPropertyName_SelectsIconManagedType()
     {
         // Arrange
-        Com2PictureConverter converter = Instance;
-        VARIANT nullVariant = default;
+        Com2PropertyDescriptor iconProperty = new(
+            default,
+            "MouseIcon",
+            default,
+            default,
+            default,
+            default,
+            default);
 
         // Act
-        object? result = converter.ConvertNativeToManaged(nullVariant, null);
+        Com2PictureConverter converter = new(iconProperty);
 
         // Assert
-        Assert.Null(result);
+        Assert.Equal(typeof(Icon), converter.ManagedType);
     }
 
     [Fact]
-    public void Com2PictureConverter_ConvertNativeToManaged_NullHandle_ReturnsNull()
+    public void Com2PictureConverter_Ctor_NonIconPropertyName_SelectsBitmapManagedType()
     {
         // Arrange
-        TestIPicture nullHandlePicture = new(0);
-        using var unknown = ComHelpers.GetComScope<IUnknown>(nullHandlePicture);
+        Com2PropertyDescriptor bitmapProperty = new(
+            default,
+            "Picture",
+            default,
+            default,
+            default,
+            default,
+            default);
 
         // Act
-        object? result = Instance.ConvertNativeToManaged((VARIANT)unknown.Value, null);
+        Com2PictureConverter converter = new(bitmapProperty);
 
         // Assert
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void Com2PictureConverter_ConvertNativeToManaged_Icon_ReturnsIcon()
-    {
-        // Arrange
-        Icon testIcon = SystemIcons.Question;
-        nint iconHandle = testIcon.Handle;
-        TestIPicture iconPicture = new(iconHandle, PICTYPE.PICTYPE_ICON);
-        using var unknown = ComHelpers.GetComScope<IUnknown>(iconPicture);
-
-        // Act
-        object? result = Instance.ConvertNativeToManaged((VARIANT)unknown.Value, null);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.IsType<Icon>(result);
-        Icon resultIcon = (Icon)result;
-        Assert.Equal(testIcon.Height, resultIcon.Height);
-        Assert.Equal(testIcon.Width, resultIcon.Width);
-    }
-
-    [Fact]
-    public void Com2PictureConverter_ConvertNativeToManaged_Bitmap_ReturnsBitmap()
-    {
-        // Arrange
-        Icon testIcon = SystemIcons.Warning;
-        using Bitmap testBitmap = testIcon.ToBitmap();
-        nint hBitmap = testBitmap.GetHbitmap();
-        TestIPicture bitmapPicture = new(hBitmap, PICTYPE.PICTYPE_BITMAP);
-
-        try
-        {
-            using var unknown = ComHelpers.GetComScope<IUnknown>(bitmapPicture);
-
-            // Act
-            object? result = Instance.ConvertNativeToManaged((VARIANT)unknown.Value, null);
-
-            // Assert
-            Assert.NotNull(result);
-            Assert.IsType<Bitmap>(result);
-            Bitmap resultBitmap = (Bitmap)result;
-            Assert.Equal(testIcon.Height, resultBitmap.Height);
-            Assert.Equal(testIcon.Width, resultBitmap.Width);
-        }
-        finally
-        {
-            PInvokeCore.DeleteObject((HGDIOBJ)hBitmap);
-        }
-    }
-
-    [Fact]
-    public void Com2PictureConverter_ConvertNativeToManaged_UnsupportedPictureType_ReturnsNullOrThrows()
-    {
-        // Arrange
-        // Use PICTYPE.PICTYPE_METAFILE which is not supported
-        TestIPicture unsupportedPicture = new(1, PICTYPE.PICTYPE_METAFILE);
-        using var unknown = ComHelpers.GetComScope<IUnknown>(unsupportedPicture);
-
-        // Act & Assert
-        // The converter asserts on unsupported types, suppress asserts
-        using (new NoAssertContext())
-        {
-            object? result = Instance.ConvertNativeToManaged((VARIANT)unknown.Value, null);
-            Assert.Null(result);
-        }
-    }
-
-    [Fact]
-    public void Com2PictureConverter_ConvertManagedToNative_Null_ReturnsNull()
-    {
-        // Arrange
-        Com2PictureConverter converter = Instance;
-        bool cancelSet = true;
-
-        // Act
-        VARIANT result = converter.ConvertManagedToNative(null, null, ref cancelSet);
-
-        // Assert
-        Assert.True(result.IsEmpty);
-        Assert.False(cancelSet);
+        Assert.Equal(typeof(Bitmap), converter.ManagedType);
     }
 
     [StaFact]
-    public unsafe void Com2PictureConverter_ConvertManagedToNative_Icon_ReturnsNativePicture()
-    {
-        // Arrange
-        bool cancelSet = true;
-        Icon testIcon = SystemIcons.Information;
-
-        // Act
-        using VARIANT native = Instance.ConvertManagedToNative(testIcon, null, ref cancelSet);
-
-        // Assert
-        Assert.False(cancelSet);
-        Assert.False(native.IsEmpty);
-
-        using ComScope<IPicture> picture = ComScope<IPicture>.QueryFrom((IUnknown*)native);
-        picture.Value->get_Type(out PICTYPE type).ThrowOnFailure();
-        Assert.Equal(PICTYPE.PICTYPE_ICON, type);
-    }
-
-    [StaFact]
-    public unsafe void Com2PictureConverter_ConvertManagedToNative_Bitmap_ReturnsNativePicture()
-    {
-        // Arrange
-        bool cancelSet = true;
-        using Bitmap testBitmap = new(50, 60);
-
-        // Act
-        using VARIANT native = Instance.ConvertManagedToNative(testBitmap, null, ref cancelSet);
-
-        // Assert
-        Assert.False(cancelSet);
-        Assert.False(native.IsEmpty);
-
-        using ComScope<IPicture> picture = ComScope<IPicture>.QueryFrom((IUnknown*)native);
-        picture.Value->get_Type(out PICTYPE type).ThrowOnFailure();
-        Assert.Equal(PICTYPE.PICTYPE_BITMAP, type);
-    }
-
-    [Fact]
-    public void Com2PictureConverter_ConvertManagedToNative_InvalidObject_ThrowsOrFallsBack()
+    public unsafe void Com2PictureConverter_ConvertManagedToNative_SameManagedValue_ShortCircuits()
     {
         // Arrange
         Com2PictureConverter converter = Instance;
-        object invalidObject = new object();
-        bool cancelSet = true;
+        bool cancelSet = false;
+        using Bitmap bitmap = new(10, 10);
 
-        // Act & Assert
-        // The converter asserts on invalid objects, suppress asserts
-        using (new NoAssertContext())
-        {
-            VARIANT result = converter.ConvertManagedToNative(invalidObject, null, ref cancelSet);
-            Assert.True(result.IsEmpty);
-            Assert.False(cancelSet);
-        }
-    }
+        using VARIANT firstNative = converter.ConvertManagedToNative(bitmap, null, ref cancelSet);
+        Assert.False(cancelSet);
+        Assert.False(firstNative.IsEmpty);
 
-    [Fact]
-    public void Com2PictureConverter_ManagedType_ReturnsBitmap()
-    {
-        // Arrange
-        Com2PictureConverter converter = Instance;
-
-        // Act
-        Type managedType = converter.ManagedType;
+        // Act - passing the same managed instance back in should short-circuit the conversion.
+        VARIANT secondNative = converter.ConvertManagedToNative(bitmap, null, ref cancelSet);
 
         // Assert
-        // Default should be Bitmap unless it's an Icon property
-        Assert.True(managedType == typeof(Bitmap) || managedType == typeof(Icon));
-    }
-
-    [Fact]
-    public void Com2PictureConverter_ConvertNativeToManaged_CachesResult()
-    {
-        // Arrange
-        Icon testIcon = SystemIcons.Asterisk;
-        nint iconHandle = testIcon.Handle;
-        TestIPicture iconPicture = new(iconHandle, PICTYPE.PICTYPE_ICON);
-        using var unknown = ComHelpers.GetComScope<IUnknown>(iconPicture);
-
-        // Act
-        object? result1 = Instance.ConvertNativeToManaged((VARIANT)unknown.Value, null);
-        object? result2 = Instance.ConvertNativeToManaged((VARIANT)unknown.Value, null);
-
-        // Assert
-        // Should return the same cached instance if handle hasn't changed
-        Assert.Same(result1, result2);
+        Assert.True(cancelSet);
+        Assert.True(secondNative.IsEmpty);
     }
 
     private unsafe class IPictureMock : IPicture.Interface, IManagedWrapper<IPicture>

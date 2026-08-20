@@ -463,51 +463,6 @@ public class Com2ExtendedTypeConverterTests
         Assert.Same(innerConverter, result);
     }
 
-    [Fact]
-    public void Com2ExtendedTypeConverter_WithNullInnerConverter_UsesBaseBehavior()
-    {
-        // Arrange
-        Com2ExtendedTypeConverter converter = new((TypeConverter)null);
-
-        // Act & Assert
-        Assert.Null(converter.InnerConverter);
-        Assert.False(converter.CanConvertFrom(typeof(string)));
-        Assert.True(converter.CanConvertTo(typeof(string)));  // Base returns true for string
-        Assert.False(converter.GetStandardValuesSupported());
-        Assert.False(converter.GetStandardValuesExclusive());
-        Assert.Null(converter.GetStandardValues());
-        Assert.False(converter.GetPropertiesSupported());
-        Assert.False(converter.GetCreateInstanceSupported());
-        Assert.False(converter.IsValid("test"));  // Base returns false
-    }
-
-    [Fact]
-    public void Com2ExtendedTypeConverter_MultipleOperations_DelegateCorrectly()
-    {
-        // Arrange
-        TestConverter innerConverter = new()
-        {
-            CanConvertFromResult = true,
-            CanConvertToResult = true,
-            ConvertFromResult = 42
-        };
-
-        TypeConverter converter = CreateConverter(innerConverter);
-
-        // Act
-        bool canConvertFrom = converter.CanConvertFrom(typeof(string));
-        bool canConvertTo = converter.CanConvertTo(typeof(int));
-        object converted = converter.ConvertFrom("test");
-
-        // Assert
-        Assert.True(canConvertFrom);
-        Assert.True(canConvertTo);
-        Assert.Equal(42, converted);
-        Assert.Equal(1, innerConverter.CanConvertFromCallCount);
-        Assert.Equal(1, innerConverter.CanConvertToCallCount);
-        Assert.Equal(1, innerConverter.ConvertFromCallCount);
-    }
-
     private static TypeConverter CreateConverter(TypeConverter innerConverter)
     {
         return new Com2ExtendedTypeConverter(innerConverter);

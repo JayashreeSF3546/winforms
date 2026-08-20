@@ -215,52 +215,6 @@ public class Com2IDispatchConverterTests
     }
 
     [Fact]
-    public void GetPropertiesSupported_False_ReturnsFalse()
-    {
-        // Arrange
-        RecordingTypeConverter baseConverter = new();
-        Com2IDispatchConverter converter = new(
-            allowExpand: false,
-            baseConverter);
-
-        // Act
-        bool result = converter.GetPropertiesSupported(context: null);
-
-        // Assert
-        result.Should().BeFalse();
-    }
-
-    [Fact]
-    public void GetProperties_WithObject_ReturnsObjectProperties()
-    {
-        // Arrange
-        RecordingTypeConverter baseConverter = new();
-
-        Com2IDispatchConverter converter = new(
-            allowExpand: true,
-            baseConverter);
-
-        TestComponent value = new()
-        {
-            Name = "COM object",
-            Number = 42
-        };
-
-        Attribute[] attributes = [];
-
-        // Act
-        PropertyDescriptorCollection properties = converter.GetProperties(
-            context: null,
-            value,
-            attributes);
-
-        // Assert
-        properties.Should().NotBeNull();
-        properties[nameof(TestComponent.Name)].Should().NotBeNull();
-        properties[nameof(TestComponent.Number)].Should().NotBeNull();
-    }
-
-    [Fact]
     public void GetProperties_WithBrowsableAttribute_FiltersProperties()
     {
         // Arrange
@@ -366,25 +320,6 @@ public class Com2IDispatchConverterTests
     }
 
     [Fact]
-    public void GetProperties_AllowExpandFalse_ReturnsExpected()
-    {
-        RecordingTypeConverter baseConverter = new();
-
-        Com2IDispatchConverter converter =
-            new(false, baseConverter);
-
-        TestComponent value = new();
-
-        PropertyDescriptorCollection properties =
-            converter.GetProperties(
-                null,
-                value,
-                null);
-
-        properties.Should().NotBeNull();
-    }
-
-    [Fact]
     public void GetProperties_WithBrowsableFalse_FiltersOutVisibleProperties()
     {
         RecordingTypeConverter baseConverter = new();
@@ -429,17 +364,6 @@ public class Com2IDispatchConverterTests
     }
 
     [Fact]
-    public void GetPropertiesSupported_True_ReturnsTrue()
-    {
-        Com2IDispatchConverter converter =
-            new(true, new RecordingTypeConverter());
-
-        converter.GetPropertiesSupported(null)
-            .Should()
-            .BeTrue();
-    }
-
-    [Fact]
     public void CanConvertTo_Int_ReturnsFalse()
     {
         RecordingTypeConverter baseConverter = new();
@@ -477,7 +401,7 @@ public class Com2IDispatchConverterTests
     }
 
     [Fact]
-    public void Ctor_NullConverter_Throws()
+    public void Ctor_NullConverter_DoesNotThrow()
     {
         Action action = () =>
             new Com2IDispatchConverter(

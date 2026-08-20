@@ -235,23 +235,17 @@ public class Com2EnumConverterTests
     }
 
     [Fact]
-    public void Com2EnumConverter_ConvertFrom_Null_UsesBase()
+    public void Com2EnumConverter_ConvertFrom_Null_ThrowsNotSupportedException()
     {
         // Arrange
         Com2Enum com2Enum = CreateTestEnum();
         TypeConverter converter = CreateConverter(com2Enum);
 
-        // Act & Assert
-        // ConvertFrom with null value should fall back to base implementation
-        // The base implementation might throw or handle null gracefully
-        try
-        {
-            converter.ConvertFrom(null);
-        }
-        catch
-        {
-            // Expected behavior - base converter may throw for null input
-        }
+        // Act
+        Action action = () => converter.ConvertFrom(null);
+
+        // Assert
+        action.Should().Throw<NotSupportedException>();
     }
 
     [Fact]
@@ -337,13 +331,8 @@ public class Com2EnumConverterTests
         Com2Enum testEnum = new();
 
         // Use reflection to call the protected PopulateArrays method
-        var populateMethod = typeof(Com2Enum).GetMethod("PopulateArrays", 
-            BindingFlags.NonPublic | BindingFlags.Instance);
-
-        if (populateMethod is not null)
-        {
-            populateMethod.Invoke(testEnum, [names, values]);
-        }
+        var populateMethod = typeof(Com2Enum).GetMethod("PopulateArrays", BindingFlags.NonPublic | BindingFlags.Instance);
+        populateMethod.Invoke(testEnum, [names, values]);
 
         return testEnum;
     }

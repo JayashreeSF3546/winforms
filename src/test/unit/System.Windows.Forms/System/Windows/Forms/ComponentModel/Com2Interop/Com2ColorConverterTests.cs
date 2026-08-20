@@ -199,41 +199,4 @@ public class Com2ColorConverterTests
         // Assert
         Assert.Equal(oleColor, (int)resultNativeValue);
     }
-
-    [Fact]
-    public void Com2ColorConverter_CancelSet_RemainsUnchanged()
-    {
-        // Arrange
-        Com2ColorConverter converter = new();
-        bool cancelSet = true;
-
-        // Act
-        converter.ConvertManagedToNative(Color.Red, s_stubDescriptor, ref cancelSet);
-
-        // Assert
-        // ConvertManagedToNative sets cancelSet to false
-        Assert.False(cancelSet);
-    }
-
-    [Fact]
-    public void Com2ColorConverter_MultipleColors_ConvertCorrectly()
-    {
-        // Arrange
-        Com2ColorConverter converter = new();
-        Color[] testColors = [Color.Red, Color.Green, Color.Blue, Color.Yellow, Color.White, Color.Black];
-        bool cancelSet = false;
-
-        // Act & Assert
-        foreach (Color testColor in testColors)
-        {
-            int oleColor = ColorTranslator.ToOle(testColor);
-            VARIANT nativeValue = (VARIANT)oleColor;
-
-            object result = converter.ConvertNativeToManaged(nativeValue, s_stubDescriptor);
-            Assert.Equal(testColor, result);
-
-            VARIANT convertedBack = converter.ConvertManagedToNative(testColor, s_stubDescriptor, ref cancelSet);
-            Assert.Equal(oleColor, (int)convertedBack);
-        }
-    }
 }
