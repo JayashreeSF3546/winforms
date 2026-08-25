@@ -5,6 +5,7 @@
 
 using System.ComponentModel;
 using System.Drawing;
+using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using System.Windows.Forms.TestUtilities;
 using Moq;
@@ -2290,6 +2291,113 @@ public partial class TextBoxBaseTests
             BorderStyle = borderStyle
         };
         Assert.Equal(expected, control.PreferredHeight);
+    }
+
+    [WinFormsFact]
+    public void TextBoxBase_PreferredHeight_Get_MatchesGdiCellHeight()
+    {
+        // Regression test for https://github.com/dotnet/winforms/issues/5255: PreferredHeight must never be
+        // shorter than what GDI itself reports as the font's full cell height (ascent + descent), otherwise
+        // descenders can be clipped by the native edit control.
+        using SubTextBox control = new()
+        {
+            BorderStyle = BorderStyle.None
+        };
+
+        int expected = Math.Max(control.FontHeight, GetGdiFontCellHeight(control.Font));
+        Assert.Equal(expected, control.PreferredHeight);
+    }
+
+    [WinFormsFact]
+    public void TextBoxBase_PreferredHeight_Get_CascadiaCodeFont_AccountsForDescenders()
+    {
+        if (!IsFontFamilyInstalled("Cascadia Code"))
+        {
+            Assert.Skip("Cascadia Code font is not installed on this machine.");
+        }
+
+        using Font cascadiaCode = new("Cascadia Code", 12f);
+        using SubTextBox control = new()
+        {
+            BorderStyle = BorderStyle.None,
+            Font = cascadiaCode
+        };
+
+        int gdiCellHeight = GetGdiFontCellHeight(cascadiaCode);
+
+        // The bug was that PreferredHeight (and thus the default AutoSize height) could be shorter than the
+        // font's actual GDI cell height, clipping descenders like "g", "j", "p", "q", and "y".
+        Assert.True(
+            control.PreferredHeight >= gdiCellHeight,
+            $"PreferredHeight ({control.PreferredHeight}) should be at least the GDI font cell height ({gdiCellHeight}).");
+    }
+
+    private static bool IsFontFamilyInstalled(string familyName)
+    {
+        using InstalledFontCollection installedFonts = new();
+        return installedFonts.Families.Any(family => family.Name == familyName);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TEXTMETRIC
+    {
+        public int tmHeight;
+        public int tmAscent;
+        public int tmDescent;
+        public int tmInternalLeading;
+        public int tmExternalLeading;
+        public int tmAveCharWidth;
+        public int tmMaxCharWidth;
+        public int tmWeight;
+        public int tmOverhang;
+        public int tmDigitizedAspectX;
+        public int tmDigitizedAspectY;
+        public byte tmFirstChar;
+        public byte tmLastChar;
+        public byte tmDefaultChar;
+        public byte tmBreakChar;
+        public byte tmItalic;
+        public byte tmUnderlined;
+        public byte tmStruckOut;
+        public byte tmPitchAndFamily;
+        public byte tmCharSet;
+    }
+
+    [DllImport("gdi32.dll", ExactSpelling = true)]
+    private static extern IntPtr SelectObject(IntPtr hdc, IntPtr hObject);
+
+    [DllImport("gdi32.dll", ExactSpelling = true, EntryPoint = "GetTextMetricsW")]
+    private static extern bool GetTextMetrics(IntPtr hdc, out TEXTMETRIC lptm);
+
+    [DllImport("gdi32.dll", ExactSpelling = true)]
+    private static extern bool DeleteObject(IntPtr hObject);
+
+    // Independently computes the GDI (not GDI+) font cell height, mirroring the same TEXTMETRICW.tmHeight value
+    // the native edit control (and TextBoxBase.GetFontCellHeight) rely on, without depending on WinForms internals.
+    private static int GetGdiFontCellHeight(Font font)
+    {
+        using Bitmap bitmap = new(1, 1);
+        using Graphics graphics = Graphics.FromImage(bitmap);
+        IntPtr hdc = graphics.GetHdc();
+        try
+        {
+            IntPtr hFont = font.ToHfont();
+            try
+            {
+                IntPtr oldFont = SelectObject(hdc, hFont);
+                GetTextMetrics(hdc, out TEXTMETRIC tm);
+                SelectObject(hdc, oldFont);
+                return tm.tmHeight;
+            }
+            finally
+            {
+                DeleteObject(hFont);
+            }
+        }
+        finally
+        {
+            graphics.ReleaseHdc(hdc);
+        }
     }
 
     [WinFormsFact]

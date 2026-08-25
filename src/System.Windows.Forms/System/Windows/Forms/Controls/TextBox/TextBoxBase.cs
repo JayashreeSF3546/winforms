@@ -798,21 +798,7 @@ public abstract partial class TextBoxBase : Control
             // COMPAT we must return the same busted height we did in Everett, even
             // if it doesn't take multiline and word wrap into account. For better accuracy and/or wrapping use
             // GetPreferredSize instead.
-            int height = FontHeight;
-            try
-            {
-                const string descenderTest = "gjpqy";
-
-                // Use SingleLine + NoPrefix for accurate single-line measurement.
-                var flags = TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
-                Size measured = TextRenderer.MeasureText(descenderTest, Font, Size.Empty, flags);
-                height = Math.Max(height, measured.Height);
-            }
-            catch
-            {
-                // If measurement fails for any reason, fall back to FontHeight.
-                height = FontHeight;
-            }
+            int height = GetFontCellHeight();
 
             if (_borderStyle != BorderStyle.None)
             {
@@ -821,6 +807,26 @@ public abstract partial class TextBoxBase : Control
 
             return height;
         }
+    }
+
+    /// <summary>
+    ///  Returns the full cell height (ascent + descent) of <see cref="Control.Font"/> as computed by GDI
+    ///  (<see cref="TEXTMETRICW.tmHeight"/>), which is always at least <see cref="Control.FontHeight"/>.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   For some typefaces (e.g. Cascadia Code) the GDI+ line spacing reported by <see cref="Control.FontHeight"/>
+    ///   is shorter than the space GDI actually needs to render the full glyph, including descenders such as
+    ///   "g", "j", "p", "q", and "y". Falling back to <see cref="Control.FontHeight"/> alone can therefore result
+    ///   in the bottom of such glyphs being clipped in the native edit control. Using the GDI cell height keeps
+    ///   the control tall enough regardless of the current text or script. See
+    ///   <see href="https://github.com/dotnet/winforms/issues/5255"/>.
+    ///  </para>
+    /// </remarks>
+    private int GetFontCellHeight()
+    {
+        using FontCache.Scope fontScope = GdiCache.GetHFONTScope(Font);
+        return Math.Max(FontHeight, fontScope.Data.Height);
     }
 
     // GetPreferredSizeCore
@@ -865,8 +871,10 @@ public abstract partial class TextBoxBase : Control
 
         Size textSize = TextRenderer.MeasureText(Text, Font, proposedConstraints, format);
 
-        // We use this old computation as a lower bound to ensure backwards compatibility.
-        textSize.Height = Math.Max(textSize.Height, FontHeight);
+        // We use this old computation as a lower bound to ensure backwards compatibility. GetFontCellHeight()
+        // is used instead of FontHeight alone so that fonts with descenders taller than the GDI+ line spacing
+        // (e.g. Cascadia Code) don't get clipped. See https://github.com/dotnet/winforms/issues/5255.
+        textSize.Height = Math.Max(textSize.Height, GetFontCellHeight());
         Size preferredSize = textSize + bordersAndPadding;
         return preferredSize;
     }
