@@ -4260,4 +4260,84 @@ public partial class DataGridViewTests : IDisposable
 
         Assert.NotNull(result);
     }
+
+    [WinFormsFact]
+    public void DataGridView_GetClipboardContent_FullRowSelect_SelectedRow_ReturnsDataObject()
+    {
+        using DataGridView control = new()
+        {
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithAutoHeaderText
+        };
+
+        control.Columns.Add("Column1", "Column1");
+        int rowIndex = control.Rows.Add("Value1");
+
+        control.Rows[rowIndex].Selected = true;
+
+        using NoAssertContext context = new();
+
+        DataObject result = control.GetClipboardContent();
+
+        Assert.NotNull(result);
+    }
+
+    [WinFormsFact]
+    public void DataGridView_GetClipboardContent_RowHeaderSelect_NoSelectedRows_ReturnsNull()
+    {
+        using DataGridView control = new()
+        {
+            SelectionMode = DataGridViewSelectionMode.RowHeaderSelect,
+            ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
+        };
+
+        control.Columns.Add("Column1", "Column1");
+        control.Rows.Add("Value1");
+
+        Assert.Null(control.GetClipboardContent());
+    }
+
+    [WinFormsFact]
+    public void DataGridView_GetClipboardContent_ColumnHeaderSelect_NoSelectedColumns_ReturnsNull()
+    {
+        using DataGridView control = new()
+        {
+            SelectionMode = DataGridViewSelectionMode.ColumnHeaderSelect,
+            ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
+        };
+
+        DataGridViewTextBoxColumn column = new()
+        {
+            Name = "Column1",
+            HeaderText = "Column1",
+            SortMode = DataGridViewColumnSortMode.Programmatic
+        };
+
+        control.Columns.Add(column);
+        control.Rows.Add("Value1");
+
+        Assert.Null(control.GetClipboardContent());
+    }
+
+    [WinFormsFact]
+    public void DataGridView_GetClipboardContent_FullColumnSelect_NoSelectedColumns_ReturnsNull()
+    {
+        using DataGridView control = new()
+        {
+            SelectionMode = DataGridViewSelectionMode.FullColumnSelect,
+            ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
+        };
+
+        DataGridViewTextBoxColumn column = new()
+        {
+            Name = "Column1",
+            HeaderText = "Column1",
+            SortMode = DataGridViewColumnSortMode.Programmatic
+        };
+
+        control.Columns.Add(column);
+        control.Rows.Add("Value1");
+
+        Assert.Null(control.GetClipboardContent());
+    }
 }

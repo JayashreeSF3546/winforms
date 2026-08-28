@@ -1585,18 +1585,39 @@ public class ClipboardTests
     }
 
     [WinFormsFact]
-    public void Clipboard_TryGetData_NoClipboardData_ReturnsFalse()
+    public void Clipboard_TryGetData_WithResolver_EmptyClipboard_ReturnsFalse()
     {
         try
         {
             Clipboard.Clear();
 
             Assert.False(
-                Clipboard.TryGetData<string>(
+                Clipboard.TryGetData(
                     "MissingFormat",
+                    static typeName => typeof(string),
                     out string? data));
 
             Assert.Null(data);
+        }
+        finally
+        {
+            Clipboard.Clear();
+        }
+    }
+
+    [WinFormsFact]
+    public void Clipboard_TryGetData_NoFormatArgument_UsesTypeFullNameAsFormat()
+    {
+        const string expected = "Hello";
+
+        try
+        {
+            Clipboard.Clear();
+
+            Clipboard.SetData(typeof(string).FullName!, expected);
+
+            Assert.True(Clipboard.TryGetData(out string? data));
+            Assert.Equal(expected, data);
         }
         finally
         {
