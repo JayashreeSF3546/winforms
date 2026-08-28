@@ -20,6 +20,28 @@ public class GraphicsRecorderTests
     }
 
     [WinFormsFact]
+    public void Record_NullOptions_ThrowsArgumentNullException()
+    {
+        Action action = () => GraphicsRecorder.Record(
+            options: null!,
+            paint: graphics => { });
+
+        action.Should().Throw<ArgumentNullException>()
+            .And.ParamName.Should().Be("options");
+    }
+
+    [WinFormsFact]
+    public void Record_OptionsWithNullPaint_ThrowsArgumentNullException()
+    {
+        Action action = () => GraphicsRecorder.Record(
+            new RecorderOptions(),
+            paint: null!);
+
+        action.Should().Throw<ArgumentNullException>()
+            .And.ParamName.Should().Be("paint");
+    }
+
+    [WinFormsFact]
     public void Record_EmptyPaint_CapturesHeaderAndEofRecords()
     {
         RecordedGraphics recording = GraphicsRecorder.Record(
@@ -102,6 +124,30 @@ public class GraphicsRecorderTests
         recording.Records.Should().Contain(record => record.Type == EmfRecordType.EMR_HEADER);
         recording.Records.Should().Contain(record => record.Type == EmfRecordType.EMR_EOF);
         recording.Records.Should().Contain(record => record.Type == EmfRecordType.EMR_GDICOMMENT);
+    }
+
+    [WinFormsFact]
+    public void Record_EmfOnly_DrawString_DoesNotCaptureGdiComment()
+    {
+        RecordedGraphics recording = GraphicsRecorder.Record(
+            new RecorderOptions
+            {
+                Size = new Size(200, 100),
+                EmfType = EmfType.EmfOnly
+            },
+            graphics =>
+            {
+                graphics.DrawString(
+                    "Hello",
+                    SystemFonts.DefaultFont,
+                    Brushes.Black,
+                    PointF.Empty);
+            });
+
+        recording.Records.Should().NotBeEmpty();
+        recording.Records.Should().Contain(record => record.Type == EmfRecordType.EMR_HEADER);
+        recording.Records.Should().Contain(record => record.Type == EmfRecordType.EMR_EOF);
+        recording.Records.Should().NotContain(record => record.Type == EmfRecordType.EMR_GDICOMMENT);
     }
 
     [WinFormsFact]
