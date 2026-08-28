@@ -320,6 +320,93 @@ public class Com2EnumConverterTests
         Assert.Throws<NotSupportedException>(() => converter.ConvertFrom(integralValue));
     }
 
+    [Fact]
+    public void Com2EnumConverter_CanConvertTo_EnumDestinationType_ReturnsTrue()
+    {
+        // Arrange
+        Com2Enum com2Enum = CreateTestEnum();
+        TypeConverter converter = CreateConverter(com2Enum);
+
+        // Act
+        bool result = converter.CanConvertTo(typeof(DayOfWeek));
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
+    public void Com2EnumConverter_CanConvertTo_NonStringNonEnumDestinationType_ReturnsBaseBehavior()
+    {
+        // Arrange
+        Com2Enum com2Enum = CreateTestEnum();
+        TypeConverter converter = CreateConverter(com2Enum);
+
+        // Act
+        bool result = converter.CanConvertTo(typeof(int));
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void Com2EnumConverter_ConvertTo_EnumDestinationType_ReturnsEnumValue()
+    {
+        // Arrange
+        Com2Enum com2Enum = CreateTestEnum();
+        TypeConverter converter = CreateConverter(com2Enum);
+
+        // Act
+        object result = converter.ConvertTo(1, typeof(DayOfWeek));
+
+        // Assert
+        Assert.Equal(DayOfWeek.Monday, result);
+    }
+
+    [Fact]
+    public void Com2EnumConverter_ConvertTo_NullDestinationType_ThrowsArgumentNullException()
+    {
+        // Arrange
+        Com2Enum com2Enum = CreateTestEnum();
+        TypeConverter converter = CreateConverter(com2Enum);
+
+        // Act
+        Action action = () => converter.ConvertTo(null, null, 1, null);
+
+        // Assert
+        action.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void Com2EnumConverter_GetStandardValues_CachesResultAcrossCalls()
+    {
+        // Arrange
+        Com2Enum com2Enum = CreateTestEnum();
+        TypeConverter converter = CreateConverter(com2Enum);
+
+        // Act
+        ICollection first = converter.GetStandardValues();
+        ICollection second = converter.GetStandardValues();
+
+        // Assert - same StandardValuesCollection instance is returned once cached.
+        Assert.Same(first, second);
+    }
+
+    [Fact]
+    public void Com2EnumConverter_RefreshValues_ClearsCache()
+    {
+        // Arrange
+        Com2Enum com2Enum = CreateTestEnum();
+        Com2EnumConverter converter = (Com2EnumConverter)CreateConverter(com2Enum);
+
+        // Act
+        ICollection first = converter.GetStandardValues(null);
+        converter.RefreshValues();
+        ICollection second = converter.GetStandardValues(null);
+
+        // Assert - a fresh StandardValuesCollection is created after RefreshValues.
+        Assert.NotSame(first, second);
+    }
+
     private static Com2Enum CreateTestEnum()
     {
         return CreateTestEnum(["One", "Two"], [1, 2]);

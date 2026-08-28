@@ -463,6 +463,30 @@ public class Com2ExtendedTypeConverterTests
         Assert.Same(innerConverter, result);
     }
 
+    [Fact]
+    public void Com2ExtendedTypeConverter_CtorWithBaseType_UsesTypeDescriptorConverter()
+    {
+        // Arrange & Act - the Type-based constructor resolves the inner converter via
+        // TypeDescriptor.GetConverter(baseType) rather than taking an explicit converter instance.
+        Com2ExtendedTypeConverter converter = new(typeof(int));
+
+        // Assert
+        converter.InnerConverter.Should().BeOfType<Int32Converter>();
+    }
+
+    [Fact]
+    public void Com2ExtendedTypeConverter_CtorWithBaseType_DelegatesConvertFrom()
+    {
+        // Arrange
+        Com2ExtendedTypeConverter converter = new(typeof(int));
+
+        // Act
+        object result = converter.ConvertFrom("42");
+
+        // Assert
+        result.Should().Be(42);
+    }
+
     private static TypeConverter CreateConverter(TypeConverter innerConverter)
     {
         return new Com2ExtendedTypeConverter(innerConverter);
