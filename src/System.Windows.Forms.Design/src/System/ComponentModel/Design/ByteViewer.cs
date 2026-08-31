@@ -29,7 +29,6 @@ public class ByteViewer : TableLayoutPanel
     private const int BASE_HEX_DUMP_GAP = 5;
 
     // DPI-scaled layout values (updated at runtime)
-    private float _dpiScale = 1.0f;
     private int _borderGap;
     private int _insetGap;
     private int _cellHeight;
@@ -89,15 +88,20 @@ public class ByteViewer : TableLayoutPanel
 
     private void UpdateScaling()
     {
-        _dpiScale = DeviceDpi / 96f;
+        int dpi = DeviceDpi;
 
-        _borderGap = (int)Math.Round(BASE_BORDER_GAP * _dpiScale);
-        _insetGap = (int)Math.Round(BASE_INSET_GAP * _dpiScale);
-        _cellHeight = (int)Math.Round(BASE_CELL_HEIGHT * _dpiScale);
-        _cellWidth = (int)Math.Round(BASE_CELL_WIDTH * _dpiScale);
-        _charWidth = (int)Math.Round(BASE_CHAR_WIDTH * _dpiScale);
-        _addressWidth = (int)Math.Round(BASE_ADDRESS_WIDTH * _dpiScale);
-        _hexDumpGap = (int)Math.Round(BASE_HEX_DUMP_GAP * _dpiScale);
+        _borderGap = ScaleHelper.ScaleToDpi(BASE_BORDER_GAP, dpi);
+        _insetGap = ScaleHelper.ScaleToDpi(BASE_INSET_GAP, dpi);
+        _cellHeight = ScaleHelper.ScaleToDpi(BASE_CELL_HEIGHT, dpi);
+        _cellWidth = ScaleHelper.ScaleToDpi(BASE_CELL_WIDTH, dpi);
+        _charWidth = ScaleHelper.ScaleToDpi(BASE_CHAR_WIDTH, dpi);
+        _addressWidth = ScaleHelper.ScaleToDpi(BASE_ADDRESS_WIDTH, dpi);
+        _hexDumpGap = ScaleHelper.ScaleToDpi(BASE_HEX_DUMP_GAP, dpi);
+
+        // Scrollbar metrics are DPI-dependent too; re-query them for the current DPI
+        // rather than relying on the values captured when the control was created.
+        _scrollbarHeight = SystemInformation.GetHorizontalScrollBarHeightForDpi(dpi);
+        _scrollbarWidth = SystemInformation.GetVerticalScrollBarWidthForDpi(dpi);
 
         _hexWidth = _cellWidth * _columnCount;
         _dumpWidth = _charWidth * _columnCount;
@@ -470,10 +474,7 @@ public class ByteViewer : TableLayoutPanel
     [MemberNotNull(nameof(_scrollBar))]
     private void InitUI()
     {
-        _scrollbarHeight = SystemInformation.HorizontalScrollBarHeight;
-        _scrollbarWidth = SystemInformation.VerticalScrollBarWidth;
-
-        // For backwards compatibility
+        // Computes DPI-scaled layout metrics, including the scrollbar dimensions.
         UpdateScaling();
 
         // For backwards compatibility
@@ -548,21 +549,19 @@ public class ByteViewer : TableLayoutPanel
     }
 
     /// <summary>
-    /// Handle DPI changes (PerMonitorV2) by recomputing layout.
-    /// Uses WM_DPICHANGED so it works on targets without OnDpiChanged override.
+    ///  Handles DPI changes (PerMonitorV2) by recomputing layout.
+    ///  <see cref="ByteViewer"/> is always hosted as a child control (see
+    ///  <see cref="BinaryEditor"/>), so it never receives the top-level-only
+    ///  WM_DPICHANGED message. Child controls are instead notified via
+    ///  WM_DPICHANGED_AFTERPARENT, which raises <see cref="OnDpiChangedAfterParent"/>.
     /// </summary>
-    protected override void WndProc(ref Message m)
+    protected override void OnDpiChangedAfterParent(EventArgs e)
     {
-        int WM_DPICHANGED = 0x02E0;
-        if (m.Msg == WM_DPICHANGED)
-        {
-            // Recompute DPI-scaled metrics and any state that depends on DPI, then repaint.
-            UpdateScaling();
-            InitState();
-            Invalidate();
-        }
+        base.OnDpiChangedAfterParent(e);
 
-        base.WndProc(ref m);
+        // Recompute DPI-scaled metrics and any state that depends on DPI, then repaint.
+        UpdateScaling();
+        InitState();
     }
 
     /// <summary>
