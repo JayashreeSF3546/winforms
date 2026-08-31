@@ -19,6 +19,14 @@ public partial class Control
     ///   before the callback executes, the callback will not be executed and the task will be cancelled.
     ///  </para>
     ///  <para>
+    ///   <b>Note:</b> Because <paramref name="callback"/> has no way to observe
+    ///   <paramref name="cancellationToken"/> itself, cancellation and callback execution are coordinated so
+    ///   that exactly one outcome is possible: either the callback never runs and the returned task is
+    ///   cancelled, or the callback runs to completion (or throws) and the returned task reflects that outcome.
+    ///   Once the callback has started running, a subsequent cancellation request can no longer cause the
+    ///   returned task to complete as cancelled.
+    ///  </para>
+    ///  <para>
     ///   When the callback executes, it runs on the UI thread and blocks it for the duration of its execution.
     ///   InvokeAsync queues the callback to the end of the message queue and returns immediately, but once the
     ///   callback executes, it will block the UI thread. For this reason, only execute short-running synchronous
@@ -63,8 +71,21 @@ public partial class Control
 
         TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        // Coordinates cancellation with callback execution so that, once the callback has
+        // committed to running (claimed the "executing" state), a cancellation request can no
+        // longer cause the returned task to complete as canceled while the callback still runs
+        // (or has already run) to completion. See https://github.com/dotnet/winforms/issues/12696.
+        int state = InvokeAsyncState.Pending;
+
         using (cancellationToken.Register(
-            () => completion.TrySetCanceled(cancellationToken),
+            () =>
+            {
+                if (Interlocked.CompareExchange(ref state, InvokeAsyncState.Cancelled, InvokeAsyncState.Pending)
+                    == InvokeAsyncState.Pending)
+                {
+                    completion.TrySetCanceled(cancellationToken);
+                }
+            },
             useSynchronizationContext: false))
         {
             BeginInvoke(WrappedAction);
@@ -73,14 +94,15 @@ public partial class Control
 
         void WrappedAction()
         {
+            if (Interlocked.CompareExchange(ref state, InvokeAsyncState.Executing, InvokeAsyncState.Pending)
+                != InvokeAsyncState.Pending)
+            {
+                // Cancellation already won the race; the callback must not run.
+                return;
+            }
+
             try
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    completion.TrySetCanceled(cancellationToken);
-                    return;
-                }
-
                 callback();
                 completion.TrySetResult();
             }
@@ -89,6 +111,18 @@ public partial class Control
                 HandleInternalDelegateException(completion, ex, cancellationToken);
             }
         }
+    }
+
+    /// <summary>
+    ///  States used to atomically coordinate between a cancellation request and callback execution
+    ///  in the synchronous <see cref="InvokeAsync(Action, CancellationToken)"/> and
+    ///  <see cref="InvokeAsync{T}(Func{T}, CancellationToken)"/> overloads.
+    /// </summary>
+    private static class InvokeAsyncState
+    {
+        public const int Pending = 0;
+        public const int Executing = 1;
+        public const int Cancelled = 2;
     }
 
     private static void HandleInternalDelegateException(
@@ -136,6 +170,14 @@ public partial class Control
     ///   the method returns immediately with a default value without throwing an exception. The returned task
     ///   will be completed (not cancelled) to avoid allocation overhead. If cancellation occurs after the method
     ///   is called but before the callback executes, the callback will not be executed and the task will be cancelled.
+    ///  </para>
+    ///  <para>
+    ///   <b>Note:</b> Because <paramref name="callback"/> has no way to observe
+    ///   <paramref name="cancellationToken"/> itself, cancellation and callback execution are coordinated so
+    ///   that exactly one outcome is possible: either the callback never runs and the returned task is
+    ///   cancelled, or the callback runs to completion (or throws) and the returned task reflects that outcome.
+    ///   Once the callback has started running, a subsequent cancellation request can no longer cause the
+    ///   returned task to complete as cancelled.
     ///  </para>
     ///  <para>
     ///   When the callback executes, it runs on the UI thread and blocks it for the duration of its execution.
@@ -188,9 +230,20 @@ public partial class Control
 
         TaskCompletionSource<T> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        // See the comment in InvokeAsync(Action, CancellationToken) for why this coordination is needed.
+        int state = InvokeAsyncState.Pending;
+
         using (
-            cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken),
-            useSynchronizationContext: false))
+            cancellationToken.Register(
+                () =>
+                {
+                    if (Interlocked.CompareExchange(ref state, InvokeAsyncState.Cancelled, InvokeAsyncState.Pending)
+                        == InvokeAsyncState.Pending)
+                    {
+                        completion.TrySetCanceled(cancellationToken);
+                    }
+                },
+                useSynchronizationContext: false))
         {
             BeginInvoke(WrappedCallback);
             return await completion.Task.ConfigureAwait(false);
@@ -198,14 +251,15 @@ public partial class Control
 
         void WrappedCallback()
         {
+            if (Interlocked.CompareExchange(ref state, InvokeAsyncState.Executing, InvokeAsyncState.Pending)
+                != InvokeAsyncState.Pending)
+            {
+                // Cancellation already won the race; the callback must not run.
+                return;
+            }
+
             try
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    completion.TrySetCanceled(cancellationToken);
-                    return;
-                }
-
                 T result = callback();
                 completion.TrySetResult(result);
             }

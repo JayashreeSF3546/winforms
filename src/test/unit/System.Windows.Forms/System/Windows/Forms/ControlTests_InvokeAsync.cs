@@ -319,6 +319,77 @@ public partial class ControlTests
     }
 
     [WinFormsFact]
+    public async Task InvokeAsync_Action_Cancellation_AfterCallbackStarted_CompletesSuccessfully()
+    {
+        // Regression test for https://github.com/dotnet/winforms/issues/12696: once the
+        // synchronous callback has started running, a cancellation request must not cause the
+        // returned task to complete as cancelled -- the task must reflect the callback's actual
+        // outcome, since the callback (an Action) has no way to observe the CancellationToken and
+        // stop itself.
+        using var control = new TestControl();
+        control.EnsureHandle();
+
+        using var cts = new CancellationTokenSource();
+        using ManualResetEventSlim callbackStarted = new(initialState: false);
+        using ManualResetEventSlim releaseCallback = new(initialState: false);
+        bool callbackRan = false;
+
+        Task task = control.InvokeAsync(
+            () =>
+            {
+                callbackRan = true;
+                callbackStarted.Set();
+
+                // Block here (on the UI thread) until the test has cancelled the token, to
+                // guarantee the cancellation lands while the callback is executing.
+                releaseCallback.Wait();
+            },
+            cts.Token);
+
+        await Task.Run(() => callbackStarted.Wait()).ConfigureAwait(false);
+
+        cts.Cancel();
+        releaseCallback.Set();
+
+        // The task must complete successfully (not as cancelled), because the callback had
+        // already committed to running by the time cancellation was requested.
+        await task.ConfigureAwait(false);
+        Assert.Equal(TaskStatus.RanToCompletion, task.Status);
+        Assert.True(callbackRan);
+    }
+
+    [WinFormsFact]
+    public async Task InvokeAsync_FuncT_Cancellation_AfterCallbackStarted_CompletesSuccessfully()
+    {
+        // Regression test for https://github.com/dotnet/winforms/issues/12696: see
+        // InvokeAsync_Action_Cancellation_AfterCallbackStarted_CompletesSuccessfully for details.
+        using var control = new TestControl();
+        control.EnsureHandle();
+
+        using var cts = new CancellationTokenSource();
+        using ManualResetEventSlim callbackStarted = new(initialState: false);
+        using ManualResetEventSlim releaseCallback = new(initialState: false);
+
+        Task<int> task = control.InvokeAsync(
+            () =>
+            {
+                callbackStarted.Set();
+                releaseCallback.Wait();
+                return 42;
+            },
+            cts.Token);
+
+        await Task.Run(() => callbackStarted.Wait()).ConfigureAwait(false);
+
+        cts.Cancel();
+        releaseCallback.Set();
+
+        int result = await task.ConfigureAwait(false);
+        Assert.Equal(TaskStatus.RanToCompletion, task.Status);
+        Assert.Equal(42, result);
+    }
+
+    [WinFormsFact]
     public async Task InvokeAsync_Action_Cancellation_DuringExecution()
     {
         using var control = new TestControl();
