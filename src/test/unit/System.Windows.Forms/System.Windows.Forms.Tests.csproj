@@ -32,6 +32,7 @@
     <ProjectReference Include="..\..\..\System.Private.Windows.GdiPlus\System.Private.Windows.GdiPlus.csproj" />
     <ProjectReference Include="..\..\..\System.Windows.Forms.Primitives\src\System.Windows.Forms.Primitives.csproj" />
     <ProjectReference Include="..\..\..\System.Windows.Forms\System.Windows.Forms.csproj" />
+    <ProjectReference Include="..\..\..\Microsoft.Extensions.Hosting.WindowsForms\Microsoft.Extensions.Hosting.WindowsForms.csproj" />
     <ProjectReference Include="..\..\..\System.Design\src\System.Design.Facade.csproj" />
     <!-- This facade assembly is required to resolve UITypeEditor type from NETFX that is referenced in EditorAttributes -->
     <ProjectReference Include="..\..\..\System.Drawing\src\System.Drawing.Facade.csproj" />

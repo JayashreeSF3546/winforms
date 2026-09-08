@@ -28,3 +28,29 @@ catch (Exception)
 }
 
 Environment.Exit(0);
+
+
+// ~~~~~~~~~~~~~~~~~~ builder
+//Thread.CurrentThread.CurrentUICulture = Thread.CurrentThread.CurrentCulture;
+
+//try
+//{
+//    WinFormsApplicationBuilder builder =
+//        WinFormsApplication.CreateBuilder(args);
+
+//    builder
+//        .UseHighDpiMode(HighDpiMode.SystemAware)
+//        .UseVisualStyles()
+//        .UseColorMode(SystemColorMode.Classic)
+//        .UseStartupForm<MainForm>();
+
+//    using WinFormsApplication application = builder.Build();
+//    application.Run();
+
+//    Environment.ExitCode = 0;
+//}
+//catch (Exception exception)
+//{
+//    Console.Error.WriteLine(exception);
+//    Environment.ExitCode = -1;
+//}
