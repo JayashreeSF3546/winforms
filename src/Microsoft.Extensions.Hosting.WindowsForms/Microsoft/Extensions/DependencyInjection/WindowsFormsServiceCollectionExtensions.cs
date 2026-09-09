@@ -68,6 +68,7 @@ public static class WindowsFormsServiceCollectionExtensions
         WinFormsApplicationOptions options)
     {
         services.AddSingleton(options);
+        services.AddWindowsFormsActivation();
         services.AddSingleton(serviceProvider =>
             new WinFormsApplicationLifetime(
                 serviceProvider.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>()));

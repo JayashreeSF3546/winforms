@@ -25,6 +25,7 @@ internal sealed partial class WinFormsHostedService : IHostedService
     private Thread? _uiThread;
     private WindowsFormsSynchronizationContext? _synchronizationContext;
     private ApplicationContext? _applicationContext;
+    private IDisposable? _startupActivation;
     private int _stopPosted;
 
     internal WinFormsHostedService(
@@ -114,29 +115,68 @@ internal sealed partial class WinFormsHostedService : IHostedService
         finally
         {
             Application.ApplicationExit -= OnApplicationExit;
+
+            // The startup activation is disposed on the UI thread, which disposes the startup form,
+            // its child scopes, and its scoped services deterministically.
+            DisposeStartupActivation();
             _applicationLifetime.SynchronizationContext = null;
             _uiStopped.TrySetResult(null);
         }
     }
 
+    private void DisposeStartupActivation()
+    {
+        IDisposable? activation = Interlocked.Exchange(ref _startupActivation, null);
+
+        try
+        {
+            activation?.Dispose();
+        }
+        catch (Exception exception)
+        {
+            LogStartupActivationDisposalFailure(exception);
+        }
+    }
+
     private ApplicationContext CreateApplicationContext()
     {
+        IUIActivator? activator = ActivationServices.GetApplicationActivatorOrDefault(_services);
+
         if (_options.ApplicationContextFactory is not null)
         {
-            ApplicationContext context = _options.ApplicationContextFactory(_services);
-            return context ?? throw new InvalidOperationException(
-                "The configured application context factory returned null.");
+            ApplicationContext context = _options.ApplicationContextFactory(_services)
+                ?? throw new InvalidOperationException(
+                    "The configured application context factory returned null.");
+
+            // A custom application context owns the message loop, so it lives in the application
+            // scope itself rather than in a child scope.
+            activator?.AssignServices(context);
+
+            return context;
         }
 
-        if (_options.StartupFormFactory is not null)
+        if (_options.StartupFormFactory is null)
         {
-            Form form = _options.StartupFormFactory(_services);
-            return form is null
-                ? throw new InvalidOperationException("The configured startup form factory returned null.")
-                : new ApplicationContext(form);
+            return new ApplicationContext();
         }
 
-        return new ApplicationContext();
+        if (activator is null)
+        {
+            // Activation services are not registered, so the Phase 1 behavior is preserved exactly.
+            Form form = _options.StartupFormFactory(_services)
+                ?? throw new InvalidOperationException("The configured startup form factory returned null.");
+
+            return new ApplicationContext(form);
+        }
+
+        UIActivation<Form> activation = activator.Create(
+            _options.StartupFormFactory,
+            UIScopeKind.Form,
+            name: "StartupForm");
+
+        _startupActivation = activation;
+
+        return new ApplicationContext(activation.Instance);
     }
 
     private void InitializeApplication()
@@ -190,4 +230,10 @@ internal sealed partial class WinFormsHostedService : IHostedService
         Level = LogLevel.Error,
         Message = "The WinForms UI thread failed.")]
     private partial void LogUiThreadFailure(Exception exception);
+
+    [LoggerMessage(
+        EventId = 2,
+        Level = LogLevel.Warning,
+        Message = "Disposing the startup form activation failed.")]
+    private partial void LogStartupActivationDisposalFailure(Exception exception);
 }

@@ -31,6 +31,7 @@ public static class WindowsFormsHostApplicationBuilderExtensions
                 ActivatorUtilities.CreateInstance<TForm>(serviceProvider));
             configure?.Invoke(options);
             services.AddSingleton(options);
+            services.AddWindowsFormsActivation();
             services.AddSingleton(serviceProvider =>
                 new WinFormsApplicationLifetime(
                     serviceProvider.GetRequiredService<IHostApplicationLifetime>()));
@@ -63,6 +64,7 @@ public static class WindowsFormsHostApplicationBuilderExtensions
             ActivatorUtilities.CreateInstance<TForm>(serviceProvider));
         configure?.Invoke(options);
         builder.Services.AddSingleton(options);
+        builder.Services.AddWindowsFormsActivation();
         builder.Services.AddSingleton(serviceProvider =>
             new WinFormsApplicationLifetime(
                 serviceProvider.GetRequiredService<IHostApplicationLifetime>()));
@@ -95,6 +97,7 @@ public static class WindowsFormsHostApplicationBuilderExtensions
             : serviceProvider => applicationContextFactory(serviceProvider));
         configure?.Invoke(options);
         builder.Services.AddSingleton(options);
+        builder.Services.AddWindowsFormsActivation();
         builder.Services.AddSingleton(serviceProvider =>
             new WinFormsApplicationLifetime(
                 serviceProvider.GetRequiredService<IHostApplicationLifetime>()));

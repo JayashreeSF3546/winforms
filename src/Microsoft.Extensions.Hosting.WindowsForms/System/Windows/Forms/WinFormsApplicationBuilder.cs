@@ -162,6 +162,7 @@ public sealed class WinFormsApplicationBuilder
         _built = true;
         WinFormsApplicationOptions options = Options.Clone();
         Services.AddSingleton(options);
+        Services.AddWindowsFormsActivation();
         Services.AddSingleton(serviceProvider =>
             new WinFormsApplicationLifetime(
                 serviceProvider.GetRequiredService<IHostApplicationLifetime>()));
