@@ -83,6 +83,9 @@ internal sealed class RadioButtonModernAdapter : RadioButtonBaseAdapter
         bool useExplicitBackColor = Control.ShouldSerializeBackColor() || !Control.UseVisualStyleBackColor;
         bool hasTransparentBackColor = Control.BackColor.HasTransparency();
 
+        bool parentHasBackgroundImage = Control.ParentInternal?.BackgroundImage is not null;
+        bool paintOpaqueBackground = !hasTransparentBackColor && (useExplicitBackColor || parentHasBackgroundImage);
+
         if (useExplicitBackColor && !hasTransparentBackColor)
         {
             using var backBrush = Control.BackColor.GetCachedSolidBrushScope();
