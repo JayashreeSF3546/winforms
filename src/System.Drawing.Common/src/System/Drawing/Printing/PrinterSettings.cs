@@ -613,12 +613,37 @@ public unsafe partial class PrinterSettings : ICloneable
         }
     }
 
+    internal static bool IsDevModeValid(DEVMODEW* devmode, int bufferSize)
+    {
+        if (devmode is null || bufferSize < sizeof(DEVMODEW))
+        {
+            return false;
+        }
+
+        uint publicSize = devmode->dmSize;
+        uint privateSize = devmode->dmDriverExtra;
+        uint availableSize = (uint)bufferSize;
+
+        // WinForms reads fields from the complete DEVMODEW structure below.
+        // Do not allow a truncated public structure.
+        if (publicSize < sizeof(DEVMODEW) || publicSize > availableSize)
+        {
+            return false;
+        }
+
+        // Use subtraction rather than addition to avoid integer overflow.
+        if (privateSize > availableSize - publicSize)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private HGLOBAL GetHdevmodeInternal(char* printerName)
     {
-        int result = -1;
-
-        // Create DEVMODE
-        result = PInvoke.DocumentProperties(
+        // First call: request the required DEVMODE buffer size.
+        int bufferSize = PInvoke.DocumentProperties(
             default,
             default,
             printerName,
@@ -626,77 +651,159 @@ public unsafe partial class PrinterSettings : ICloneable
             (DEVMODEW*)null,
             0);
 
-        if (result < 1)
+        if (bufferSize < sizeof(DEVMODEW))
         {
             throw new InvalidPrinterException(this);
         }
 
-        HGLOBAL handle = PInvokeCore.GlobalAlloc(GLOBAL_ALLOC_FLAGS.GMEM_MOVEABLE, (uint)result);
-        DEVMODEW* devmode = (DEVMODEW*)PInvokeCore.GlobalLock(handle);
+        HGLOBAL handle = PInvokeCore.GlobalAlloc(
+            GLOBAL_ALLOC_FLAGS.GMEM_MOVEABLE | GLOBAL_ALLOC_FLAGS.GMEM_ZEROINIT,
+            checked((uint)bufferSize));
 
-        // Get the DevMode only if its not cached.
-        if (_cachedDevmode is not null)
+        if (handle == default)
         {
-            Marshal.Copy(_cachedDevmode, 0, (nint)devmode, _devmodeBytes);
+            throw new Win32Exception(Marshal.GetLastPInvokeError());
         }
-        else
+
+        DEVMODEW* devmode = null;
+        bool locked = false;
+        bool success = false;
+
+        try
         {
-            result = PInvoke.DocumentProperties(
+            devmode = (DEVMODEW*)PInvokeCore.GlobalLock(handle);
+
+            if (devmode is null)
+            {
+                throw new Win32Exception();
+            }
+
+            locked = true;
+
+            if (_cachedDevmode is not null)
+            {
+                // The cached public DEVMODE must fit in the new printer's buffer.
+                if (_devmodeBytes < sizeof(DEVMODEW)
+                    || _devmodeBytes > bufferSize
+                    || _cachedDevmode.Length < _devmodeBytes)
+                {
+                    throw new InvalidPrinterException(this);
+                }
+
+                Marshal.Copy(
+                    _cachedDevmode,
+                    0,
+                    (nint)devmode,
+                    _devmodeBytes);
+            }
+            else
+            {
+                // Second call: ask the driver to populate the DEVMODE.
+                int result = PInvoke.DocumentProperties(
+                    default,
+                    default,
+                    printerName,
+                    devmode,
+                    (DEVMODEW*)null,
+                    (uint)DEVMODE_FIELD_FLAGS.DM_OUT_BUFFER);
+
+                if (result < 0)
+                {
+                    throw new Win32Exception();
+                }
+            }
+
+            // Validate the DEVMODE before reading its fields or passing it
+            // back to the printer driver.
+            if (!IsDevModeValid(devmode, bufferSize))
+            {
+                throw new InvalidPrinterException(this);
+            }
+
+            if (_extraInfo is not null)
+            {
+                uint publicSize = devmode->dmSize;
+                uint privateSize = devmode->dmDriverExtra;
+                uint availableSize = (uint)bufferSize;
+
+                bool extraInfoFits =
+                    _extraBytes <= privateSize
+                    && _extraBytes <= _extraInfo.Length
+                    && _extraBytes <= availableSize - publicSize;
+
+                if (!extraInfoFits)
+                {
+                    throw new InvalidPrinterException(this);
+                }
+
+                if (_extraBytes > 0)
+                {
+                    Marshal.Copy(
+                        _extraInfo,
+                        0,
+                        (nint)((byte*)devmode + publicSize),
+                        _extraBytes);
+                }
+            }
+
+            if (devmode->dmFields.HasFlag(DEVMODE_FIELD_FLAGS.DM_COPIES)
+                && _copies != -1)
+            {
+                devmode->Anonymous1.Anonymous1.dmCopies = _copies;
+            }
+
+            if (devmode->dmFields.HasFlag(DEVMODE_FIELD_FLAGS.DM_DUPLEX)
+                && (int)_duplex != -1)
+            {
+                devmode->dmDuplex = (DEVMODE_DUPLEX)_duplex;
+            }
+
+            if (devmode->dmFields.HasFlag(DEVMODE_FIELD_FLAGS.DM_COLLATE)
+                && _collate.IsNotDefault)
+            {
+                devmode->dmCollate = _collate.IsTrue
+                    ? DEVMODE_COLLATE.DMCOLLATE_TRUE
+                    : DEVMODE_COLLATE.DMCOLLATE_FALSE;
+            }
+
+            // Third call: validate and normalize the modified DEVMODE.
+            int validationResult = PInvoke.DocumentProperties(
                 default,
                 default,
                 printerName,
                 devmode,
-                (DEVMODEW*)null,
-                (uint)DEVMODE_FIELD_FLAGS.DM_OUT_BUFFER);
+                devmode,
+                (uint)(
+                    DEVMODE_FIELD_FLAGS.DM_IN_BUFFER
+                    | DEVMODE_FIELD_FLAGS.DM_OUT_BUFFER));
 
-            if (result < 0)
+            if (validationResult < 0)
             {
                 throw new Win32Exception();
             }
-        }
 
-        if (_extraInfo is not null)
-        {
-            // Guard against buffer overrun attacks (since design allows client to set a new printer name without
-            // updating the devmode)/ by checking for a large enough buffer size before copying the extra info buffer.
-            if (_extraBytes <= devmode->dmDriverExtra)
+            // The driver may have modified dmSize or dmDriverExtra.
+            if (!IsDevModeValid(devmode, bufferSize))
             {
-                Marshal.Copy(_extraInfo, 0, (nint)((byte*)devmode + devmode->dmSize), _extraBytes);
+                throw new InvalidPrinterException(this);
+            }
+
+            success = true;
+            return handle;
+        }
+        finally
+        {
+            // Memory must be unlocked before it is freed.
+            if (locked)
+            {
+                PInvokeCore.GlobalUnlock(handle);
+            }
+
+            if (!success)
+            {
+                PInvokeCore.GlobalFree(handle);
             }
         }
-
-        if (devmode->dmFields.HasFlag(DEVMODE_FIELD_FLAGS.DM_COPIES) && _copies != -1)
-        {
-            devmode->Anonymous1.Anonymous1.dmCopies = _copies;
-        }
-
-        if (devmode->dmFields.HasFlag(DEVMODE_FIELD_FLAGS.DM_DUPLEX) && (int)_duplex != -1)
-        {
-            devmode->dmDuplex = (DEVMODE_DUPLEX)_duplex;
-        }
-
-        if (devmode->dmFields.HasFlag(DEVMODE_FIELD_FLAGS.DM_COLLATE) && _collate.IsNotDefault)
-        {
-            devmode->dmCollate = _collate.IsTrue ? DEVMODE_COLLATE.DMCOLLATE_TRUE : DEVMODE_COLLATE.DMCOLLATE_FALSE;
-        }
-
-        result = PInvoke.DocumentProperties(
-            default,
-            default,
-            printerName,
-            devmode,
-            devmode,
-            (uint)(DEVMODE_FIELD_FLAGS.DM_IN_BUFFER | DEVMODE_FIELD_FLAGS.DM_OUT_BUFFER));
-
-        if (result < 0)
-        {
-            PInvokeCore.GlobalFree(handle);
-            PInvokeCore.GlobalUnlock(handle);
-            return default;
-        }
-
-        PInvokeCore.GlobalUnlock(handle);
-        return handle;
     }
 
     /// <summary>

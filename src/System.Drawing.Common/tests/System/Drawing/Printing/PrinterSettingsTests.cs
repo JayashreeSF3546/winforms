@@ -27,6 +27,7 @@
 
 using System.Drawing.Imaging;
 using System.Globalization;
+using Windows.Win32.Graphics.Gdi;
 
 namespace System.Drawing.Printing.Tests;
 
@@ -619,5 +620,72 @@ public class PrinterSettingsTests
         {
             printer.Should().NotBeNullOrEmpty();
         }
+    }
+
+    [Fact]
+    public unsafe void IsDevModeValid_NullPointer_ReturnsFalse()
+    {
+        Assert.False(PrinterSettings.IsDevModeValid(null, sizeof(DEVMODEW)));
+    }
+
+    [Fact]
+    public unsafe void IsDevModeValid_BufferSmallerThanDevMode_ReturnsFalse()
+    {
+        DEVMODEW devmode = default;
+
+        Assert.False(
+            PrinterSettings.IsDevModeValid(
+                &devmode,
+                sizeof(DEVMODEW) - 1));
+    }
+
+    [Fact]
+    public unsafe void IsDevModeValid_DmSizeIsZero_ReturnsFalse()
+    {
+        DEVMODEW devmode = default;
+        devmode.dmSize = 0;
+
+        Assert.False(
+            PrinterSettings.IsDevModeValid(
+                &devmode,
+                sizeof(DEVMODEW)));
+    }
+
+    [Fact]
+    public unsafe void IsDevModeValid_DmSizeExceedsBuffer_ReturnsFalse()
+    {
+        DEVMODEW devmode = default;
+        devmode.dmSize = checked((ushort)sizeof(DEVMODEW));
+
+        Assert.False(
+            PrinterSettings.IsDevModeValid(
+                &devmode,
+                sizeof(DEVMODEW) - 1));
+    }
+
+    [Fact]
+    public unsafe void IsDevModeValid_DriverExtraExceedsBuffer_ReturnsFalse()
+    {
+        DEVMODEW devmode = default;
+        devmode.dmSize = checked((ushort)sizeof(DEVMODEW));
+        devmode.dmDriverExtra = 100;
+
+        Assert.False(
+            PrinterSettings.IsDevModeValid(
+                &devmode,
+                sizeof(DEVMODEW) + 99));
+    }
+
+    [Fact]
+    public unsafe void IsDevModeValid_ValidDevMode_ReturnsTrue()
+    {
+        DEVMODEW devmode = default;
+        devmode.dmSize = checked((ushort)sizeof(DEVMODEW));
+        devmode.dmDriverExtra = 100;
+
+        Assert.True(
+            PrinterSettings.IsDevModeValid(
+                &devmode,
+                sizeof(DEVMODEW) + 100));
     }
 }
