@@ -27,10 +27,55 @@ Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseStartupForm<TForm>()
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseStartupForm<TForm>(System.Func<System.IServiceProvider!, TForm!>! factory) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseStartupForm(System.Windows.Forms.Form! startupForm) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseHost(Microsoft.Extensions.Hosting.IHost! host) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddUserSettings() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddUserSettings(Microsoft.Extensions.WinForms.UserSettingsOptions! options) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddUserSettings(Microsoft.Extensions.WinForms.UserSettingsOptions! options, bool includeInConfiguration, params string![]! settingKeys) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddUserSettings(Microsoft.Extensions.WinForms.IUserSettingsService! settingsService) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddUserSettings(Microsoft.Extensions.WinForms.IUserSettingsService! settingsService, bool includeInConfiguration, params string![]! settingKeys) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationLifetime
 Microsoft.Extensions.WinForms.WinFormsApplicationLifetime.ApplicationStarted -> System.EventHandler?
 Microsoft.Extensions.WinForms.WinFormsApplicationLifetime.ApplicationStopped -> System.EventHandler?
 Microsoft.Extensions.WinForms.WinFormsApplicationLifetime.ApplicationStopping -> System.EventHandler?
+Microsoft.Extensions.WinForms.IUserSettingsMigration
+Microsoft.Extensions.WinForms.IUserSettingsMigration.FromVersion.get -> int
+Microsoft.Extensions.WinForms.IUserSettingsMigration.Migrate(System.Text.Json.Nodes.JsonObject! settings) -> System.Text.Json.Nodes.JsonObject!
+Microsoft.Extensions.WinForms.IUserSettingsService
+Microsoft.Extensions.WinForms.IUserSettingsService.Changed -> System.EventHandler<Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs!>?
+Microsoft.Extensions.WinForms.IUserSettingsService.SchemaVersion.get -> int
+Microsoft.Extensions.WinForms.IUserSettingsService.GetStoredSchemaVersionAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int?>!
+Microsoft.Extensions.WinForms.IUserSettingsService.LoadAsync<TSettings>(TSettings! defaults, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TSettings!>!
+Microsoft.Extensions.WinForms.IUserSettingsService.SaveAsync<TSettings>(TSettings! settings, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Microsoft.Extensions.WinForms.IUserSettingsService.ResetAsync<TSettings>(TSettings! defaults, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Microsoft.Extensions.WinForms.IUserSettingsService.UpgradeAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Microsoft.Extensions.WinForms.IUserSettingsService.MigrateFromLegacySettingsAsync(System.Configuration.ApplicationSettingsBase! legacySettings, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Microsoft.Extensions.WinForms.JsonUserSettingsService
+Microsoft.Extensions.WinForms.JsonUserSettingsService.JsonUserSettingsService(Microsoft.Extensions.WinForms.UserSettingsOptions! options) -> void
+Microsoft.Extensions.WinForms.JsonUserSettingsService.Changed -> System.EventHandler<Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs!>?
+Microsoft.Extensions.WinForms.JsonUserSettingsService.SchemaVersion.get -> int
+Microsoft.Extensions.WinForms.JsonUserSettingsService.GetStoredSchemaVersionAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int?>!
+Microsoft.Extensions.WinForms.JsonUserSettingsService.LoadAsync<TSettings>(TSettings! defaults, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TSettings!>!
+Microsoft.Extensions.WinForms.JsonUserSettingsService.SaveAsync<TSettings>(TSettings! settings, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Microsoft.Extensions.WinForms.JsonUserSettingsService.ResetAsync<TSettings>(TSettings! defaults, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Microsoft.Extensions.WinForms.JsonUserSettingsService.UpgradeAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Microsoft.Extensions.WinForms.JsonUserSettingsService.MigrateFromLegacySettingsAsync(System.Configuration.ApplicationSettingsBase! legacySettings, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs
+Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs.SchemaVersion.get -> int
+Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs.Settings.get -> System.Text.Json.JsonElement
+Microsoft.Extensions.WinForms.UserSettingsOptions
+Microsoft.Extensions.WinForms.UserSettingsOptions.UserSettingsOptions() -> void
+Microsoft.Extensions.WinForms.UserSettingsOptions.ApplicationId.get -> string?
+Microsoft.Extensions.WinForms.UserSettingsOptions.ApplicationId.set -> void
+Microsoft.Extensions.WinForms.UserSettingsOptions.FilePath.get -> string?
+Microsoft.Extensions.WinForms.UserSettingsOptions.FilePath.set -> void
+Microsoft.Extensions.WinForms.UserSettingsOptions.SchemaVersion.get -> int
+Microsoft.Extensions.WinForms.UserSettingsOptions.SchemaVersion.set -> void
+Microsoft.Extensions.WinForms.UserSettingsOptions.Migrations.get -> System.Collections.Generic.IList<Microsoft.Extensions.WinForms.IUserSettingsMigration!>!
+Microsoft.Extensions.WinForms.UserSettingsOptions.SerializerOptions.get -> System.Text.Json.JsonSerializerOptions!
+Microsoft.Extensions.WinForms.UserSettingsOptions.SerializerOptions.set -> void
+Microsoft.Extensions.WinForms.UserSettingsOptions.LockTimeout.get -> System.TimeSpan
+Microsoft.Extensions.WinForms.UserSettingsOptions.LockTimeout.set -> void
+Microsoft.Extensions.WinForms.UserSettingsConfigurationExtensions
+static Microsoft.Extensions.WinForms.UserSettingsConfigurationExtensions.AddUserSettings(this Microsoft.Extensions.Configuration.IConfigurationBuilder! configurationBuilder, Microsoft.Extensions.WinForms.IUserSettingsService! settingsService, params string![]! settingKeys) -> Microsoft.Extensions.Configuration.IConfigurationBuilder!
 override System.Windows.Forms.GroupBox.OnPaintBackground(System.Windows.Forms.PaintEventArgs! pevent) -> void
 static System.Windows.Forms.Application.SystemVisualSettings.get -> System.Windows.Forms.SystemVisualSettings!
 static System.Windows.Forms.Application.SystemVisualSettingsChanged -> System.Windows.Forms.SystemVisualSettingsChangedEventHandler?

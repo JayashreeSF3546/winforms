@@ -68,6 +68,39 @@ using WinFormsApplication application = builder.Build();
 application.Run();
 ```
 
+## User settings (#14958)
+
+`WinFormsApplicationBuilder.AddUserSettings()` registers the default
+`IUserSettingsService`; pass `UserSettingsOptions` to customize its JSON store,
+or pass an `IUserSettingsService` implementation to use a custom store.
+By default, the file is stored under the current user's Local Application Data
+directory in an application-specific `WinForms` folder, derived from the entry
+assembly name. Set `ApplicationId` for a stable product identity or `FilePath`
+for an explicit store. The JSON document contains a `schemaVersion` and a
+settings object.
+
+`LoadAsync(defaults)` returns the supplied defaults without creating a file
+when no store exists. `SaveAsync` and `ResetAsync(defaults)` commit versioned
+JSON atomically while retaining a `.bak` of the previous valid file.
+`UpgradeAsync` applies ordered `IUserSettingsMigration` implementations,
+one schema version at a time. Concurrent processes coordinate through a
+per-file lock with a bounded wait. Corrupt primary data is retained as a
+timestamped `.corrupt-*` file and recovered from `.bak` when possible; a
+valid backup also restores a missing primary file. Operations reject a newer
+schema instead of downgrading it, and invalid stores report an actionable
+error rather than silently replacing user data with defaults.
+
+Legacy migration is explicitly invoked with
+`MigrateFromLegacySettingsAsync(ApplicationSettingsBase)`. It imports only
+user-scoped values, does not remove the generated settings store, and does not
+run automatically. The `Changed` event is raised after a successful
+save/reset/upgrade/migration and includes an immutable settings snapshot.
+Configuration projection is opt-in:
+`AddUserSettings(settingsService, includeInConfiguration: true,
+settingKeys: ["Theme"])` exposes only selected values under `UserSettings` and
+publishes configuration reload notifications after committed changes. Do not
+store secrets in settings or project sensitive preferences to configuration.
+
 ## Lifetime contract
 
 The application exposes one lifetime object with `ApplicationStarted`,

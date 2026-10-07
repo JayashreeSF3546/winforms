@@ -259,6 +259,156 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
     }
 
     /// <summary>
+    ///  Registers the default JSON user-settings service.
+    /// </summary>
+    /// <returns>This builder.</returns>
+    public WinFormsApplicationBuilder AddUserSettings()
+        => AddUserSettings(new UserSettingsOptions());
+
+    /// <summary>
+    ///  Registers the default JSON user-settings service with the specified options.
+    /// </summary>
+    /// <param name="options">The user-settings options.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  A user-settings service is already registered or an external host was supplied.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    ///  The application identifier or explicit file path is invalid.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///  The schema version or lock timeout is invalid.
+    /// </exception>
+    public WinFormsApplicationBuilder AddUserSettings(UserSettingsOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        return AddUserSettingsService(
+            new JsonUserSettingsService(options),
+            includeInConfiguration: false,
+            settingKeys: []);
+    }
+
+    /// <summary>
+    ///  Registers the default JSON user-settings service with an optional configuration projection.
+    /// </summary>
+    /// <param name="options">The user-settings options.</param>
+    /// <param name="includeInConfiguration">
+    ///  <see langword="true"/> to project settings under
+    ///  <c>UserSettings</c>; otherwise, <see langword="false"/>.
+    /// </param>
+    /// <param name="settingKeys">
+    ///  Optional settings paths to project when
+    ///  <paramref name="includeInConfiguration"/> is <see langword="true"/>.
+    /// </param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException">
+    ///  <paramref name="options"/> or <paramref name="settingKeys"/> is null.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    ///  A user-settings service is already registered or an external host was supplied.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    ///  The application identifier or explicit file path is invalid, or settings keys were provided
+    ///  while configuration projection is disabled.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///  The schema version or lock timeout is invalid.
+    /// </exception>
+    public WinFormsApplicationBuilder AddUserSettings(
+        UserSettingsOptions options,
+        bool includeInConfiguration,
+        params string[] settingKeys)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settingKeys);
+
+        return AddUserSettingsService(
+            new JsonUserSettingsService(options),
+            includeInConfiguration,
+            settingKeys);
+    }
+
+    /// <summary>
+    ///  Registers a user-settings service with the application.
+    /// </summary>
+    /// <param name="settingsService">The settings service.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException">
+    ///  <paramref name="settingsService"/> is null.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    ///  A user-settings service is already registered or an external host was supplied.
+    /// </exception>
+    public WinFormsApplicationBuilder AddUserSettings(IUserSettingsService settingsService)
+        => AddUserSettingsService(settingsService, includeInConfiguration: false, settingKeys: []);
+
+    /// <summary>
+    ///  Registers a user-settings service with an optional configuration projection.
+    /// </summary>
+    /// <param name="settingsService">The settings service.</param>
+    /// <param name="includeInConfiguration">
+    ///  <see langword="true"/> to project settings under
+    ///  <c>UserSettings</c>; otherwise, <see langword="false"/>.
+    /// </param>
+    /// <param name="settingKeys">
+    ///  Optional settings paths to project when
+    ///  <paramref name="includeInConfiguration"/> is <see langword="true"/>.
+    /// </param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException">
+    ///  <paramref name="settingsService"/> or <paramref name="settingKeys"/> is null.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    ///  A user-settings service is already registered or an external host was supplied.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    ///  Configuration projection is disabled but settings keys were provided.
+    /// </exception>
+    public WinFormsApplicationBuilder AddUserSettings(
+        IUserSettingsService settingsService,
+        bool includeInConfiguration,
+        params string[] settingKeys)
+    {
+        ArgumentNullException.ThrowIfNull(settingsService);
+
+        return AddUserSettingsService(settingsService, includeInConfiguration, settingKeys);
+    }
+
+    private WinFormsApplicationBuilder AddUserSettingsService(
+        IUserSettingsService settingsService,
+        bool includeInConfiguration,
+        string[] settingKeys)
+    {
+        ArgumentNullException.ThrowIfNull(settingsService);
+        ArgumentNullException.ThrowIfNull(settingKeys);
+
+        if (!includeInConfiguration && settingKeys.Length != 0)
+        {
+            throw new ArgumentException(
+                "Settings keys require configuration projection to be enabled.",
+                nameof(settingKeys));
+        }
+
+        IServiceCollection services = Services;
+
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(IUserSettingsService)))
+        {
+            throw new InvalidOperationException("A user-settings service is already registered.");
+        }
+
+        if (includeInConfiguration)
+        {
+            Configuration.AddUserSettings(settingsService, settingKeys);
+        }
+
+        services.AddSingleton(settingsService);
+
+        return this;
+    }
+
+    /// <summary>
     ///  Builds a Windows Forms application from the builder's current options.
     /// </summary>
     /// <returns>The configured application.</returns>

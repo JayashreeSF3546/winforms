@@ -190,9 +190,18 @@ not rewrite an application configuration provider.
 | Change notifications | Notify subscribers after a successful in-process save, reset, or migration commit; signal the optional configuration projection after commit. A file watcher and cross-process notification guarantee are not part of the default contract. |
 | Legacy migration | Migration from `Settings.settings` / generated `ApplicationSettings` is opt-in. Import only user-scoped values through an explicit migration path; never require migration for existing applications or delete the original settings as part of import. |
 
-The concrete API, serialization shape, backup retention, conflict policy, and
-recovery UX belong to #14958. The boundary decision is that storage is
-per-user, versioned, replaceable, and non-destructive.
+The #14958 implementation stores a `{ "schemaVersion": n, "settings": { ... } }`
+document below Local Application Data, with an explicit path override and an
+application identifier derived from the entry assembly by default. Migrations
+advance exactly one version at a time; all transformations complete before an
+atomic replacement. A sidecar file lock coordinates processes, a `.bak` keeps
+the previous valid document, and corrupt primary data is preserved separately
+before backup recovery. A valid backup also restores a missing primary file;
+operations reject a newer schema rather than downgrade it. If neither file is
+valid, the service surfaces an error without substituting defaults. The
+optional configuration projection is read-only, under `UserSettings`, and can
+be restricted to selected keys. Migration from generated settings is explicit,
+imports user-scoped values only, and leaves the original store untouched.
 
 ## Logging and exception integration
 
