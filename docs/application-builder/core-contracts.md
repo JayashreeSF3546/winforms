@@ -1,7 +1,11 @@
 # WinForms Application Builder core contracts
 
-**Status:** Contract prototype for issue [#14942](https://github.com/dotnet/winforms/issues/14942)  
-**Architecture decisions:** [lifetime architecture](lifetime-architecture.md)  
+**Status:** Contract prototype for issue [#14942](https://github.com/dotnet/winforms/issues/14942)
+
+**Architecture decisions:** [lifetime architecture](lifetime-architecture.md)
+
+**DI and scope research:** [Designer-safe DI and UI scopes](di-scopes-architecture.md)
+
 **Parent proposal:** [#14082](https://github.com/dotnet/winforms/issues/14082)
 
 ## Contract boundary
