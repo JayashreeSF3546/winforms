@@ -1,6 +1,6 @@
 # WinForms Application Builder DI and UI scopes
 
-**Status:** Research recommendation for [#14948](https://github.com/dotnet/winforms/issues/14948), with the runtime scope prototype implemented for [#14950](https://github.com/dotnet/winforms/issues/14950). The added public signatures are tracked as unshipped and remain subject to API review.
+**Status:** Research recommendation for [#14948](https://github.com/dotnet/winforms/issues/14948), with runtime scope activation implemented for [#14950](https://github.com/dotnet/winforms/issues/14950) and the provisional Designer boundary validated for [#14951](https://github.com/dotnet/winforms/issues/14951). Public signatures remain unshipped and subject to API review.
 
 **Parent feature:** [#14947](https://github.com/dotnet/winforms/issues/14947)
 
@@ -17,9 +17,12 @@ used by Designer-generated code and existing applications.
 Designer-created child controls and nonvisual components are constructed inside
 `InitializeComponent`, not by the application factory. The root factory does
 not inject into those descendants. Do not give components a global or ambient
-provider, or expose arbitrary lookup as the default assignment contract. A
-separate Designer-approved descendant-assignment mechanism remains open for
-#14951. The root factory candidate is documented in
+provider, or expose arbitrary lookup as the default assignment contract. The
+provisional root-factory contract requires no Designer-generated service
+hookup; focused compatibility tests verify parameterless construction for
+service-aware Forms, UserControls, and components. A future automatic
+descendant-assignment mechanism would require a separate Designer review. The
+root factory candidate is documented in
 [the DI contract prototype](di-contract-prototype.md); it is not an approved API.
 
 The Generic Host owns the root provider for the application lifetime. Create
@@ -55,6 +58,17 @@ Consequently, runtime DI cannot replace all design-time constructors without
 also changing the generated-code/designer contract. Requiring a runtime service
 in a control's parameterless constructor would break design loading and could
 also break existing applications.
+
+### Application Builder boundary validation
+
+The provisional activation factory is called only by the runtime
+`WinFormsApplication` activation path; `DesignSurface` and CodeDOM serialization
+do not consult it. #14951 therefore makes no production Designer or generated
+code changes. The focused regression tests use the in-process `DesignSurface`
+to verify parameterless construction for service-aware Form roots, derived
+Forms, UserControls, and components, including component creation, rename, and
+removal. These tests exercise the shared WinForms Designer construction path;
+they do not launch Visual Studio's out-of-process Designer.
 
 ### Designer edits, undo, reload, and inheritance
 
@@ -156,7 +170,7 @@ host is supplied, its provider must expose `IServiceScopeFactory`.
 | General property injection | Can preserve parameterless construction, but implicit reflection-based injection hides required dependencies and ordering. Only consider an explicit, opt-in assignment for designer-created descendants; define missing-service and initialization ordering in #14949. |
 | `IServiceProviderAssignable : IServiceProvider` | The proposal's sketch is explicit per instance, but exposes arbitrary service lookup to each component and is still a service-locator surface. Do not adopt that shape without API review; prefer assignment of declared dependencies through a narrow contract. |
 | Scope-aware activation factories | Best fit for Forms and dialogs: factory creates the scope, activates the concrete type, and can own failure/disposal cleanup. Insufficient by itself for children constructed by designer-generated `InitializeComponent`. |
-| Generated Designer hookup code | Could provide a well-defined point to assign dependencies to nested controls/components, but changes generated source and must preserve C#/VB serialization, rename/delete, undo/redo, reload, inheritance, and out-of-process Designer behavior. Defer evaluation/implementation to #14949 and #14951 with Designer-team agreement. |
+| Generated Designer hookup code | Could provide a well-defined point to assign dependencies to nested controls/components, but changes generated source and must preserve C#/VB serialization, rename/delete, undo/redo, reload, inheritance, and out-of-process Designer behavior. Not required by the provisional root-factory contract; any future descendant-assignment contract needs separate Designer-team review. |
 | Static or ambient provider / service locator | Rejected. Hides ownership, makes design-time behavior process-dependent, and violates the issue's no-global-provider requirement. |
 
 ## Open questions and dependencies
@@ -165,13 +179,13 @@ host is supplied, its provider must expose `IServiceScopeFactory`.
    Designer-created descendants and prove failure behavior, optional services,
    and initialization ordering. The current proposal's raw-provider interface
    is not accepted as the final shape.
-2. The Designer team must agree on whether the runtime can assign services to
-   generated controls/components without changing Designer output, or whether
-   a generated hookup is required. #14951 owns Designer integration and
-   round-trip validation.
+2. #14951 validated that the provisional root-factory contract does not need
+   Designer-generated service hooks. Any future automatic assignment to
+   generated controls/components must be separately reviewed with the Designer
+   team and must include round-trip validation.
 3. #14950 implements the Form/dialog activation scopes and disposal contract.
-   Automatic dependency assignment for Designer-created descendants remains
-   deferred to #14951.
+   Automatic dependency assignment for Designer-created descendants is not
+   part of the provisional contract and remains future work.
 4. Dynamic reparenting of a UserControl across Forms with different scopes
    needs an explicit policy before assignment semantics are finalized. The
    control must not silently retain a stale scope or create a new one.

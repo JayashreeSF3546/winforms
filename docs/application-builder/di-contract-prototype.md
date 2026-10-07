@@ -79,10 +79,11 @@ public MainForm(ICustomerService customerService)
 
 This keeps service requirements visible in application code without giving a
 control an arbitrary provider. It is not automatic component injection. Any
-framework-managed descendant assignment requires a separate Designer-approved
-contract and is deferred to #14951. The runtime activation factory does not
-require Designer-generated code and therefore does not alter drag/drop,
-serialization, rename, delete, undo/redo, reload, or inheritance behavior.
+framework-managed descendant assignment would require a separate
+Designer-approved contract. #14951 validated the current runtime-only boundary:
+no Designer-generated service hookup is needed, and the runtime activation
+factory does not alter drag/drop, serialization, rename, delete, undo/redo,
+reload, or inheritance behavior.
 
 ## Contract boundaries
 
@@ -100,6 +101,10 @@ serialization, rename, delete, undo/redo, reload, or inheritance behavior.
   parameterless path and does not load the application host or scope.
 - **Existing callers:** continue using `new Form()`, `UseStartupForm<TForm>()`,
   or the existing instance overload without change.
+- **Designer validation:** service-aware Form, UserControl, and component
+  constructors remain separate from the Designer's parameterless construction
+  path. Focused regression coverage is in
+  `System.Windows.Forms.Design.Tests.ApplicationBuilderDesignerCompatibilityTests`.
 
 The same factory boundary is exposed through `WinFormsApplication.CreateForm`
 for modeless Forms and `WinFormsApplication.ShowDialog` for modal dialogs.
@@ -150,7 +155,9 @@ final.
 
 - #14950: implemented scope-aware Form activation, modal/modeless lifetime,
   and cleanup. The public factory signatures remain pending API review.
-- #14951: determine whether nested UserControls and components need
-  Designer-generated hookup or another explicit assignment protocol.
+- #14951: validated that the provisional root-factory contract needs no
+  Designer production-code or generated-code hook. A future contract that
+  automatically assigns services to descendants would require a separate
+  Designer review and round-trip validation.
 - #14952: add the factory, activation failure, scope identity, disposal, and
   design-time compatibility tests.
