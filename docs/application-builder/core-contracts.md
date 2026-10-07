@@ -15,15 +15,14 @@
 
 ## Contract boundary
 
-The prototype places `WinFormsApplicationBuilder`, `WinFormsApplication`,
+The builder places `WinFormsApplicationBuilder`, `WinFormsApplication`,
 `WinFormsApplicationLifetime`, and the internal `WinFormsApplicationOptions`
 in the `Microsoft.Extensions.WinForms` namespace in `System.Windows.Forms.dll`.
-This follows the proposal's single-assembly option. Runtime coordination uses
-`Microsoft.Extensions.Hosting.Abstractions` only to accept and coordinate an
-existing `IHost`; the application builder does not create a host or provide
-service registration, configuration, or logging APIs. Its scope-aware
-activation callbacks receive only the `IServiceProvider` for a specific Form
-activation.
+This follows the proposal's single-assembly option. `WinFormsApplicationBuilder`
+implements `IHostApplicationBuilder` and delegates configuration, service
+registration, logging, metrics, and host creation to
+`Microsoft.Extensions.Hosting`. Runtime coordination continues to own the
+WinForms message loop and coordinate the built host's lifetime.
 
 The builder supports selecting a form by type or instance, or selecting a
 default or supplied `ApplicationContext`. The last startup-selection call wins.
@@ -32,11 +31,42 @@ during builder creation, `Build`, or option copying. `Build` snapshots the
 builder's options so subsequent builder changes do not alter an already-built
 application.
 
-The options type is internal. The prototype does not expose
-`IServiceCollection`, configuration, logging, or a public options pattern.
-Applications continue to own their generated
+The options type is internal. Applications continue to own their generated
 `ApplicationConfiguration.Initialize()` call; the builder does not attempt to
 reference application-specific generated code.
+
+## Configuration and options (#14957)
+
+The parameterless `CreateBuilder()` preserves the hostless path: it does not
+create a host unless a host-building surface such as `Configuration`,
+`Services`, or `Environment` is accessed. `CreateBuilder(args)` and
+`CreateBuilder(HostApplicationBuilderSettings)` explicitly opt into a
+builder-owned Generic Host. The default content root is
+`AppContext.BaseDirectory`; the settings overload can choose another content
+root or environment. Standard Generic Host defaults provide optional base and
+environment-specific JSON files, Development-only User Secrets when an
+application User Secrets ID exists, environment variables, command-line
+arguments, and reload support. Providers appended to `Configuration` have
+higher precedence than the defaults.
+
+Options bind and validate through the standard Microsoft.Extensions.Options
+extensions. `ValidateOnStart()` runs when the host starts, before
+`Application.Run` enters the WinForms message loop; the original validation
+exception is propagated to the caller. A supplied, already-built host via
+`UseHost` is an alternative composition mode: host configuration and service
+registration cannot be combined with it, and the builder reports that
+conflict rather than silently ignoring either host.
+
+```csharp
+WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder(args);
+builder.Services.AddOptions<WindowOptions>()
+    .Bind(builder.Configuration.GetSection("Window"))
+    .ValidateOnStart();
+builder.UseStartupForm<MainForm>();
+
+using WinFormsApplication application = builder.Build();
+application.Run();
+```
 
 ## Lifetime contract
 
@@ -64,11 +94,11 @@ WinForms contexts without a configured host retain their existing synchronous
 exit behavior. A host stop is terminal: after the host has begun stopping, an
 application shutdown request is not canceled by a form-close veto.
 
-The current bridge accepts an already-created `IHost`; it does not create the
-host or expose `IServiceCollection`, configuration, logging, hosted-service
-registration, or an options pattern. Runnable C# and Visual Basic examples
-using an externally built host are in [samples](samples/README.md). A
-standalone lifecycle and resource benchmark harness is documented in
+The lifetime bridge introduced by #14943 continues to accept an already-built
+`IHost`; #14957 also lets the application builder create and own the host
+through `IHostApplicationBuilder`. Existing C# and Visual Basic examples using
+an externally built host remain in [samples](samples/README.md). A standalone
+lifecycle and resource benchmark harness is documented in
 [benchmarks](benchmarks/README.md).
 
 ## Scope-aware Form activation

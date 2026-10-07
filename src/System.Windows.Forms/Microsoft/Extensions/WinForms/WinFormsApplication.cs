@@ -59,6 +59,26 @@ public sealed class WinFormsApplication : IDisposable
         => WinFormsApplicationBuilder.CreateBuilder();
 
     /// <summary>
+    ///  Creates a builder for a Windows Forms application using the specified
+    ///  command-line arguments.
+    /// </summary>
+    /// <param name="args">The command-line arguments.</param>
+    /// <returns>A new application builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is null.</exception>
+    public static WinFormsApplicationBuilder CreateBuilder(string[] args)
+        => WinFormsApplicationBuilder.CreateBuilder(args);
+
+    /// <summary>
+    ///  Creates a builder for a Windows Forms application using the specified
+    ///  host settings.
+    /// </summary>
+    /// <param name="settings">The host settings.</param>
+    /// <returns>A new application builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="settings"/> is null.</exception>
+    public static WinFormsApplicationBuilder CreateBuilder(HostApplicationBuilderSettings settings)
+        => WinFormsApplicationBuilder.CreateBuilder(settings);
+
+    /// <summary>
     ///  Gets the lifetime notifications for this application.
     /// </summary>
     public WinFormsApplicationLifetime Lifetime { get; } = new();

@@ -7,7 +7,18 @@ Microsoft.Extensions.WinForms.WinFormsApplication.Run() -> void
 Microsoft.Extensions.WinForms.WinFormsApplication.ShowDialog<TForm>(System.Func<System.IServiceProvider!, TForm!>! factory, System.Windows.Forms.IWin32Window? owner = null) -> System.Windows.Forms.DialogResult
 Microsoft.Extensions.WinForms.WinFormsApplication.StopAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 static Microsoft.Extensions.WinForms.WinFormsApplication.CreateBuilder() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+static Microsoft.Extensions.WinForms.WinFormsApplication.CreateBuilder(Microsoft.Extensions.Hosting.HostApplicationBuilderSettings! settings) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+static Microsoft.Extensions.WinForms.WinFormsApplication.CreateBuilder(string![]! args) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Configuration.get -> Microsoft.Extensions.Configuration.IConfigurationManager!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.ConfigureContainer<TContainerBuilder>(Microsoft.Extensions.DependencyInjection.IServiceProviderFactory<TContainerBuilder>! factory, System.Action<TContainerBuilder>? configure = null) -> void
+static Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.CreateBuilder(Microsoft.Extensions.Hosting.HostApplicationBuilderSettings! settings) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+static Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.CreateBuilder(string![]! args) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Environment.get -> Microsoft.Extensions.Hosting.IHostEnvironment!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Logging.get -> Microsoft.Extensions.Logging.ILoggingBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Metrics.get -> Microsoft.Extensions.Diagnostics.Metrics.IMetricsBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Properties.get -> System.Collections.Generic.IDictionary<object!, object!>!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Services.get -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Build() -> Microsoft.Extensions.WinForms.WinFormsApplication!
 static Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.CreateBuilder() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseApplicationContext() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
