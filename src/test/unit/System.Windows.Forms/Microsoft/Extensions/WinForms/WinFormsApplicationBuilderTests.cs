@@ -281,6 +281,25 @@ public class WinFormsApplicationBuilderTests
     }
 
     [WinFormsFact]
+    public void Run_WithoutHostProvidesEmptyServicesToStartupFactory()
+    {
+        RunOnStaThread(() =>
+        {
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(services =>
+                {
+                    Assert.Null(services.GetService(typeof(TestScopedService)));
+                    Assert.Null(services.GetService(typeof(OptionalTestService)));
+
+                    return new CloseOnShownForm();
+                })
+                .Build();
+
+            application.Run();
+        });
+    }
+
+    [WinFormsFact]
     public void CreateForm_CanceledCloseKeepsScopeUntilApplicationExit()
     {
         RunOnStaThread(() =>
@@ -311,6 +330,46 @@ public class WinFormsApplicationBuilderTests
             Assert.True(modelessForm.IsDisposed);
             Assert.Equal(2, host.ScopeFactory.CreatedCount);
             Assert.Equal(2, host.ScopeFactory.DisposedCount);
+        });
+    }
+
+    [WinFormsFact]
+    public void CreateForm_ModelessFormsUseIndependentScopesAndOptionalServices()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new();
+            List<TestScopedService> scopedServices = [];
+            using Form startupForm = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(startupForm)
+                .UseHost(host)
+                .Build();
+            startupForm.Shown += (_, _) =>
+            {
+                for (int index = 0; index < 2; index++)
+                {
+                    Form form = application.CreateForm(services =>
+                    {
+                        scopedServices.Add(Assert.IsType<TestScopedService>(
+                            services.GetService(typeof(TestScopedService))));
+                        Assert.Null(services.GetService(typeof(OptionalTestService)));
+
+                        return new CloseOnShownForm();
+                    });
+                    form.Show();
+                }
+
+                startupForm.Close();
+            };
+
+            application.Run();
+
+            Assert.Equal(2, scopedServices.Count);
+            Assert.NotSame(scopedServices[0], scopedServices[1]);
+            Assert.All(scopedServices, service => Assert.True(service.IsDisposed));
+            Assert.Equal(3, host.ScopeFactory.CreatedCount);
+            Assert.Equal(3, host.ScopeFactory.DisposedCount);
         });
     }
 
@@ -380,6 +439,64 @@ public class WinFormsApplicationBuilderTests
     }
 
     [WinFormsFact]
+    public void ShowDialog_NestedInModelessFormUsesIndependentScope()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new();
+            TestScopedService? parentService = null;
+            TestScopedService? dialogService = null;
+            Form? parentForm = null;
+            using Form startupForm = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(startupForm)
+                .UseHost(host)
+                .Build();
+            startupForm.Shown += (_, _) =>
+            {
+                parentForm = application.CreateForm(services =>
+                {
+                    parentService = Assert.IsType<TestScopedService>(
+                        services.GetService(typeof(TestScopedService)));
+                    Form modelessParent = new();
+                    modelessParent.Shown += (_, _) =>
+                    {
+                        application.ShowDialog(
+                            services =>
+                            {
+                                dialogService = Assert.IsType<TestScopedService>(
+                                    services.GetService(typeof(TestScopedService)));
+
+                                return new CloseOnShownForm();
+                            },
+                            modelessParent);
+
+                        Assert.NotNull(dialogService);
+                        Assert.True(dialogService.IsDisposed);
+                        Assert.False(parentService.IsDisposed);
+                        modelessParent.Close();
+                    };
+
+                    return modelessParent;
+                });
+                parentForm.Show();
+                startupForm.Close();
+            };
+
+            application.Run();
+
+            Assert.NotNull(parentService);
+            Assert.NotNull(dialogService);
+            Assert.True(parentService.IsDisposed);
+            Assert.True(dialogService.IsDisposed);
+            Assert.NotNull(parentForm);
+            Assert.True(parentForm.IsDisposed);
+            Assert.Equal(3, host.ScopeFactory.CreatedCount);
+            Assert.Equal(3, host.ScopeFactory.DisposedCount);
+        });
+    }
+
+    [WinFormsFact]
     public void Run_FormFactoryFailureDisposesActivationScope()
     {
         RunOnStaThread(() =>
@@ -401,6 +518,49 @@ public class WinFormsApplicationBuilderTests
     }
 
     [WinFormsFact]
+    public void CreateForm_FactoryFailureDisposesActivationScopeAndNullResultIsRejected()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new();
+            TestScopedService? activationService = null;
+            using Form startupForm = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(startupForm)
+                .UseHost(host)
+                .Build();
+            startupForm.Shown += (_, _) =>
+            {
+                InvalidOperationException activationException = Assert.Throws<InvalidOperationException>(
+                    () => application.CreateForm<TestForm>(services =>
+                    {
+                        activationService = Assert.IsType<TestScopedService>(
+                            services.GetService(typeof(TestScopedService)));
+
+                        throw new InvalidOperationException("Modeless form activation failed.");
+                    }));
+
+                Assert.Equal("Modeless form activation failed.", activationException.Message);
+                Assert.NotNull(activationService);
+                Assert.True(activationService.IsDisposed);
+
+                InvalidOperationException nullFormException = Assert.Throws<InvalidOperationException>(
+                    () => application.CreateForm<TestForm>(_ => null!));
+
+                Assert.Equal("The form factory returned null.", nullFormException.Message);
+                Assert.Equal(3, host.ScopeFactory.CreatedCount);
+                Assert.Equal(2, host.ScopeFactory.DisposedCount);
+                startupForm.Close();
+            };
+
+            application.Run();
+
+            Assert.Equal(3, host.ScopeFactory.CreatedCount);
+            Assert.Equal(3, host.ScopeFactory.DisposedCount);
+        });
+    }
+
+    [WinFormsFact]
     public void Run_ScopeCreationFailureDoesNotStartHost()
     {
         RunOnStaThread(() =>
@@ -417,6 +577,29 @@ public class WinFormsApplicationBuilderTests
             Assert.Equal("Scope creation failed.", exception.Message);
             Assert.Equal(1, host.ScopeFactory.CreatedCount);
             Assert.Equal(0, host.ScopeFactory.DisposedCount);
+            Assert.Equal(0, host.StartCount);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_ScopeServiceProviderFailureDisposesCreatedScope()
+    {
+        RunOnStaThread(() =>
+        {
+            InvalidOperationException providerException = new("Scope service provider access failed.");
+            ThrowingServiceProviderScope? scope = null;
+            TestHost host = new(createScope: () => scope = new(providerException));
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm<TestForm>(_ => new())
+                .UseHost(host)
+                .Build();
+
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(application.Run);
+
+            Assert.Same(providerException, exception);
+            Assert.NotNull(scope);
+            Assert.True(scope.IsDisposed);
+            Assert.Equal(1, host.ScopeFactory.CreatedCount);
             Assert.Equal(0, host.StartCount);
         });
     }
@@ -445,6 +628,7 @@ public class WinFormsApplicationBuilderTests
             Assert.NotNull(form);
             Assert.Same(form.Service, form.Child.Service);
             Assert.Same(form.Service, form.Component.Service);
+            Assert.True(form.Child.ServiceWasAliveOnDispose);
             Assert.True(form.Component.ServiceWasAliveOnDispose);
             Assert.True(form.Service.IsDisposed);
             Assert.Equal(1, host.ScopeFactory.CreatedCount);
@@ -856,6 +1040,13 @@ public class WinFormsApplicationBuilderTests
         public void Dispose() => IsDisposed = true;
     }
 
+    /// <summary>
+    ///  Represents a service that is intentionally not registered in test scopes.
+    /// </summary>
+    private sealed class OptionalTestService
+    {
+    }
+
     private sealed class ScopedDescendantForm : Form
     {
         private readonly Container _components = new();
@@ -894,6 +1085,18 @@ public class WinFormsApplicationBuilderTests
     private sealed class TestUserControl : UserControl
     {
         internal TestScopedService? Service { get; init; }
+
+        internal bool ServiceWasAliveOnDispose { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ServiceWasAliveOnDispose = Service is { IsDisposed: false };
+            }
+
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class TestComponent(TestScopedService service) : Component
@@ -1094,5 +1297,17 @@ public class WinFormsApplicationBuilderTests
                 owner.OnScopeDisposed();
             }
         }
+    }
+
+    /// <summary>
+    ///  A test scope that fails when the activation provider is requested.
+    /// </summary>
+    private sealed class ThrowingServiceProviderScope(Exception providerException) : IServiceScope
+    {
+        internal bool IsDisposed { get; private set; }
+
+        public IServiceProvider ServiceProvider => throw providerException;
+
+        public void Dispose() => IsDisposed = true;
     }
 }

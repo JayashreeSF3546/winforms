@@ -70,6 +70,16 @@ Forms, UserControls, and components, including component creation, rename, and
 removal. These tests exercise the shared WinForms Designer construction path;
 they do not launch Visual Studio's out-of-process Designer.
 
+### Test ownership
+
+Runtime activation and scope lifecycle coverage lives in
+`src\test\unit\System.Windows.Forms\Microsoft\Extensions\WinForms\WinFormsApplicationBuilderTests.cs`.
+In-process Designer compatibility coverage lives in
+`src\System.Windows.Forms.Design\tests\UnitTests\System\ComponentModel\Design\ApplicationBuilderDesignerCompatibilityTests.cs`.
+Visual Studio's out-of-process Designer validation is separate from these
+runtime unit tests and remains owned by the Designer tooling/CI that can launch
+that closed-source host.
+
 ### Designer edits, undo, reload, and inheritance
 
 - The designer host reports component rename and removal operations. The

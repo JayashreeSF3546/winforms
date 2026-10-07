@@ -147,9 +147,11 @@ Before finalizing the public API:
 The current source does not expose a DI registration surface on
 `WinFormsApplicationBuilder`; the caller continues to configure and own the
 Generic Host. Scope identity, disposal, failure cleanup, and the explicit
-descendant-composition boundary are covered by #14950 tests. API and Designer
-review remain necessary before these candidate signatures can be considered
-final.
+descendant-composition boundary are covered by #14950 and #14952 runtime tests.
+In-process Designer construction is covered separately by #14951 tests; Visual
+Studio's out-of-process Designer remains owned by its tooling/CI. API and
+Designer review remain necessary before these candidate signatures can be
+considered final.
 
 ## Follow-up ownership
 
@@ -159,5 +161,7 @@ final.
   Designer production-code or generated-code hook. A future contract that
   automatically assigns services to descendants would require a separate
   Designer review and round-trip validation.
-- #14952: add the factory, activation failure, scope identity, disposal, and
-  design-time compatibility tests.
+- #14952: added runtime coverage for isolated modeless/modal scopes, optional
+  service resolution, activation and provider failures, null factories,
+  descendant disposal ordering, and no-host activation. In-process Designer
+  compatibility tests are maintained separately under #14951.
