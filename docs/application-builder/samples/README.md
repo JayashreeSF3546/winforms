@@ -79,6 +79,9 @@ build. Record the IDE/OS version and actual result after running each scenario:
 | Classic, Light, and Dark themes | Windows on ARM, ARM64 | Not run |
 | Layout and close responsiveness | Slow or constrained Windows hardware | Not run |
 
+The repeatable scope/resource stress-test methodology and its measurements
+are documented in [`../di-scope-leak-testing.md`](../di-scope-leak-testing.md).
+
 ## Decisions and scope
 
 - The samples use the existing `IHost` integration and do not add a
