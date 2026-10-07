@@ -17,6 +17,11 @@ internal sealed class WinFormsApplicationOptions
     internal Func<Form>? StartupFormFactory { get; set; }
 
     /// <summary>
+    ///  Gets or sets the service-aware factory for creating the startup form.
+    /// </summary>
+    internal Func<IServiceProvider, Form>? StartupServiceFormFactory { get; set; }
+
+    /// <summary>
     ///  Gets or sets the existing startup form.
     /// </summary>
     internal Form? StartupForm { get; set; }
@@ -49,6 +54,7 @@ internal sealed class WinFormsApplicationOptions
         => new()
         {
             StartupFormFactory = StartupFormFactory,
+            StartupServiceFormFactory = StartupServiceFormFactory,
             StartupForm = StartupForm,
             ApplicationContextFactory = ApplicationContextFactory,
             ApplicationContext = ApplicationContext,

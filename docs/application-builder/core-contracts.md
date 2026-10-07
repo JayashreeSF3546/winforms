@@ -1,7 +1,13 @@
 # WinForms Application Builder core contracts
 
-**Status:** Contract prototype for issue [#14942](https://github.com/dotnet/winforms/issues/14942)  
-**Architecture decisions:** [lifetime architecture](lifetime-architecture.md)  
+**Status:** Contract prototype for issue [#14942](https://github.com/dotnet/winforms/issues/14942)
+
+**Architecture decisions:** [lifetime architecture](lifetime-architecture.md)
+
+**DI and scope research:** [Designer-safe DI and UI scopes](di-scopes-architecture.md)
+
+**DI contract prototype:** [runtime factory contract](di-contract-prototype.md)
+
 **Parent proposal:** [#14082](https://github.com/dotnet/winforms/issues/14082)
 
 ## Contract boundary
@@ -11,8 +17,10 @@ The prototype places `WinFormsApplicationBuilder`, `WinFormsApplication`,
 in the `Microsoft.Extensions.WinForms` namespace in `System.Windows.Forms.dll`.
 This follows the proposal's single-assembly option. Runtime coordination uses
 `Microsoft.Extensions.Hosting.Abstractions` only to accept and coordinate an
-existing `IHost`; the application builder does not create a host or add
-dependency-injection, configuration, or logging APIs.
+existing `IHost`; the application builder does not create a host or provide
+service registration, configuration, or logging APIs. Its scope-aware
+activation callbacks receive only the `IServiceProvider` for a specific Form
+activation.
 
 The builder supports selecting a form by type or instance, or selecting a
 default or supplied `ApplicationContext`. The last startup-selection call wins.
@@ -21,10 +29,11 @@ during builder creation, `Build`, or option copying. `Build` snapshots the
 builder's options so subsequent builder changes do not alter an already-built
 application.
 
-The options type is internal. The prototype does not expose services,
-configuration, logging, or a public options pattern. Applications continue to
-own their generated `ApplicationConfiguration.Initialize()` call; the builder
-does not attempt to reference application-specific generated code.
+The options type is internal. The prototype does not expose
+`IServiceCollection`, configuration, logging, or a public options pattern.
+Applications continue to own their generated
+`ApplicationConfiguration.Initialize()` call; the builder does not attempt to
+reference application-specific generated code.
 
 ## Lifetime contract
 
@@ -58,6 +67,23 @@ registration, or an options pattern. Runnable C# and Visual Basic examples
 using an externally built host are in [samples](samples/README.md). A
 standalone lifecycle and resource benchmark harness is documented in
 [benchmarks](benchmarks/README.md).
+
+## Scope-aware Form activation
+
+Issue #14950 adds a service-aware startup Form factory and
+`WinFormsApplication.CreateForm` / `ShowDialog` activation methods. Each
+activated Form uses a host-created service scope when a Generic Host is
+configured; without a host, the factory receives an empty service provider.
+The Form's `Disposed` event ends its scope, so a canceled close keeps scoped
+services alive. Modal activation disposes the dialog and scope before
+returning, including when display or disposal throws. When the application
+message loop exits, it disposes any activated modeless Forms that remain open.
+
+UserControls and components remain Designer-constructed. A Form factory can
+explicitly assign dependencies to these descendants; the framework does not
+inject an ambient provider or create descendant scopes. Automatic Designer
+integration remains assigned to #14951. The new API signatures are unshipped
+and require API review before release.
 
 ## Alternatives considered
 
