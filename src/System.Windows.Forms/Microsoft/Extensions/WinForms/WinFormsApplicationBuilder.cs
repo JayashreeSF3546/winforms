@@ -43,6 +43,36 @@ public sealed class WinFormsApplicationBuilder
         where TForm : Form, new()
     {
         _options.StartupFormFactory = static () => new TForm();
+        _options.StartupServiceFormFactory = null;
+        _options.StartupForm = null;
+        _options.ApplicationContextFactory = null;
+        _options.ApplicationContext = null;
+        _options.StartupObjectThread = null;
+
+        return this;
+    }
+
+    /// <summary>
+    ///  Selects a startup form to be created by a factory using the form's
+    ///  activation scope.
+    /// </summary>
+    /// <typeparam name="TForm">The type of the startup form.</typeparam>
+    /// <param name="factory">
+    ///  A factory that creates the startup form using its activation services.
+    /// </param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  The factory returns null when the application runs.
+    /// </exception>
+    public WinFormsApplicationBuilder UseStartupForm<TForm>(
+        Func<IServiceProvider, TForm> factory)
+        where TForm : Form
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+
+        _options.StartupFormFactory = null;
+        _options.StartupServiceFormFactory = services => factory(services);
         _options.StartupForm = null;
         _options.ApplicationContextFactory = null;
         _options.ApplicationContext = null;
@@ -61,6 +91,7 @@ public sealed class WinFormsApplicationBuilder
         ArgumentNullException.ThrowIfNull(startupForm);
 
         _options.StartupFormFactory = null;
+        _options.StartupServiceFormFactory = null;
         _options.StartupForm = startupForm;
         _options.ApplicationContextFactory = null;
         _options.ApplicationContext = null;
@@ -76,6 +107,7 @@ public sealed class WinFormsApplicationBuilder
     public WinFormsApplicationBuilder UseApplicationContext()
     {
         _options.StartupFormFactory = null;
+        _options.StartupServiceFormFactory = null;
         _options.StartupForm = null;
         _options.ApplicationContextFactory = static () => new();
         _options.ApplicationContext = null;
@@ -94,6 +126,7 @@ public sealed class WinFormsApplicationBuilder
         ArgumentNullException.ThrowIfNull(applicationContext);
 
         _options.StartupFormFactory = null;
+        _options.StartupServiceFormFactory = null;
         _options.StartupForm = null;
         _options.ApplicationContextFactory = null;
         _options.ApplicationContext = applicationContext;

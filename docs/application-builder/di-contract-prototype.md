@@ -1,6 +1,6 @@
 # WinForms Application Builder DI contract prototype
 
-**Status:** Design prototype for issue [#14949](https://github.com/dotnet/winforms/issues/14949); proposed signatures require API and Designer review
+**Status:** Design prototype from [#14949](https://github.com/dotnet/winforms/issues/14949), implemented as an unshipped runtime prototype in [#14950](https://github.com/dotnet/winforms/issues/14950); proposed signatures still require API review
 
 **Research basis:** [DI and scope architecture](di-scopes-architecture.md)
 
@@ -25,7 +25,8 @@ public sealed class WinFormsApplicationBuilder
 }
 ```
 
-This is a candidate signature, not an approved or shipped API. The factory is
+This is a candidate signature, not an approved or shipped API. The current
+prototype tracks the overload in `PublicAPI.Unshipped.txt`. The factory is
 called only by the runtime activation path. Its provider is the activation
 scope's service provider; scope creation and disposal are owned by the
 coordinator, not by the Form or factory. A factory exception fails activation
@@ -89,7 +90,7 @@ serialization, rename, delete, undo/redo, reload, or inheritance behavior.
   provider for a particular activation to the runtime coordinator.
 - **Activation coordinator:** creates and owns the activation scope, invokes
   the factory, and retains the scope until the Form's owning lifetime ends.
-  Scope behavior itself is implemented in #14950.
+  Scope behavior is implemented in #14950.
 - **Factory:** synchronously constructs one Form from the supplied provider.
   It does not own or dispose the provider/scope.
 - **Form:** receives required services as ordinary constructor parameters and
@@ -100,10 +101,15 @@ serialization, rename, delete, undo/redo, reload, or inheritance behavior.
 - **Existing callers:** continue using `new Form()`, `UseStartupForm<TForm>()`,
   or the existing instance overload without change.
 
-The same factory boundary can be reused for modeless Forms and modal dialogs,
-but their scope lifetimes and cleanup are not implemented by this prototype.
-The application context remains the application lifetime owner and does not
-itself acquire a Form scope.
+The same factory boundary is exposed through `WinFormsApplication.CreateForm`
+for modeless Forms and `WinFormsApplication.ShowDialog` for modal dialogs.
+Modeless scopes remain alive through canceled closes and are cleaned up when
+the Form is disposed or the application loop ends. Modal helpers dispose the
+dialog and scope after the modal operation, including exceptional exits. A
+startup Form supplied as an instance, by a parameterless factory, or as the
+`MainForm` of a supplied context also receives an activation scope. The
+application context remains the application lifetime owner and does not itself
+acquire a Form scope.
 
 ## Alternatives reviewed
 
@@ -117,32 +123,33 @@ itself acquire a Form scope.
 
 ## Prototype validation plan
 
-Before finalizing or adding a public API:
+Before finalizing the public API:
 
 1. Verify that a parameterless Designer construction path and a factory-created
    DI path both initialize the same Form exactly once.
-2. Verify required-service resolution failures propagate and the activation
-   coordinator disposes a partially created Form and scope.
+2. Verify factory failures propagate and dispose the activation scope, and that
+   any Form returned before a later activation failure is disposed with it.
 3. Verify the factory receives the Form activation scope, not the root provider,
    and that separate Form/dialog activations do not share scoped services.
 4. Verify a factory is not invoked by builder configuration, `Build`, or
    design-time construction.
 5. Review factory overload naming, inference, exception behavior, and nullable
-   annotations with the API review team before adding it to the public API
-   baseline.
+   annotations with the API review team before considering the unshipped
+   signatures final.
 6. Agree with the Designer team on a separate descendant-assignment mechanism
    before claiming DI support for Designer-created UserControls/components.
 
-The current source has no DI registration surface on
-`WinFormsApplicationBuilder`; this document intentionally does not add a
-runtime API or claim that the prototype validation plan has already passed.
-The factory signature remains a design proposal until the tests and API/Designer
-reviews above are completed.
+The current source does not expose a DI registration surface on
+`WinFormsApplicationBuilder`; the caller continues to configure and own the
+Generic Host. Scope identity, disposal, failure cleanup, and the explicit
+descendant-composition boundary are covered by #14950 tests. API and Designer
+review remain necessary before these candidate signatures can be considered
+final.
 
 ## Follow-up ownership
 
-- #14950: implement scope-aware Form activation, modal/modeless lifetime, and
-  cleanup after the factory contract is approved.
+- #14950: implemented scope-aware Form activation, modal/modeless lifetime,
+  and cleanup. The public factory signatures remain pending API review.
 - #14951: determine whether nested UserControls and components need
   Designer-generated hookup or another explicit assignment protocol.
 - #14952: add the factory, activation failure, scope identity, disposal, and

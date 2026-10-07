@@ -1,9 +1,11 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.ComponentModel;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.WinForms;
 
@@ -249,6 +251,204 @@ public class WinFormsApplicationBuilderTests
             application.Run();
 
             Assert.Equal(["Started", "Stopping", "Stopped"], events);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_ServiceAwareStartupForm_UsesAndDisposesActivationScope()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new();
+            TestScopedService? resolvedService = null;
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(services =>
+                {
+                    resolvedService = (TestScopedService?)services.GetService(typeof(TestScopedService));
+
+                    return new CloseOnShownForm();
+                })
+                .UseHost(host)
+                .Build();
+
+            application.Run();
+
+            Assert.NotNull(resolvedService);
+            Assert.True(resolvedService.IsDisposed);
+            Assert.Equal(1, host.ScopeFactory.CreatedCount);
+            Assert.Equal(1, host.ScopeFactory.DisposedCount);
+        });
+    }
+
+    [WinFormsFact]
+    public void CreateForm_CanceledCloseKeepsScopeUntilApplicationExit()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new();
+            Form? modelessForm = null;
+            using Form startupForm = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(startupForm)
+                .UseHost(host)
+                .Build();
+            startupForm.Shown += (_, _) =>
+            {
+                modelessForm = application.CreateForm(_ => new TestForm());
+                modelessForm.FormClosing += (_, e) => e.Cancel = true;
+                modelessForm.Show();
+                modelessForm.Close();
+
+                Assert.False(modelessForm.IsDisposed);
+                Assert.Equal(0, host.ScopeFactory.DisposedCount);
+
+                startupForm.Close();
+            };
+
+            application.Run();
+
+            Assert.NotNull(modelessForm);
+            Assert.True(modelessForm.IsDisposed);
+            Assert.Equal(2, host.ScopeFactory.CreatedCount);
+            Assert.Equal(2, host.ScopeFactory.DisposedCount);
+        });
+    }
+
+    [WinFormsFact]
+    public void CreateForm_ExplicitDisposeReleasesScopeImmediately()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new();
+            using Form startupForm = new();
+            Form? modelessForm = null;
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(startupForm)
+                .UseHost(host)
+                .Build();
+            startupForm.Shown += (_, _) =>
+            {
+                modelessForm = application.CreateForm(_ => new TestForm());
+                modelessForm.Dispose();
+
+                Assert.Equal(1, host.ScopeFactory.DisposedCount);
+                startupForm.Close();
+            };
+
+            application.Run();
+
+            Assert.NotNull(modelessForm);
+            Assert.True(modelessForm.IsDisposed);
+            Assert.Equal(2, host.ScopeFactory.DisposedCount);
+        });
+    }
+
+    [WinFormsFact]
+    public void ShowDialog_DisposesDialogAndScopeAfterModalLoop()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new();
+            Form? dialog = null;
+            using Form startupForm = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(startupForm)
+                .UseHost(host)
+                .Build();
+            startupForm.Shown += (_, _) =>
+            {
+                application.ShowDialog(services =>
+                {
+                    Assert.NotNull(services.GetService(typeof(TestScopedService)));
+                    CloseOnShownForm modalForm = new();
+                    dialog = modalForm;
+
+                    return modalForm;
+                });
+
+                Assert.NotNull(dialog);
+                Assert.True(dialog.IsDisposed);
+                Assert.Equal(1, host.ScopeFactory.DisposedCount);
+                startupForm.Close();
+            };
+
+            application.Run();
+
+            Assert.Equal(2, host.ScopeFactory.CreatedCount);
+            Assert.Equal(2, host.ScopeFactory.DisposedCount);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_FormFactoryFailureDisposesActivationScope()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm<CloseOnShownForm>(services =>
+                    throw new InvalidOperationException("Form activation failed."))
+                .UseHost(host)
+                .Build();
+
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(application.Run);
+
+            Assert.Equal("Form activation failed.", exception.Message);
+            Assert.Equal(1, host.ScopeFactory.CreatedCount);
+            Assert.Equal(1, host.ScopeFactory.DisposedCount);
+            Assert.Equal(0, host.StartCount);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_ScopeCreationFailureDoesNotStartHost()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new(
+                createScope: () => throw new InvalidOperationException("Scope creation failed."));
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm<TestForm>()
+                .UseHost(host)
+                .Build();
+
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(application.Run);
+
+            Assert.Equal("Scope creation failed.", exception.Message);
+            Assert.Equal(1, host.ScopeFactory.CreatedCount);
+            Assert.Equal(0, host.ScopeFactory.DisposedCount);
+            Assert.Equal(0, host.StartCount);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_UserControlsAndComponentsParticipateInFormScope()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new();
+            ScopedDescendantForm? form = null;
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(services =>
+                {
+                    TestScopedService service =
+                        (TestScopedService)services.GetService(typeof(TestScopedService))!;
+                    form = new(service);
+
+                    return form;
+                })
+                .UseHost(host)
+                .Build();
+
+            application.Run();
+
+            Assert.NotNull(form);
+            Assert.Same(form.Service, form.Child.Service);
+            Assert.Same(form.Service, form.Component.Service);
+            Assert.True(form.Component.ServiceWasAliveOnDispose);
+            Assert.True(form.Service.IsDisposed);
+            Assert.Equal(1, host.ScopeFactory.CreatedCount);
+            Assert.Equal(1, host.ScopeFactory.DisposedCount);
         });
     }
 
@@ -649,6 +849,70 @@ public class WinFormsApplicationBuilderTests
         }
     }
 
+    private sealed class TestScopedService : IDisposable
+    {
+        internal bool IsDisposed { get; private set; }
+
+        public void Dispose() => IsDisposed = true;
+    }
+
+    private sealed class ScopedDescendantForm : Form
+    {
+        private readonly Container _components = new();
+
+        internal ScopedDescendantForm(TestScopedService service)
+        {
+            Service = service;
+            Child = new()
+            {
+                Service = service
+            };
+            Controls.Add(Child);
+
+            Component = new(service);
+            _components.Add(Component);
+            Shown += (_, _) => Close();
+        }
+
+        internal TestScopedService Service { get; }
+
+        internal TestUserControl Child { get; }
+
+        internal TestComponent Component { get; }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _components.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class TestUserControl : UserControl
+    {
+        internal TestScopedService? Service { get; init; }
+    }
+
+    private sealed class TestComponent(TestScopedService service) : Component
+    {
+        internal TestScopedService Service { get; } = service;
+
+        internal bool ServiceWasAliveOnDispose { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ServiceWasAliveOnDispose = !Service.IsDisposed;
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
     private sealed class CloseOnShownForm : Form
     {
         protected override void OnShown(EventArgs e)
@@ -671,19 +935,25 @@ public class WinFormsApplicationBuilderTests
         private readonly List<string>? _events;
         private readonly Func<CancellationToken, Task>? _startAsync;
         private readonly Func<CancellationToken, Task>? _stopAsync;
+        private readonly IServiceProvider _services;
 
         internal TestHost(
             List<string>? events = null,
             Func<CancellationToken, Task>? startAsync = null,
-            Func<CancellationToken, Task>? stopAsync = null)
+            Func<CancellationToken, Task>? stopAsync = null,
+            Func<IServiceScope>? createScope = null)
         {
             _events = events;
             _startAsync = startAsync;
             _stopAsync = stopAsync;
             Lifetime = new TestHostApplicationLifetime();
+            ScopeFactory = new(Lifetime, createScope);
+            _services = new TestServiceProvider(Lifetime, ScopeFactory);
         }
 
         internal TestHostApplicationLifetime Lifetime { get; }
+
+        internal TestServiceScopeFactory ScopeFactory { get; }
 
         internal int StartCount { get; private set; }
 
@@ -691,7 +961,7 @@ public class WinFormsApplicationBuilderTests
 
         internal int DisposeCount { get; private set; }
 
-        public IServiceProvider Services => new TestServiceProvider(Lifetime);
+        public IServiceProvider Services => _services;
 
         public Task StartAsync(CancellationToken cancellationToken = default)
         {
@@ -757,9 +1027,72 @@ public class WinFormsApplicationBuilderTests
         internal void NotifyStopped() => _stopped.Cancel();
     }
 
-    private sealed class TestServiceProvider(IHostApplicationLifetime lifetime) : IServiceProvider
+    private sealed class TestServiceProvider(
+        TestHostApplicationLifetime lifetime,
+        TestServiceScopeFactory scopeFactory,
+        TestScopedService? scopedService = null) : IServiceProvider
     {
         public object? GetService(Type serviceType)
-            => serviceType == typeof(IHostApplicationLifetime) ? lifetime : null;
+            => serviceType switch
+            {
+                _ when serviceType == typeof(IHostApplicationLifetime) => lifetime,
+                _ when serviceType == typeof(IServiceScopeFactory) => scopeFactory,
+                _ when serviceType == typeof(TestScopedService) => scopedService,
+                _ => null
+            };
+    }
+
+    private sealed class TestServiceScopeFactory : IServiceScopeFactory
+    {
+        private readonly Func<IServiceScope>? _createScope;
+        private readonly TestHostApplicationLifetime _lifetime;
+        private int _createdCount;
+        private int _disposedCount;
+
+        internal TestServiceScopeFactory(
+            TestHostApplicationLifetime lifetime,
+            Func<IServiceScope>? createScope)
+        {
+            _lifetime = lifetime;
+            _createScope = createScope;
+        }
+
+        internal int CreatedCount => Volatile.Read(ref _createdCount);
+
+        internal int DisposedCount => Volatile.Read(ref _disposedCount);
+
+        public IServiceScope CreateScope()
+        {
+            Interlocked.Increment(ref _createdCount);
+
+            return _createScope?.Invoke()
+                ?? new TestServiceScope(
+                    this,
+                    new TestServiceProvider(_lifetime, this, new TestScopedService()));
+        }
+
+        internal void OnScopeDisposed() => Interlocked.Increment(ref _disposedCount);
+    }
+
+    private sealed class TestServiceScope(
+        TestServiceScopeFactory owner,
+        IServiceProvider serviceProvider) : IServiceScope
+    {
+        private int _disposed;
+
+        public IServiceProvider ServiceProvider { get; } = serviceProvider;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                if (ServiceProvider.GetService(typeof(TestScopedService)) is IDisposable service)
+                {
+                    service.Dispose();
+                }
+
+                owner.OnScopeDisposed();
+            }
+        }
     }
 }

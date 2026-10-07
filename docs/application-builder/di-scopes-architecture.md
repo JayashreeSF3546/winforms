@@ -1,6 +1,6 @@
 # WinForms Application Builder DI and UI scopes
 
-**Status:** Research recommendation for issue [#14948](https://github.com/dotnet/winforms/issues/14948); not a finalized public API
+**Status:** Research recommendation for [#14948](https://github.com/dotnet/winforms/issues/14948), with the runtime scope prototype implemented for [#14950](https://github.com/dotnet/winforms/issues/14950). The added public signatures are tracked as unshipped and remain subject to API review.
 
 **Parent feature:** [#14947](https://github.com/dotnet/winforms/issues/14947)
 
@@ -22,10 +22,11 @@ separate Designer-approved descendant-assignment mechanism remains open for
 #14951. The root factory candidate is documented in
 [the DI contract prototype](di-contract-prototype.md); it is not an approved API.
 
-Create scopes only at application and Form/dialog activation boundaries.
-UserControls and components participate in their owning Form's scope and never
-create scopes of their own. Scope ownership is explicit and independent of
-window ownership.
+The Generic Host owns the root provider for the application lifetime. Create
+activation scopes only for Form and dialog roots. UserControls and components
+receive explicitly selected dependencies from the owning Form's activation
+factory; they do not create scopes or receive an ambient provider. Scope
+ownership is explicit and independent of native window ownership.
 
 ## Findings from current WinForms behavior
 
@@ -97,22 +98,24 @@ activation, display, or disposal fails.
 
 ## Proposed activation and scope model
 
-These are architectural recommendations for prototyping, not API approvals.
+The activation methods added for #14950 are prototype public APIs recorded in
+`PublicAPI.Unshipped.txt`; they still require API review before release.
 
 | Object/lifetime | Activation and service access | Scope owner and end |
 |---|---|---|
-| Application | The built application owns the root provider/scope. Its custom `ApplicationContext` is part of that application lifetime, not a second root. | The built application disposes the root scope/provider after its windows and components have been torn down. |
-| Modeless Form | Create a Form activation scope, then activate the concrete Form type through a factory that uses constructor injection. | The activation lease/Form owns the scope. Dispose it after an accepted close or explicit Form disposal; keep it alive if closing is canceled. |
-| Modal dialog | Create a fresh dialog activation scope for each modal invocation, activate the dialog, call `ShowDialog`, and dispose both Form and scope in `finally`. | The modal invocation owns the scope. The caller's Form ownership does not transfer DI scope ownership. |
-| UserControl | Keep Designer construction parameterless. An explicitly opted-in UserControl may receive declared dependencies after the owning Form has completed `InitializeComponent`. | It participates in the current owning Form scope. It creates no scope. |
-| Component | Continue to support `IContainer`/Designer construction. An explicitly opted-in component may receive declared dependencies from its owning Form activation. | It participates in the Form scope and is disposed by its component container before that Form scope. It creates no scope. |
+| Application | The Generic Host owns the root provider and application lifetime. A custom `ApplicationContext` is part of that lifetime, not a second DI root. | The application disposes activated Forms and their scopes before disposing the host. The host disposes its root provider when the application is disposed. |
+| Startup or modeless Form | Create a Form activation scope and invoke the service-aware factory. `CreateForm` returns the modeless Form without showing it. | The Form's scope is disposed when its `Disposed` event is raised, after child controls and container-owned components are torn down. A canceled close keeps both alive. Any activated Forms remaining when the application loop exits are disposed by the application. |
+| Modal dialog | `ShowDialog` creates a distinct activation scope, invokes the factory, shows the dialog, and disposes the Form and scope after the modal loop, including failure paths. | The modal invocation owns cleanup. The caller's Form ownership does not transfer DI scope ownership. |
+| UserControl | Keep Designer construction parameterless. The root Form factory may explicitly assign declared dependencies after normal control construction. | It participates through dependencies from the owning Form's activation. It receives no automatic provider and creates no scope. |
+| Component | Continue to support `IContainer`/Designer construction. The root Form factory may explicitly assign declared dependencies to components it owns. | Its owner disposes it before the Form's `Disposed` event and Form scope. It receives no automatic provider and creates no scope. |
 | Inherited Form/control | Activate the concrete runtime derived Form once. Base and derived controls/components share that Form's scope. | The derived Form owns the single scope; inherited members do not create additional scopes. |
 
 ### Constructor, optional, and fallback behavior
 
-- Use constructor injection at runtime activation roots (startup/modeless
-  Forms and modal dialogs). Resolve from the scope created for that activation,
-  not from a static or ambient provider.
+- Use a service-aware factory at runtime activation roots (startup/modeless
+  Forms and modal dialogs). Applications may use constructor injection inside
+  the factory, resolving from that activation's scope rather than a static or
+  ambient provider.
 - Keep the existing parameterless Designer construction path. Constructor
   injection does not make a DI dependency mandatory for a type's design-time
   constructor.
@@ -138,9 +141,12 @@ passed explicitly; they must not be obtained through a parent or global
 service locator.
 
 An application context owns the application lifetime, not a separate service
-scope. Forms it creates should use the same scope-owning activation path as
-other Forms. Modeless windows each own their activation scopes, even when one
-window is the native owner of another.
+scope. Its initial `MainForm`, when present, receives a Form scope. Forms
+created later by custom context code should use `CreateForm` or `ShowDialog`;
+direct `new Form()` calls remain outside builder activation. Modeless windows
+each own their activation scopes, even when one window is the native owner of
+another. With no Generic Host, the factory receives an empty provider; when a
+host is supplied, its provider must expose `IServiceScopeFactory`.
 
 ## Alternatives evaluated
 
@@ -163,9 +169,9 @@ window is the native owner of another.
    generated controls/components without changing Designer output, or whether
    a generated hookup is required. #14951 owns Designer integration and
    round-trip validation.
-3. #14950 owns implementing activation/scope ownership and disposal. This
-   research defines the ownership invariants but intentionally adds no runtime
-   code or tests for those behaviors.
+3. #14950 implements the Form/dialog activation scopes and disposal contract.
+   Automatic dependency assignment for Designer-created descendants remains
+   deferred to #14951.
 4. Dynamic reparenting of a UserControl across Forms with different scopes
    needs an explicit policy before assignment semantics are finalized. The
    control must not silently retain a stale scope or create a new one.

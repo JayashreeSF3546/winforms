@@ -3,6 +3,7 @@
 
 using System.Runtime.ExceptionServices;
 using System.Windows.Forms;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace Microsoft.Extensions.WinForms;
@@ -21,6 +22,8 @@ namespace Microsoft.Extensions.WinForms;
 public sealed class WinFormsApplication : IDisposable
 {
     private readonly Lock _stopLock = new();
+    private readonly Lock _formScopesLock = new();
+    private readonly List<WinFormsFormScope> _formScopes = [];
     private readonly TaskCompletionSource _hostStoppedSource =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private WinFormsApplicationOptions? _options;
@@ -159,6 +162,15 @@ public sealed class WinFormsApplication : IDisposable
                 }
             }
 
+            try
+            {
+                DisposeActivatedForms();
+            }
+            catch (Exception exception)
+            {
+                failure = CombineFailures(failure, exception);
+            }
+
             if (Volatile.Read(ref _hostStartAttempted) != 0
                 && Volatile.Read(ref _hostStopped) == 0)
             {
@@ -247,6 +259,82 @@ public sealed class WinFormsApplication : IDisposable
     }
 
     /// <summary>
+    ///  Creates a modeless form using a new activation scope.
+    /// </summary>
+    /// <typeparam name="TForm">The type of form to create.</typeparam>
+    /// <param name="factory">A factory that creates the form using its activation services.</param>
+    /// <returns>
+    ///  The activated form. Its scope remains alive until the form is disposed;
+    ///  the application disposes forms still open when its message loop ends.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">The application has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  The application is not running on its UI thread, its host cannot create
+    ///  scopes, or the factory returned null.
+    /// </exception>
+    public TForm CreateForm<TForm>(Func<IServiceProvider, TForm> factory)
+        where TForm : Form
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        EnsureActivationThread();
+
+        return ActivateForm(factory, out _);
+    }
+
+    /// <summary>
+    ///  Shows a modal form using a new activation scope and disposes both the
+    ///  form and scope when the modal operation completes.
+    /// </summary>
+    /// <typeparam name="TForm">The type of form to create.</typeparam>
+    /// <param name="factory">A factory that creates the form using its activation services.</param>
+    /// <param name="owner">The window that owns the modal form, or null.</param>
+    /// <returns>The dialog result returned by <see cref="Form.ShowDialog(IWin32Window?)"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">The application has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  The application is not running on its UI thread, its host cannot create
+    ///  scopes, or the factory returned null.
+    /// </exception>
+    public DialogResult ShowDialog<TForm>(
+        Func<IServiceProvider, TForm> factory,
+        IWin32Window? owner = null)
+        where TForm : Form
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        EnsureActivationThread();
+
+        TForm form = ActivateForm(factory, out WinFormsFormScope formScope);
+        DialogResult result = DialogResult.None;
+        Exception? failure = null;
+
+        try
+        {
+            result = form.ShowDialog(owner);
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+
+        try
+        {
+            formScope.DisposeForm();
+        }
+        catch (Exception exception)
+        {
+            failure = CombineFailures(failure, exception);
+        }
+
+        if (failure is not null)
+        {
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+
+        return result;
+    }
+
+    /// <summary>
     ///  Stops the application if it is running and releases the associated host.
     /// </summary>
     public void Dispose()
@@ -276,27 +364,223 @@ public sealed class WinFormsApplication : IDisposable
     internal WinFormsApplicationOptions Options
         => _options ?? throw new ObjectDisposedException(nameof(WinFormsApplication));
 
-    private static ApplicationContext CreateApplicationContext(WinFormsApplicationOptions options)
+    private ApplicationContext CreateApplicationContext(WinFormsApplicationOptions options)
     {
+        if (options.StartupServiceFormFactory is not null)
+        {
+            return new ApplicationContext(ActivateForm(options.StartupServiceFormFactory, out _));
+        }
+
         if (options.StartupFormFactory is not null)
         {
-            return new ApplicationContext(options.StartupFormFactory());
+            return new ApplicationContext(
+                ActivateForm(_ => options.StartupFormFactory(), out _));
         }
 
         if (options.StartupForm is not null)
         {
+            AttachFormScope(options.StartupForm);
+
             return new ApplicationContext(options.StartupForm);
         }
 
         if (options.ApplicationContextFactory is not null)
         {
-            return options.ApplicationContextFactory()
+            ApplicationContext context = options.ApplicationContextFactory()
                 ?? throw new InvalidOperationException("The application context factory returned null.");
+            AttachMainFormScope(context);
+
+            return context;
         }
 
-        return options.ApplicationContext
+        ApplicationContext applicationContext = options.ApplicationContext
             ?? throw new InvalidOperationException(
                 "Configure a startup form or application context before running the application.");
+        AttachMainFormScope(applicationContext);
+
+        return applicationContext;
+    }
+
+    private TForm ActivateForm<TForm>(
+        Func<IServiceProvider, TForm> factory,
+        out WinFormsFormScope formScope)
+        where TForm : Form
+    {
+        formScope = CreateFormScope();
+        TForm? form = null;
+
+        try
+        {
+            form = factory(formScope.Services)
+                ?? throw new InvalidOperationException("The form factory returned null.");
+            formScope.Attach(form);
+
+            return form;
+        }
+        catch (Exception activationException)
+        {
+            Exception failure = activationException;
+
+            if (form is not null)
+            {
+                try
+                {
+                    form.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    failure = CombineFailures(failure, exception)!;
+                }
+            }
+
+            try
+            {
+                formScope.Dispose();
+            }
+            catch (Exception exception)
+            {
+                failure = CombineFailures(failure, exception)!;
+            }
+
+            ExceptionDispatchInfo.Capture(failure).Throw();
+            throw;
+        }
+    }
+
+    private WinFormsFormScope CreateFormScope()
+    {
+        IServiceScope? serviceScope = null;
+        IServiceProvider services = EmptyServiceProvider.Instance;
+
+        if (_host is not null)
+        {
+            IServiceProvider rootServices = _host.Services;
+
+            if (rootServices.GetService(typeof(IServiceScopeFactory)) is not IServiceScopeFactory scopeFactory)
+            {
+                throw new InvalidOperationException(
+                    "The configured host service provider does not support creating activation scopes.");
+            }
+
+            serviceScope = scopeFactory.CreateScope()
+                ?? throw new InvalidOperationException("The service scope factory returned null.");
+
+            try
+            {
+                services = serviceScope.ServiceProvider
+                    ?? throw new InvalidOperationException("The service scope returned a null service provider.");
+            }
+            catch (Exception activationException)
+            {
+                Exception failure = activationException;
+
+                try
+                {
+                    serviceScope.Dispose();
+                }
+                catch (Exception disposalException)
+                {
+                    failure = CombineFailures(failure, disposalException)!;
+                }
+
+                ExceptionDispatchInfo.Capture(failure).Throw();
+                throw;
+            }
+        }
+
+        WinFormsFormScope formScope = new(serviceScope, services, OnFormScopeDisposed);
+
+        lock (_formScopesLock)
+        {
+            _formScopes.Add(formScope);
+        }
+
+        return formScope;
+    }
+
+    private void AttachFormScope(Form form)
+    {
+        WinFormsFormScope formScope = CreateFormScope();
+
+        try
+        {
+            formScope.Attach(form);
+        }
+        catch (Exception exception)
+        {
+            Exception failure = exception;
+
+            try
+            {
+                formScope.Dispose();
+            }
+            catch (Exception disposalException)
+            {
+                failure = CombineFailures(failure, disposalException)!;
+            }
+
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+    }
+
+    private void AttachMainFormScope(ApplicationContext applicationContext)
+    {
+        if (applicationContext.MainForm is Form mainForm)
+        {
+            AttachFormScope(mainForm);
+        }
+    }
+
+    private void EnsureActivationThread()
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeRequested) != 0, this);
+
+        if (Volatile.Read(ref _runState) != 1)
+        {
+            throw new InvalidOperationException("Forms can only be activated while the application is running.");
+        }
+
+        if (!ReferenceEquals(Thread.CurrentThread, _uiThread))
+        {
+            throw new InvalidOperationException("Forms must be activated on the application UI thread.");
+        }
+    }
+
+    private void OnFormScopeDisposed(WinFormsFormScope formScope)
+    {
+        lock (_formScopesLock)
+        {
+            _formScopes.Remove(formScope);
+        }
+    }
+
+    private void DisposeActivatedForms()
+    {
+        WinFormsFormScope[] formScopes;
+
+        lock (_formScopesLock)
+        {
+            formScopes = [.. _formScopes];
+        }
+
+        Exception? failure = null;
+
+        foreach (WinFormsFormScope formScope in formScopes)
+        {
+            try
+            {
+                formScope.DisposeForm();
+            }
+            catch (Exception exception)
+            {
+                failure = CombineFailures(failure, exception);
+            }
+        }
+
+        if (failure is not null)
+        {
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
     }
 
     private void InitializeHostLifetime()
@@ -581,5 +865,23 @@ public sealed class WinFormsApplication : IDisposable
     {
         IHost? host = Interlocked.Exchange(ref _host, null);
         host?.Dispose();
+    }
+
+    /// <summary>
+    ///  Provides no services when the application is not associated with a host.
+    /// </summary>
+    private sealed class EmptyServiceProvider : IServiceProvider
+    {
+        /// <summary>
+        ///  Gets the shared empty service provider.
+        /// </summary>
+        internal static EmptyServiceProvider Instance { get; } = new();
+
+        /// <summary>
+        ///  Returns null because no services are registered without a host.
+        /// </summary>
+        /// <param name="serviceType">The requested service type.</param>
+        /// <returns>Always null.</returns>
+        public object? GetService(Type serviceType) => null;
     }
 }
