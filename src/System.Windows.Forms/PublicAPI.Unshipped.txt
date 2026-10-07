@@ -27,6 +27,7 @@ Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseStartupForm<TForm>()
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseStartupForm<TForm>(System.Func<System.IServiceProvider!, TForm!>! factory) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseStartupForm(System.Windows.Forms.Form! startupForm) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseHost(Microsoft.Extensions.Hosting.IHost! host) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.EnableExceptionLogging() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddUserSettings() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddUserSettings(Microsoft.Extensions.WinForms.UserSettingsOptions! options) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddUserSettings(Microsoft.Extensions.WinForms.UserSettingsOptions! options, bool includeInConfiguration, params string![]! settingKeys) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!

@@ -101,6 +101,37 @@ settingKeys: ["Theme"])` exposes only selected values under `UserSettings` and
 publishes configuration reload notifications after committed changes. Do not
 store secrets in settings or project sensitive preferences to configuration.
 
+## Logging and exception integration (#14959)
+
+`WinFormsApplicationBuilder` exposes the Generic Host `ILoggingBuilder`, and
+the host provides the standard `ILogger<T>` services to application services
+and Forms. Configure providers and filters through `builder.Logging`; no file
+or telemetry provider is added automatically. Applications may add the Debug
+provider when its package is referenced, or choose a file provider explicitly.
+For file logging, use an established provider and configure a per-user location,
+restrictive file permissions, rotation, and retention. Exception messages and
+stack traces can contain application data, so provider access and retention
+remain the application's responsibility.
+
+Call `builder.EnableExceptionLogging()` to opt in to routing
+`Application.ThreadException`, `AppDomain.UnhandledException`, and
+`TaskScheduler.UnobservedTaskException` to `ILogger<WinFormsApplication>`.
+When enabled, a UI-thread exception is logged and treated as handled; WinForms'
+default exception dialog is not shown. Unobserved task exceptions are logged
+without calling `SetObserved`, and terminating CLR exceptions are logged as
+critical without changing process termination. The integration is disabled by
+default; applications that require a user-facing UI exception flow should
+install their own `Application.ThreadException` handler.
+
+Startup/runtime failures are logged when exception logging is enabled and are
+still rethrown after cleanup. The host is stopped and disposed after the
+message loop exits, releasing host-owned logging providers so their normal
+`Dispose` flush behavior runs; disposing an application before `Run` also
+releases the host. Providers supplied as preconstructed instances remain the
+caller's responsibility when their registration does not transfer ownership.
+Provider-specific asynchronous flushing is not guaranteed by `ILogger` or
+`IHost.Dispose`.
+
 ## Lifetime contract
 
 The application exposes one lifetime object with `ApplicationStarted`,
@@ -110,6 +141,10 @@ startup does not synthesize an `ApplicationStarted` notification. Event-handler
 exceptions propagate to the runtime coordinator, which must preserve cleanup
 and failure semantics when it is implemented.
 
+When a host is configured, it starts before the message loop and is stopped
+when the loop exits. The application owns the host and disposes it after
+shutdown; disposing the application before `Run` also releases the host.
+
 ## Deferred to issue #14943
 
 The runtime added by #14943 runs on the calling UI thread, installs the
@@ -117,7 +152,8 @@ WinForms synchronization context before creating a deferred startup form, and
 uses the existing `Application.Run(ApplicationContext)` message loop. A
 configured `IHost` is started before the WinForms started notification and is
 stopped before an intercepted thread exit is allowed to unwind the loop. The
-application owns and disposes a host passed to `UseHost`. Host-originated
+application owns the host passed to `UseHost`, stopping and disposing it after
+the message loop exits. Host-originated
 stopping notifications are marshalled to the UI thread while the coordinator
 is active.
 

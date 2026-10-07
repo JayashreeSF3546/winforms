@@ -259,6 +259,53 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
     }
 
     /// <summary>
+    ///  Enables opt-in logging for unhandled WinForms and CLR exceptions.
+    /// </summary>
+    /// <returns>This builder.</returns>
+    /// <remarks>
+    ///  <para>
+    ///   When the application runs, exceptions raised through
+    ///   <see cref="Application.ThreadException"/>,
+    ///   <see cref="AppDomain.UnhandledException"/>, and
+    ///   <see cref="TaskScheduler.UnobservedTaskException"/> are forwarded to
+    ///   the host's <see cref="ILogger{TCategoryName}"/>. The integration is
+    ///   disabled by default.
+    ///  </para>
+    ///  <para>
+    ///   Subscribing to <see cref="Application.ThreadException"/> installs
+    ///   custom WinForms exception handling. UI-thread exceptions are logged
+    ///   and treated as handled; the default WinForms exception dialog is not
+    ///   shown. Applications that need user-facing error UI should provide
+    ///   their own <see cref="Application.ThreadException"/> handler instead.
+    ///  </para>
+    ///  <para>
+    ///   Unobserved task exceptions are logged without calling
+    ///   <see cref="UnobservedTaskExceptionEventArgs.SetObserved"/>.
+    ///   Logging includes exception details, which may contain application
+    ///   data; configure providers and retention accordingly.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    ///  The builder has already been built.
+    /// </exception>
+    public WinFormsApplicationBuilder EnableExceptionLogging()
+    {
+        if (_hostBuilt)
+        {
+            throw new InvalidOperationException("Exception logging must be configured before the builder is built.");
+        }
+
+        if (_options.Host is null)
+        {
+            _ = Logging;
+        }
+
+        _options.EnableExceptionLogging = true;
+
+        return this;
+    }
+
+    /// <summary>
     ///  Registers the default JSON user-settings service.
     /// </summary>
     /// <returns>This builder.</returns>

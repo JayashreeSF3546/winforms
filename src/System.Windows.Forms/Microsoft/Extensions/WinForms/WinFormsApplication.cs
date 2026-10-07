@@ -5,6 +5,7 @@ using System.Runtime.ExceptionServices;
 using System.Windows.Forms;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Microsoft.Extensions.WinForms;
 
@@ -124,12 +125,25 @@ public sealed class WinFormsApplication : IDisposable
         SynchronizationContext? originalSynchronizationContext = SynchronizationContext.Current;
         bool installedSynchronizationContext = false;
         Exception? failure = null;
+        WinFormsExceptionLogging? exceptionLogging = null;
         ApplicationContext? applicationContext = null;
 
         _uiThread = Thread.CurrentThread;
 
         try
         {
+            if (options.EnableExceptionLogging)
+            {
+                IServiceProvider services = (_host ?? throw new InvalidOperationException(
+                    "Exception logging requires a configured Generic Host.")).Services;
+                ILogger<WinFormsApplication> logger =
+                    services.GetService(typeof(ILogger<WinFormsApplication>)) as ILogger<WinFormsApplication>
+                    ?? throw new InvalidOperationException(
+                        "The configured Generic Host does not provide ILogger<WinFormsApplication>.");
+                exceptionLogging = new WinFormsExceptionLogging(logger);
+                exceptionLogging.Start();
+            }
+
             WindowsFormsSynchronizationContext.AutoInstall = true;
             WindowsFormsSynchronizationContext.InstallIfNeeded();
             installedSynchronizationContext =
@@ -227,15 +241,17 @@ public sealed class WinFormsApplication : IDisposable
             }
 
             WindowsFormsSynchronizationContext.AutoInstall = autoInstall;
-            Volatile.Write(ref _runState, 2);
 
             failure = CombineFailures(failure, Interlocked.Exchange(ref _runtimeException, null));
 
-            if (Volatile.Read(ref _disposeRequested) != 0)
+            if (exceptionLogging is not null)
             {
                 try
                 {
-                    DisposeHost();
+                    if (failure is not null)
+                    {
+                        exceptionLogging.LogApplicationFailure(failure);
+                    }
                 }
                 catch (Exception exception)
                 {
@@ -243,9 +259,32 @@ public sealed class WinFormsApplication : IDisposable
                 }
                 finally
                 {
-                    Interlocked.Exchange(ref _options, null);
+                    try
+                    {
+                        exceptionLogging.Dispose();
+                    }
+                    catch (Exception exception)
+                    {
+                        failure = CombineFailures(failure, exception);
+                    }
                 }
             }
+
+            try
+            {
+                DisposeHost();
+            }
+            catch (Exception exception)
+            {
+                failure = CombineFailures(failure, exception);
+            }
+
+            if (Volatile.Read(ref _disposeRequested) != 0)
+            {
+                Interlocked.Exchange(ref _options, null);
+            }
+
+            Volatile.Write(ref _runState, 2);
         }
 
         if (failure is not null)
@@ -357,6 +396,12 @@ public sealed class WinFormsApplication : IDisposable
     /// <summary>
     ///  Stops the application if it is running and releases the associated host.
     /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   The host is stopped and disposed when the message loop exits.
+    ///   Disposing an application that has not run also releases its host.
+    ///  </para>
+    /// </remarks>
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposeRequested, 1) != 0)
@@ -884,7 +929,15 @@ public sealed class WinFormsApplication : IDisposable
     private void DisposeHost()
     {
         IHost? host = Interlocked.Exchange(ref _host, null);
-        host?.Dispose();
+
+        try
+        {
+            host?.Dispose();
+        }
+        finally
+        {
+            _options?.Host = null;
+        }
     }
 
     /// <summary>

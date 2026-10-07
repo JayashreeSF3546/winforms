@@ -208,6 +208,13 @@ imports user-scoped values only, and leaves the original store untouched.
 - Resolve `ILogger`, `ILogger<T>`, and `ILoggerFactory` from the host container.
   Reuse the host's standard filters and providers, including provider
   extensions. Do not create a WinForms logger factory alongside the host.
+- `WinFormsApplicationBuilder.EnableExceptionLogging()` is an explicit opt-in
+  to forward `Application.ThreadException`, `AppDomain.UnhandledException`,
+  and `TaskScheduler.UnobservedTaskException` to
+  `ILogger<WinFormsApplication>`. The default does not subscribe to global
+  exception events. The UI-thread handler logs and accepts the exception in
+  place of WinForms' default dialog; it does not set unobserved task exceptions
+  as observed or alter process termination.
 - Do not add a file or telemetry provider automatically. File logging is an
   application/provider choice whose location, ACLs, rotation, retention, and
   failure policy must be documented. A GUI process must not create a file or
@@ -227,13 +234,18 @@ imports user-scoped values only, and leaves the original store untouched.
 | Startup/configuration failure | Propagate synchronously to the caller after cleanup; log only if a logger is available and the app has opted into that behavior. |
 | Hosted/background-service failure | Use Generic Host failure behavior and cancellation. Log diagnostic context without swallowing the error or leaving a failed service silently running. |
 
-- Host stop and disposal must complete before the application releases its
-  logging provider graph. Provider-specific flush/disposal semantics remain
-  owned by the provider and `IHost`; the WinForms layer must not promise a
-  universal flush API that `ILogger` does not define.
+- Host stop and disposal complete after the message loop exits, before the
+  application releases its logging provider graph. Runtime failures are
+  logged when exception logging is enabled and still propagate after cleanup.
+  Provider-specific flush/disposal semantics remain owned by the provider and
+  `IHost`; preconstructed provider instances remain caller-owned unless their
+  registration transfers ownership. The WinForms layer does not promise a
+  universal flush API that `ILogger` does not define. Host-owned providers with
+  a synchronous flush-on-dispose contract are released during application
+  shutdown.
 
-The event subscriptions, exception policy, and shutdown-flush tests are owned
-by #14959, not this architecture-only issue.
+The opt-in event subscriptions, exception policy, and provider-disposal
+behavior are implemented under #14959.
 
 ## Hosted services and health diagnostics
 
