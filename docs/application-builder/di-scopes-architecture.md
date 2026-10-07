@@ -9,20 +9,18 @@
 ## Decision summary
 
 Keep design-time construction independent from the runtime application's service
-container. Use explicit, scope-owning activation factories for runtime Form
-roots and modal dialogs; constructor injection is appropriate at those roots.
-Preserve the parameterless constructors used by Designer-generated code and
-existing applications.
+container. Use an explicit runtime activation factory for Form roots; the
+activation coordinator supplies that activation's provider, and constructor
+injection is appropriate at the root. Preserve the parameterless constructors
+used by Designer-generated code and existing applications.
 
 Designer-created child controls and nonvisual components are constructed inside
-`InitializeComponent`, not by the application factory. They therefore need a
-separate, opt-in runtime service-assignment mechanism if they are to receive
-dependencies. Prefer an explicit assignment of the dependencies they declare;
-do not give components a general `IServiceProvider`, a static provider, or an
-ambient provider. The exact contract and the mechanism for discovering every
-designer-created component remain for #14949 to prototype and validate with the
-Designer team. Do not add Designer code generation or runtime injection code in
-#14948.
+`InitializeComponent`, not by the application factory. The root factory does
+not inject into those descendants. Do not give components a global or ambient
+provider, or expose arbitrary lookup as the default assignment contract. A
+separate Designer-approved descendant-assignment mechanism remains open for
+#14951. The root factory candidate is documented in
+[the DI contract prototype](di-contract-prototype.md); it is not an approved API.
 
 Create scopes only at application and Form/dialog activation boundaries.
 UserControls and components participate in their owning Form's scope and never
@@ -178,6 +176,7 @@ window is the native owner of another.
 - `D:\WinForms\API builder\BuilderAPI_ModernizationGoals.docx`
 - `D:\WinForms\API builder\BuilderAPI_Proposal.docx`
 - `D:\WinForms\API builder\BuilderAPI_Rationale.docx`
+- [DI contract prototype](di-contract-prototype.md)
 - WinForms designer construction, serialization, inheritance, reload, undo,
   Form close/modal, and Control disposal code cited above.
 - Issues [#14947](https://github.com/dotnet/winforms/issues/14947) and

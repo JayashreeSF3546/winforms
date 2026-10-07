@@ -6,6 +6,8 @@
 
 **DI and scope research:** [Designer-safe DI and UI scopes](di-scopes-architecture.md)
 
+**DI contract prototype:** [runtime factory contract](di-contract-prototype.md)
+
 **Parent proposal:** [#14082](https://github.com/dotnet/winforms/issues/14082)
 
 ## Contract boundary
