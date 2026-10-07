@@ -145,6 +145,33 @@ When a host is configured, it starts before the message loop and is stopped
 when the loop exits. The application owns the host and disposes it after
 shutdown; disposing the application before `Run` also releases the host.
 
+## Hosted services and health diagnostics (#14960)
+
+Register ordinary `IHostedService` and `BackgroundService` implementations
+through `builder.Services`; the Generic Host controls their startup, reverse
+order shutdown, and cancellation. Startup callbacks run off the UI thread and
+must return promptly. Long-running work belongs after the first incomplete
+`await` in `BackgroundService.ExecuteAsync`, and must observe its stopping
+token. Shutdown remains asynchronous while the WinForms message loop pumps
+messages. Do not block the UI thread waiting for service work or access
+controls from a hosted service.
+
+For explicit UI interaction, capture the WinForms synchronization context after
+it is installed and post work asynchronously; do not use synchronous
+cross-thread marshaling or wait for the UI thread from a service. These APIs
+do not install a second UI thread, create a custom message pump, or marshal
+arbitrary service callbacks automatically.
+
+Health checks are optional: reference
+`Microsoft.Extensions.Diagnostics.HealthChecks`, register checks through
+`builder.Services.AddHealthChecks()`, and resolve `HealthCheckService` from
+the host to call `CheckHealthAsync` where the application chooses. No checks
+are polled automatically, no HTTP endpoint is opened, and a failed report
+does not stop the application or show modal UI. Pass cancellation tokens to
+checks and run potentially blocking checks away from the UI thread. The
+application may log, display, or export reports through an explicitly chosen
+integration.
+
 ## Deferred to issue #14943
 
 The runtime added by #14943 runs on the calling UI thread, installs the
