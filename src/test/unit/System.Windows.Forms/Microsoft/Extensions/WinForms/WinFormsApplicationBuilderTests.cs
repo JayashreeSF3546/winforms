@@ -103,6 +103,42 @@ public class WinFormsApplicationBuilderTests
     }
 
     [Fact]
+    public void Configuration_UserSecretsProviderLoadsValuesFromItsIsolatedStore()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"WinFormsSecrets-{Guid.NewGuid():N}");
+        string userSecretsId = Guid.NewGuid().ToString("N");
+        string secretsDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "Microsoft",
+            "UserSecrets",
+            userSecretsId);
+        Directory.CreateDirectory(directory);
+        Directory.CreateDirectory(secretsDirectory);
+        File.WriteAllText(
+            Path.Combine(secretsDirectory, "secrets.json"),
+            """{"BuilderTests":{"Secret":"from-user-secrets"}}""");
+        File.WriteAllText(
+            Path.Combine(directory, "appsettings.json"),
+            """{"BuilderTests":{"Secret":"from-appsettings"}}""");
+
+        try
+        {
+            WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder(
+                new HostApplicationBuilderSettings { ContentRootPath = directory });
+            IConfiguration configuration = builder.Configuration;
+            builder.Configuration.AddUserSecrets(userSecretsId);
+            using WinFormsApplication application = builder.UseApplicationContext().Build();
+
+            Assert.Equal("from-user-secrets", configuration["BuilderTests:Secret"]);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+            Directory.Delete(secretsDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Configuration_ReloadUpdatesOptionsMonitorAndSnapshot()
     {
         string directory = Path.Combine(Path.GetTempPath(), $"WinFormsBuilder-{Guid.NewGuid():N}");

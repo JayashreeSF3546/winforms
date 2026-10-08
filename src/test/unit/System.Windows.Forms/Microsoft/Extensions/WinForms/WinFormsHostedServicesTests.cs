@@ -143,6 +143,34 @@ public class WinFormsHostedServicesTests
         });
     }
 
+    [Fact]
+    public void HealthChecks_ExceptionIsCapturedAsUnhealthyReport()
+    {
+        RunOnStaThread(() =>
+        {
+            HealthCheckRunner? runner = null;
+            WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder();
+            builder.Services
+                .AddHealthChecks()
+                .AddCheck(
+                    "throws",
+                    () => throw new InvalidOperationException("Health check failed."));
+            builder.Services.AddSingleton<IHostedService>(services =>
+                runner = new(services.GetRequiredService<HealthCheckService>()));
+            using Form form = new();
+            form.Shown += (_, _) => form.Close();
+            using WinFormsApplication application = builder
+                .UseStartupForm(form)
+                .Build();
+
+            application.Run();
+
+            Assert.NotNull(runner);
+            Assert.Equal(HealthStatus.Unhealthy, runner.Report?.Status);
+            Assert.IsType<InvalidOperationException>(runner.Report?.Entries["throws"].Exception);
+        });
+    }
+
     private static void RunOnStaThread(Action action)
     {
         Exception? failure = null;

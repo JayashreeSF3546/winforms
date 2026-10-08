@@ -42,6 +42,18 @@ public class WinFormsExceptionLoggingTests
     }
 
     [WinFormsFact]
+    public void ExceptionEvents_LoggingProviderFailureDoesNotEscapeExceptionHandler()
+    {
+        using WinFormsExceptionLogging logging =
+            new(new ThrowingLogger(new InvalidOperationException("Provider failed.")));
+        logging.Start();
+
+        logging.OnThreadException(
+            sender: null,
+            new ThreadExceptionEventArgs(new InvalidOperationException("UI failure.")));
+    }
+
+    [WinFormsFact]
     public void EnableExceptionLogging_LogsRuntimeFailuresAndDisposesProviderAfterShutdown()
     {
         RunOnStaThread(() =>
@@ -156,6 +168,30 @@ public class WinFormsExceptionLoggingTests
         {
             records.Add(new LogRecord(categoryName, logLevel, formatter(state, exception), exception));
         }
+    }
+
+    /// <summary>
+    ///  Throws when an exception event is logged.
+    /// </summary>
+    private sealed class ThrowingLogger(Exception failure) : ILogger<WinFormsApplication>
+    {
+        /// <inheritdoc/>
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+            => null;
+
+        /// <inheritdoc/>
+        public bool IsEnabled(LogLevel logLevel)
+            => true;
+
+        /// <inheritdoc/>
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => throw failure;
     }
 
     /// <summary>

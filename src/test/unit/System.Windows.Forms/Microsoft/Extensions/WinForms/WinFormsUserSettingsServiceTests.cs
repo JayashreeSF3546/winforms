@@ -138,6 +138,37 @@ public class WinFormsUserSettingsServiceTests
     }
 
     [Fact]
+    public async Task UpgradeAsync_MigrationFailureLeavesOriginalFileUnchanged()
+    {
+        string directory = CreateTemporaryDirectory();
+        string filePath = Path.Combine(directory, "settings.json");
+        string original = """{"schemaVersion":1,"settings":{"Name":"original"}}""";
+        File.WriteAllText(filePath, original);
+        UserSettingsOptions options = new()
+        {
+            FilePath = filePath,
+            SchemaVersion = 2
+        };
+        options.Migrations.Add(new FailingMigration());
+        JsonUserSettingsService service = new(options);
+
+        try
+        {
+            InvalidOperationException exception =
+                await Assert.ThrowsAsync<InvalidOperationException>(
+                    () => service.UpgradeAsync(TestContext.Current.CancellationToken));
+
+            Assert.Equal("Migration failed.", exception.Message);
+            Assert.Equal(original, File.ReadAllText(filePath));
+            Assert.False(File.Exists($"{filePath}.bak"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task LoadAsync_FutureSchemaIsReportedWithoutDowngrading()
     {
         string directory = CreateTemporaryDirectory();
@@ -489,6 +520,19 @@ public class WinFormsUserSettingsServiceTests
             settings["Name"] = "migrated";
             return settings;
         }
+    }
+
+    /// <summary>
+    ///  Fails deterministically to verify migration writes are atomic.
+    /// </summary>
+    private sealed class FailingMigration : IUserSettingsMigration
+    {
+        /// <inheritdoc/>
+        public int FromVersion => 1;
+
+        /// <inheritdoc/>
+        public JsonObject Migrate(JsonObject settings)
+            => throw new InvalidOperationException("Migration failed.");
     }
 
     /// <summary>
