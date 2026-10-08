@@ -47,6 +47,11 @@ internal sealed class WinFormsApplicationOptions
     internal IHost? Host { get; set; }
 
     /// <summary>
+    ///  Gets or sets whether WinForms and CLR exceptions are forwarded to the host logger.
+    /// </summary>
+    internal bool EnableExceptionLogging { get; set; }
+
+    /// <summary>
     ///  Creates a copy of these options.
     /// </summary>
     /// <returns>A new options instance with the same configured startup target.</returns>
@@ -59,6 +64,7 @@ internal sealed class WinFormsApplicationOptions
             ApplicationContextFactory = ApplicationContextFactory,
             ApplicationContext = ApplicationContext,
             StartupObjectThread = StartupObjectThread,
-            Host = Host
+            Host = Host,
+            EnableExceptionLogging = EnableExceptionLogging
         };
 }

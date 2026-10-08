@@ -5,8 +5,10 @@ using System.ComponentModel;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.WinForms;
 
 namespace System.Windows.Forms.Tests;
@@ -27,6 +29,199 @@ public class WinFormsApplicationBuilderTests
         WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder();
 
         Assert.NotNull(builder);
+    }
+
+    [Fact]
+    public void ApplicationCreateBuilder_WithArguments_AddsCommandLineConfiguration()
+    {
+        string[] args = ["--BuilderTests:CommandLine=loaded"];
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder(args);
+        using WinFormsApplication application = builder.UseApplicationContext().Build();
+
+        Assert.Equal("loaded", builder.Configuration["BuilderTests:CommandLine"]);
+    }
+
+    [Fact]
+    public void CreateBuilder_WithSettings_UsesApplicationDirectoryAsDefaultContentRoot()
+    {
+        WinFormsApplicationBuilder builder = WinFormsApplicationBuilder.CreateBuilder(
+            new HostApplicationBuilderSettings());
+        using WinFormsApplication application = builder.UseApplicationContext().Build();
+
+        Assert.Equal(AppContext.BaseDirectory, builder.Environment.ContentRootPath);
+    }
+
+    [Fact]
+    public void Configuration_UsesEnvironmentJsonEnvironmentVariablesCommandLineAndAdditionalProviders()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"WinFormsBuilder-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        const string environmentVariable = "WINFORMS_BUILDER_TESTS__VALUE";
+        const string environmentKey = "WINFORMS_BUILDER_TESTS__FROMENVIRONMENT";
+        string? originalValue = Environment.GetEnvironmentVariable(environmentVariable);
+        string? originalEnvironmentValue = Environment.GetEnvironmentVariable(environmentKey);
+
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(directory, "appsettings.json"),
+                """{"WINFORMS_BUILDER_TESTS":{"Value":"base","Environment":"base","FromEnvironment":"base"}}""");
+            File.WriteAllText(
+                Path.Combine(directory, "appsettings.Integration.json"),
+                """{"WINFORMS_BUILDER_TESTS":{"Value":"environment-json","Environment":"Integration"}}""");
+            Environment.SetEnvironmentVariable(environmentVariable, "environment");
+            Environment.SetEnvironmentVariable(environmentKey, "environment-provider");
+
+            WinFormsApplicationBuilder builder = WinFormsApplicationBuilder.CreateBuilder(
+                new HostApplicationBuilderSettings
+                {
+                    Args = ["--WINFORMS_BUILDER_TESTS:Value=command-line"],
+                    ContentRootPath = directory,
+                    EnvironmentName = "Integration"
+                });
+            IConfiguration configuration = builder.Configuration;
+
+            Assert.Equal("command-line", configuration["WINFORMS_BUILDER_TESTS:Value"]);
+            Assert.Equal("Integration", configuration["WINFORMS_BUILDER_TESTS:Environment"]);
+            Assert.Equal("environment-provider", configuration["WINFORMS_BUILDER_TESTS:FromEnvironment"]);
+
+            builder.Configuration.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["WINFORMS_BUILDER_TESTS:Value"] = "additional"
+                });
+            Assert.Equal("additional", configuration["WINFORMS_BUILDER_TESTS:Value"]);
+
+            using WinFormsApplication application = builder.UseApplicationContext().Build();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(environmentVariable, originalValue);
+            Environment.SetEnvironmentVariable(environmentKey, originalEnvironmentValue);
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Configuration_UserSecretsProviderLoadsValuesFromItsIsolatedStore()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"WinFormsSecrets-{Guid.NewGuid():N}");
+        string userSecretsId = Guid.NewGuid().ToString("N");
+        string secretsDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "Microsoft",
+            "UserSecrets",
+            userSecretsId);
+        Directory.CreateDirectory(directory);
+        Directory.CreateDirectory(secretsDirectory);
+        File.WriteAllText(
+            Path.Combine(secretsDirectory, "secrets.json"),
+            """{"BuilderTests":{"Secret":"from-user-secrets"}}""");
+        File.WriteAllText(
+            Path.Combine(directory, "appsettings.json"),
+            """{"BuilderTests":{"Secret":"from-appsettings"}}""");
+
+        try
+        {
+            WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder(
+                new HostApplicationBuilderSettings { ContentRootPath = directory });
+            IConfiguration configuration = builder.Configuration;
+            builder.Configuration.AddUserSecrets(userSecretsId);
+            using WinFormsApplication application = builder.UseApplicationContext().Build();
+
+            Assert.Equal("from-user-secrets", configuration["BuilderTests:Secret"]);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+            Directory.Delete(secretsDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Configuration_ReloadUpdatesOptionsMonitorAndSnapshot()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"WinFormsBuilder-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            string settingsPath = Path.Combine(directory, "appsettings.json");
+            File.WriteAllText(settingsPath, """{"Feature":{"Name":"initial"}}""");
+
+            WinFormsApplicationBuilder builder = WinFormsApplicationBuilder.CreateBuilder(
+                new HostApplicationBuilderSettings { ContentRootPath = directory });
+            builder.Services.AddOptions<BuilderTestOptions>()
+                .Bind(builder.Configuration.GetSection("Feature"));
+            using WinFormsApplication application = builder.UseApplicationContext().Build();
+            IServiceProvider services = application.Options.Host!.Services;
+            IOptions<BuilderTestOptions> options = services.GetRequiredService<IOptions<BuilderTestOptions>>();
+            IOptionsMonitor<BuilderTestOptions> monitor =
+                services.GetRequiredService<IOptionsMonitor<BuilderTestOptions>>();
+            using IServiceScope originalScope = services.CreateScope();
+            IOptionsSnapshot<BuilderTestOptions> originalSnapshot =
+                originalScope.ServiceProvider.GetRequiredService<IOptionsSnapshot<BuilderTestOptions>>();
+
+            Assert.Equal("initial", options.Value.Name);
+            Assert.Equal("initial", monitor.CurrentValue.Name);
+            Assert.Equal("initial", originalSnapshot.Value.Name);
+
+            File.WriteAllText(settingsPath, """{"Feature":{"Name":"updated"}}""");
+            ((IConfigurationRoot)builder.Configuration).Reload();
+
+            Assert.Equal("initial", options.Value.Name);
+            Assert.Equal("updated", monitor.CurrentValue.Name);
+            Assert.Equal("initial", originalSnapshot.Value.Name);
+
+            using IServiceScope updatedScope = services.CreateScope();
+            IOptionsSnapshot<BuilderTestOptions> updatedSnapshot =
+                updatedScope.ServiceProvider.GetRequiredService<IOptionsSnapshot<BuilderTestOptions>>();
+
+            Assert.Equal("updated", updatedSnapshot.Value.Name);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [WinFormsFact]
+    public void Run_ValidateOnStartFailureIsReportedBeforeMessageLoopStarts()
+    {
+        RunOnStaThread(() =>
+        {
+            WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder();
+            builder.Services.AddOptions<BuilderTestOptions>()
+                .Validate(options => !string.IsNullOrEmpty(options.Name), "Feature:Name is required.")
+                .ValidateOnStart();
+            using WinFormsApplication application = builder.UseApplicationContext().Build();
+
+            OptionsValidationException exception =
+                Assert.Throws<OptionsValidationException>(application.Run);
+
+            Assert.Contains("Feature:Name is required.", exception.Failures);
+        });
+    }
+
+    [Fact]
+    public void UseHost_RejectsBuilderAfterHostConfigurationHasStarted()
+    {
+        WinFormsApplicationBuilder builder = WinFormsApplicationBuilder.CreateBuilder();
+        _ = builder.Services;
+        TestHost host = new();
+
+        Assert.Throws<InvalidOperationException>(() => builder.UseHost(host));
+        host.Dispose();
+    }
+
+    [Fact]
+    public void Build_HostBuilderCanOnlyBeBuiltOnce()
+    {
+        WinFormsApplicationBuilder builder = WinFormsApplicationBuilder.CreateBuilder();
+        builder.Services.AddOptions<BuilderTestOptions>();
+        using WinFormsApplication application = builder.UseApplicationContext().Build();
+
+        Assert.Throws<InvalidOperationException>(builder.Build);
     }
 
     [Fact]
@@ -1021,6 +1216,11 @@ public class WinFormsApplicationBuilderTests
         {
             ExceptionDispatchInfo.Capture(failure).Throw();
         }
+    }
+
+    private sealed class BuilderTestOptions
+    {
+        public string Name { get; set; } = string.Empty;
     }
 
     private sealed class TestForm : Form

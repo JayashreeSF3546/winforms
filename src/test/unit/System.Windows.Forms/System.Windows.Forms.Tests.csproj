@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
     <PackageReference Include="System.Runtime.Serialization.Formatters" />
   </ItemGroup>
 

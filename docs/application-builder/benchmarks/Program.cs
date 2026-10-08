@@ -86,6 +86,8 @@ internal static partial class Program
             Console.WriteLine();
         }
 
+        InfrastructureBenchmarks.Run(args);
+
         Console.WriteLine("These comparative measurements are diagnostic, not CI thresholds.");
     }
 
@@ -254,6 +256,7 @@ internal static partial class Program
         return new ProcessSnapshot(
             process.HandleCount,
             process.Threads.Count,
+            process.WorkingSet64,
             process.PrivateMemorySize64,
             GC.GetTotalMemory(forceFullCollection: true));
     }
@@ -377,6 +380,7 @@ internal static partial class Program
                 $"  Resource delta after cycle {cycleCount} (post-GC): "
                     + $"handles {current.HandleCount - previous.HandleCount:+#;-#;0}, "
                     + $"threads {current.ThreadCount - previous.ThreadCount:+#;-#;0}, "
+                    + $"working set {current.WorkingSetBytes - previous.WorkingSetBytes:+#;-#;0}, "
                     + $"private bytes {current.PrivateBytes - previous.PrivateBytes:+#;-#;0}, "
                     + $"managed live bytes {current.ManagedLiveBytes - previous.ManagedLiveBytes:+#;-#;0}");
         }
@@ -425,6 +429,7 @@ internal static partial class Program
     private sealed record ProcessSnapshot(
         int HandleCount,
         int ThreadCount,
+        long WorkingSetBytes,
         long PrivateBytes,
         long ManagedLiveBytes);
 
