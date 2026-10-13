@@ -64,6 +64,7 @@ public sealed partial class Application
 
         protected Form? CurrentForm { get; private set; }
         protected bool PostedQuit { get; private set; }
+        internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 
         /// <summary>
         ///  Creates a new thread context object.
@@ -90,6 +91,8 @@ public sealed partial class Application
         }
 
         public ApplicationContext? ApplicationContext { get; private set; }
+
+        internal static ThreadContext? Current => t_currentThreadContext;
 
         public virtual void EnsureReadyForIdle() { }
 

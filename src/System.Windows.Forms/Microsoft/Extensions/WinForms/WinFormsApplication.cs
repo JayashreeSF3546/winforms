@@ -27,6 +27,8 @@ public sealed class WinFormsApplication : IDisposable
     private readonly List<WinFormsFormScope> _formScopes = [];
     private readonly TaskCompletionSource _hostStoppedSource =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _applicationStoppingSource =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private WinFormsApplicationOptions? _options;
     private IHost? _host;
     private IHostApplicationLifetime? _hostLifetime;
@@ -44,7 +46,9 @@ public sealed class WinFormsApplication : IDisposable
     private int _hostStopRequestedByApplication;
     private int _hostStartAttempted;
     private int _hostStopped;
+    private int _hostOwnershipTransferred;
     private int _disposeRequested;
+    private int _applicationStoppingDispatchScheduled;
 
     internal WinFormsApplication(WinFormsApplicationOptions options)
     {
@@ -123,10 +127,13 @@ public sealed class WinFormsApplication : IDisposable
 
         bool autoInstall = WindowsFormsSynchronizationContext.AutoInstall;
         SynchronizationContext? originalSynchronizationContext = SynchronizationContext.Current;
+        Application.ThreadContext? originalThreadContext = Application.ThreadContext.Current;
+        Application.ThreadContext? threadContext = null;
         bool installedSynchronizationContext = false;
         Exception? failure = null;
         WinFormsExceptionLogging? exceptionLogging = null;
         ApplicationContext? applicationContext = null;
+        Form? startupForm = null;
 
         _uiThread = Thread.CurrentThread;
 
@@ -149,16 +156,25 @@ public sealed class WinFormsApplication : IDisposable
             installedSynchronizationContext =
                 originalSynchronizationContext is not WindowsFormsSynchronizationContext
                 && SynchronizationContext.Current is WindowsFormsSynchronizationContext;
-            _marshallingControl = Application.ThreadContext.FromCurrent().MarshallingControl;
+            threadContext = Application.ThreadContext.FromCurrent();
+            _marshallingControl = threadContext.MarshallingControl;
 
             applicationContext = CreateApplicationContext(options);
             _applicationContext = applicationContext;
+            startupForm = applicationContext.MainForm;
             _previousExitThreadHandler = applicationContext.ExitThreadHandler;
             applicationContext.ExitThreadHandler = OnExitThreadRequested;
 
             InitializeHostLifetime();
-            StartHost();
-            Lifetime.NotifyApplicationStarted();
+            if (_host is null)
+            {
+                Lifetime.NotifyApplicationStarted();
+            }
+            else
+            {
+                applicationContext.MainForm = null;
+                StartHost(applicationContext, startupForm);
+            }
 
             bool enterMessageLoop;
             lock (_stopLock)
@@ -181,14 +197,51 @@ public sealed class WinFormsApplication : IDisposable
         }
         finally
         {
+            NotifyApplicationStopping();
+            threadContext ??= Application.ThreadContext.Current;
+
             if (applicationContext is not null)
             {
+                if (threadContext?.IsDisposed != true
+                    && applicationContext.MainForm is null
+                    && startupForm is not null)
+                {
+                    applicationContext.MainForm = startupForm;
+                }
+
                 applicationContext.ExitThreadHandler = _previousExitThreadHandler;
                 _applicationContext = null;
 
+                if (ReferenceEquals(threadContext?.ApplicationContext, applicationContext)
+                    && threadContext?.IsDisposed == false)
+                {
+                    try
+                    {
+                        threadContext.Dispose(postQuit: false, disposing: true);
+                    }
+                    catch (Exception exception)
+                    {
+                        failure = CombineFailures(failure, exception);
+                    }
+                }
+                else if (threadContext?.IsDisposed != true)
+                {
+                    try
+                    {
+                        applicationContext.Dispose();
+                    }
+                    catch (Exception exception)
+                    {
+                        failure = CombineFailures(failure, exception);
+                    }
+                }
+            }
+
+            if (originalThreadContext is null && threadContext is { IsDisposed: false })
+            {
                 try
                 {
-                    applicationContext.Dispose();
+                    threadContext.Dispose(postQuit: false, disposing: true);
                 }
                 catch (Exception exception)
                 {
@@ -205,8 +258,9 @@ public sealed class WinFormsApplication : IDisposable
                 failure = CombineFailures(failure, exception);
             }
 
-            if (Volatile.Read(ref _hostStartAttempted) != 0
-                && Volatile.Read(ref _hostStopped) == 0)
+            if (_hostStopTask is not null
+                || (Volatile.Read(ref _hostStartAttempted) != 0
+                    && Volatile.Read(ref _hostStopped) == 0))
             {
                 try
                 {
@@ -308,8 +362,6 @@ public sealed class WinFormsApplication : IDisposable
         }
 
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeRequested) != 0, this);
-        NotifyApplicationStopping();
-
         Task stopTask = EnsureHostStopStarted(cancellationToken);
 
         return cancellationToken.CanBeCanceled
@@ -394,7 +446,8 @@ public sealed class WinFormsApplication : IDisposable
     }
 
     /// <summary>
-    ///  Stops the application if it is running and releases the associated host.
+    ///  Stops the application if it is running and releases the associated host,
+    ///  unless shutdown was initiated directly through a supplied host.
     /// </summary>
     /// <remarks>
     ///  <para>
@@ -411,7 +464,7 @@ public sealed class WinFormsApplication : IDisposable
 
         if (Volatile.Read(ref _runState) == 1)
         {
-            NotifyApplicationStopping();
+            _ = EnsureApplicationStoppingNotified();
             _ = EnsureHostStopStarted(CancellationToken.None);
             return;
         }
@@ -673,17 +726,17 @@ public sealed class WinFormsApplication : IDisposable
         if (_hostLifetime.ApplicationStopped.IsCancellationRequested)
         {
             Volatile.Write(ref _hostStopped, 1);
+            if (_options?.HostWasSupplied == true)
+            {
+                Volatile.Write(ref _hostOwnershipTransferred, 1);
+            }
+
             _hostStoppedSource.TrySetResult();
         }
     }
 
-    private void StartHost()
+    private void StartHost(ApplicationContext applicationContext, Form? startupForm)
     {
-        if (_host is null)
-        {
-            return;
-        }
-
         if (_hostLifetime?.ApplicationStopped.IsCancellationRequested == true
             || _hostLifetime?.ApplicationStopping.IsCancellationRequested == true)
         {
@@ -692,9 +745,31 @@ public sealed class WinFormsApplication : IDisposable
 
         Volatile.Write(ref _hostStartAttempted, 1);
 
-        if (_hostLifetime?.ApplicationStarted.IsCancellationRequested != true)
+        _marshallingControl!.BeginInvoke(
+            (Action)(() => StartHostAsync(applicationContext, startupForm)));
+    }
+
+    private async void StartHostAsync(ApplicationContext applicationContext, Form? startupForm)
+    {
+        try
         {
-            Task.Run(() => _host.StartAsync()).GetAwaiter().GetResult();
+            if (_hostLifetime?.ApplicationStarted.IsCancellationRequested != true)
+            {
+                await _host!.StartAsync().ConfigureAwait(true);
+            }
+
+            Lifetime.NotifyApplicationStarted();
+
+            if (Volatile.Read(ref _allowThreadExit) == 0 && startupForm is not null)
+            {
+                applicationContext.MainForm = startupForm;
+                startupForm.Visible = true;
+            }
+        }
+        catch (Exception exception)
+        {
+            RecordRuntimeException(exception);
+            _ = EnsureHostStopStarted(CancellationToken.None);
         }
     }
 
@@ -726,31 +801,14 @@ public sealed class WinFormsApplication : IDisposable
             return true;
         }
 
-        if (_hostLifetime?.ApplicationStopping.IsCancellationRequested != true)
-        {
-            _ = EnsureHostStopStarted(CancellationToken.None);
-        }
+        _ = EnsureHostStopStarted(CancellationToken.None);
 
         return false;
     }
 
     private void OnHostStopping()
     {
-        if (ReferenceEquals(Thread.CurrentThread, _uiThread) || _marshallingControl is null)
-        {
-            NotifyApplicationStopping();
-            return;
-        }
-
-        try
-        {
-            _marshallingControl.BeginInvoke((Action)NotifyApplicationStopping);
-        }
-        catch (Exception exception)
-        {
-            RecordRuntimeException(exception);
-            NotifyApplicationStopping();
-        }
+        _ = EnsureApplicationStoppingNotified();
     }
 
     private void OnHostStopped()
@@ -759,6 +817,13 @@ public sealed class WinFormsApplication : IDisposable
         {
             Volatile.Write(ref _hostStopped, 1);
             _hostStoppedSource.TrySetResult();
+
+            if (_hostStopTask is null
+                && _host is not null
+                && _options?.HostWasSupplied == true)
+            {
+                Volatile.Write(ref _hostOwnershipTransferred, 1);
+            }
         }
 
         if (Volatile.Read(ref _hostStopRequestedByApplication) == 0)
@@ -778,10 +843,45 @@ public sealed class WinFormsApplication : IDisposable
         {
             RecordRuntimeException(exception);
         }
+        finally
+        {
+            _applicationStoppingSource.TrySetResult();
+        }
+    }
+
+    private Task EnsureApplicationStoppingNotified()
+    {
+        if (_applicationStoppingSource.Task.IsCompleted)
+        {
+            return _applicationStoppingSource.Task;
+        }
+
+        if (_uiThread is null || ReferenceEquals(Thread.CurrentThread, _uiThread))
+        {
+            NotifyApplicationStopping();
+            return _applicationStoppingSource.Task;
+        }
+
+        if (Interlocked.CompareExchange(ref _applicationStoppingDispatchScheduled, 1, 0) == 0
+            && _marshallingControl is { IsDisposed: false, IsHandleCreated: true } marshallingControl)
+        {
+            try
+            {
+                marshallingControl.BeginInvoke((Action)NotifyApplicationStopping);
+            }
+            catch (Exception exception)
+            {
+                RecordRuntimeException(exception);
+            }
+        }
+
+        return _applicationStoppingSource.Task;
     }
 
     private Task EnsureHostStopStarted(CancellationToken cancellationToken)
     {
+        Task applicationStoppingTask = EnsureApplicationStoppingNotified();
+
         lock (_stopLock)
         {
             if (_hostStopTask is not null)
@@ -799,18 +899,22 @@ public sealed class WinFormsApplication : IDisposable
                 return _hostStopTask;
             }
 
-            if (_hostLifetime?.ApplicationStopping.IsCancellationRequested == true)
-            {
-                _hostStopTask = _hostStoppedSource.Task;
-                return _hostStopTask;
-            }
-
             Volatile.Write(ref _hostStopRequestedByApplication, 1);
-            _hostStopTask = Task.Run(
-                () => StopHostAsync(cancellationToken),
-                CancellationToken.None);
+            _hostStopTask = StopHostAfterStoppingAsync(
+                applicationStoppingTask,
+                cancellationToken);
             return _hostStopTask;
         }
+    }
+
+    private async Task StopHostAfterStoppingAsync(
+        Task applicationStoppingTask,
+        CancellationToken cancellationToken)
+    {
+        await applicationStoppingTask.ConfigureAwait(false);
+        await Task.Run(
+            () => StopHostAsync(cancellationToken),
+            CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task StopHostAsync(CancellationToken cancellationToken)
@@ -871,18 +975,6 @@ public sealed class WinFormsApplication : IDisposable
 
         if (context is null)
         {
-            if (Volatile.Read(ref _runState) != 1)
-            {
-                try
-                {
-                    Lifetime.NotifyApplicationStopped();
-                }
-                catch (Exception exception)
-                {
-                    RecordRuntimeException(exception);
-                }
-            }
-
             return;
         }
 
@@ -932,7 +1024,10 @@ public sealed class WinFormsApplication : IDisposable
 
         try
         {
-            host?.Dispose();
+            if (Volatile.Read(ref _hostOwnershipTransferred) == 0)
+            {
+                host?.Dispose();
+            }
         }
         finally
         {

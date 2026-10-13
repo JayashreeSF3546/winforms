@@ -122,6 +122,7 @@ $nonRevAssemblies = $xmlDoc.package.files.file | `
                 -and $_.target.EndsWith('.dll', [System.StringComparison]::OrdinalIgnoreCase) `
                 -and !$_.target.EndsWith('resources.dll', [System.StringComparison]::OrdinalIgnoreCase) `
                 -and !$_.target.EndsWith('\Accessibility.dll', [System.StringComparison]::OrdinalIgnoreCase) `
+                -and !$_.target.EndsWith('\Microsoft.Extensions.Hosting.Abstractions.dll', [System.StringComparison]::OrdinalIgnoreCase) `
                 -and !$_.target.EndsWith('\Microsoft.VisualBasic.dll', [System.StringComparison]::OrdinalIgnoreCase)
         } | `
     Select-Object -Unique src | `

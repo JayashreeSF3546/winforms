@@ -64,6 +64,10 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageDownload Include="Microsoft.NETCore.App.Runtime.win-x64" Version="[$(MicrosoftNETCoreAppRefPackageVersion)]" />
+  </ItemGroup>
+
   <!-- Any projects referenced here will have their outputs automatically put into the package -->
   <!-- If you add a new csproj, and you want the outputs in the package, you must add it here -->
   <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
@@ -135,7 +139,31 @@
 
     <TransportPropsFileInputPath>$(MSBuildThisFileDirectory)build\$(MSBuildProjectName).props</TransportPropsFileInputPath>
     <TransportPropsFileOutputPath>$(IntermediateOutputPath)$(MSBuildProjectName).props</TransportPropsFileOutputPath>
+
+    <_HostingAbstractionsRefAssembly>$(NuGetPackageRoot)microsoft.netcore.app.ref\$(MicrosoftNETCoreAppRefPackageVersion)\ref\$(TargetFramework)\Microsoft.Extensions.Hosting.Abstractions.dll</_HostingAbstractionsRefAssembly>
+    <_HostingAbstractionsRuntimeAssembly>$(NuGetPackageRoot)microsoft.netcore.app.runtime.win-x64\$(MicrosoftNETCoreAppRefPackageVersion)\runtimes\win-x64\lib\$(TargetFramework)\Microsoft.Extensions.Hosting.Abstractions.dll</_HostingAbstractionsRuntimeAssembly>
   </PropertyGroup>
+
+  <Target Name="IncludeHostingAbstractionsInTransportPackage"
+          BeforeTargets="GenerateTransportPropsFile">
+    <Error Condition="!Exists('$(_HostingAbstractionsRefAssembly)')"
+           Text="Microsoft.Extensions.Hosting.Abstractions.dll was not found in the .NET reference pack." />
+    <Error Condition="!Exists('$(_HostingAbstractionsRuntimeAssembly)')"
+           Text="Microsoft.Extensions.Hosting.Abstractions.dll was not found in the .NET runtime pack." />
+
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="$(_HostingAbstractionsRefAssembly)"
+                              PackagePath="ref\$(TargetFramework)"
+                              IsPackable="true"
+                              PackageId="Microsoft.NETCore.App.Ref"
+                              PackageVersion="$(MicrosoftNETCoreAppRefPackageVersion)" />
+      <TfmSpecificPackageFile Include="$(_HostingAbstractionsRuntimeAssembly)"
+                              PackagePath="lib\$(TargetFramework)"
+                              IsPackable="true"
+                              PackageId="Microsoft.NETCore.App.Runtime.win-x64"
+                              PackageVersion="$(MicrosoftNETCoreAppRefPackageVersion)" />
+    </ItemGroup>
+  </Target>
 
   <Target Name="GenerateTransportPropsFile"
           Condition="'@(ProjectReference)' != ''"

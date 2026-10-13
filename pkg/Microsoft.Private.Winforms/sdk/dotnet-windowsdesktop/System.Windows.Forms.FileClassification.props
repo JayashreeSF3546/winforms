@@ -5,6 +5,7 @@
 <Project>
   <!-- File classifications that should be included for both the ref and runtime pack. -->
   <ItemGroup>
+    <FrameworkListFileClass Include="Microsoft.Extensions.Hosting.Abstractions.dll" Profile="WindowsForms" />
     <FrameworkListFileClass Include="Microsoft.VisualBasic.dll" Profile="WindowsForms" />
     <FrameworkListFileClass Include="Microsoft.VisualBasic.Forms.dll" Profile="WindowsForms" />
     <FrameworkListFileClass Include="System.Design.dll" Profile="WindowsForms" />

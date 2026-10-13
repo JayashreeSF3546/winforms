@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Runtime.ExceptionServices;
+
 namespace Microsoft.Extensions.WinForms;
 
 /// <summary>
@@ -83,19 +85,40 @@ public sealed class WinFormsApplicationLifetime
     {
         lock (_stateLock)
         {
-            if (_state is not LifecycleState.Stopping and not LifecycleState.Stopped)
-            {
-                _state = LifecycleState.Stopping;
-                ApplicationStopping?.Invoke(this, EventArgs.Empty);
-            }
-
             if (_state == LifecycleState.Stopped)
             {
                 return;
             }
 
+            bool notifyStopping = _state != LifecycleState.Stopping;
             _state = LifecycleState.Stopped;
-            ApplicationStopped?.Invoke(this, EventArgs.Empty);
+            Exception? failure = null;
+
+            try
+            {
+                if (notifyStopping)
+                {
+                    ApplicationStopping?.Invoke(this, EventArgs.Empty);
+                }
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+
+            try
+            {
+                ApplicationStopped?.Invoke(this, EventArgs.Empty);
+            }
+            catch (Exception exception)
+            {
+                failure = failure is null ? exception : new AggregateException(failure, exception);
+            }
+
+            if (failure is not null)
+            {
+                ExceptionDispatchInfo.Capture(failure).Throw();
+            }
         }
     }
 }

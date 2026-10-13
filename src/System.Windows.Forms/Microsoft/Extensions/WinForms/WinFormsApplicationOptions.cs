@@ -47,6 +47,11 @@ internal sealed class WinFormsApplicationOptions
     internal IHost? Host { get; set; }
 
     /// <summary>
+    ///  Gets or sets whether the host was supplied by the caller.
+    /// </summary>
+    internal bool HostWasSupplied { get; set; }
+
+    /// <summary>
     ///  Gets or sets whether WinForms and CLR exceptions are forwarded to the host logger.
     /// </summary>
     internal bool EnableExceptionLogging { get; set; }
@@ -65,6 +70,7 @@ internal sealed class WinFormsApplicationOptions
             ApplicationContext = ApplicationContext,
             StartupObjectThread = StartupObjectThread,
             Host = Host,
+            HostWasSupplied = HostWasSupplied,
             EnableExceptionLogging = EnableExceptionLogging
         };
 }

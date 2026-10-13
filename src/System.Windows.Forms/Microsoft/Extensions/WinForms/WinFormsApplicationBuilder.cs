@@ -30,6 +30,7 @@ namespace Microsoft.Extensions.WinForms;
 public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
 {
     private readonly WinFormsApplicationOptions _options = new();
+    private readonly HashSet<object> _builtOwnedOptions = new(ReferenceEqualityComparer.Instance);
     private HostApplicationBuilder? _hostBuilder;
     private bool _hostBuilt;
 
@@ -233,7 +234,9 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
     /// <remarks>
     ///  <para>
     ///   The application takes ownership of the host and disposes it when the
-    ///   application is disposed.
+    ///   application is disposed. If the caller initiates <see cref="IHost.StopAsync"/>
+    ///   directly, the caller retains responsibility for disposing the host after
+    ///   that stop operation completes.
     ///  </para>
     ///  <para>
     ///   A host supplied here cannot be combined with host configuration or
@@ -254,6 +257,7 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
         }
 
         _options.Host = host;
+        _options.HostWasSupplied = true;
 
         return this;
     }
@@ -460,13 +464,15 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
     /// </summary>
     /// <returns>The configured application.</returns>
     /// <exception cref="InvalidOperationException">
-    ///  The host for this builder has already been built.
+    ///  The host for this builder has already been built, or a supplied host,
+    ///  startup form, or application context is already owned by an application
+    ///  built from this builder.
     /// </exception>
     public WinFormsApplication Build()
     {
         if (_hostBuilder is null)
         {
-            return new(_options.Clone());
+            return BuildApplication(_options.Clone());
         }
 
         if (_hostBuilt)
@@ -479,10 +485,40 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
         WinFormsApplicationOptions options = _options.Clone();
         options.Host = _hostBuilder.Build();
 
-        return new(options);
+        return BuildApplication(options);
     }
 
     internal WinFormsApplicationOptions Options => _options;
+
+    private WinFormsApplication BuildApplication(WinFormsApplicationOptions options)
+    {
+        if (IsAlreadyOwned(options.Host)
+            || IsAlreadyOwned(options.StartupForm)
+            || IsAlreadyOwned(options.ApplicationContext))
+        {
+            throw new InvalidOperationException(
+                "A supplied host, startup form, or application context can only be owned by one application built from this builder.");
+        }
+
+        WinFormsApplication application = new(options);
+
+        TrackOwnership(options.Host);
+        TrackOwnership(options.StartupForm);
+        TrackOwnership(options.ApplicationContext);
+
+        return application;
+    }
+
+    private bool IsAlreadyOwned(object? value)
+        => value is not null && _builtOwnedOptions.Contains(value);
+
+    private void TrackOwnership(object? value)
+    {
+        if (value is not null)
+        {
+            _builtOwnedOptions.Add(value);
+        }
+    }
 
     private HostApplicationBuilder GetHostBuilder()
     {

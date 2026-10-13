@@ -362,6 +362,43 @@ public class WinFormsApplicationBuilderTests
         Assert.NotNull(secondApplication.Options.ApplicationContextFactory);
     }
 
+    [WinFormsFact]
+    public void Build_CannotAssignSuppliedHostToMultipleApplications()
+    {
+        TestHost host = new();
+        WinFormsApplicationBuilder builder = WinFormsApplicationBuilder.CreateBuilder()
+            .UseApplicationContext()
+            .UseHost(host);
+        using WinFormsApplication application = builder.Build();
+
+        Assert.Throws<InvalidOperationException>(builder.Build);
+
+        application.Dispose();
+        Assert.Equal(1, host.DisposeCount);
+    }
+
+    [WinFormsFact]
+    public void Build_CannotAssignSuppliedStartupFormToMultipleApplications()
+    {
+        using Form form = new();
+        WinFormsApplicationBuilder builder = WinFormsApplicationBuilder.CreateBuilder()
+            .UseStartupForm(form);
+        using WinFormsApplication application = builder.Build();
+
+        Assert.Throws<InvalidOperationException>(builder.Build);
+    }
+
+    [WinFormsFact]
+    public void Build_CannotAssignSuppliedApplicationContextToMultipleApplications()
+    {
+        using ApplicationContext context = new();
+        WinFormsApplicationBuilder builder = WinFormsApplicationBuilder.CreateBuilder()
+            .UseApplicationContext(context);
+        using WinFormsApplication application = builder.Build();
+
+        Assert.Throws<InvalidOperationException>(builder.Build);
+    }
+
     [Fact]
     public void Dispose_ReleasesApplicationOptions()
     {
@@ -428,6 +465,28 @@ public class WinFormsApplicationBuilderTests
                 nameof(lifetime.ApplicationStopped)
             ],
             events);
+    }
+
+    [Fact]
+    public void Lifetime_StoppingHandlerFailureDoesNotSuppressStopped()
+    {
+        using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+            .UseApplicationContext()
+            .Build();
+        List<string> events = [];
+        application.Lifetime.ApplicationStopping += (_, _) =>
+        {
+            events.Add("Stopping");
+            throw new InvalidOperationException("Stopping handler failed.");
+        };
+        application.Lifetime.ApplicationStopped += (_, _) => events.Add("Stopped");
+
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+            application.Lifetime.NotifyApplicationStopped);
+        application.Lifetime.NotifyApplicationStopped();
+
+        Assert.Equal("Stopping handler failed.", exception.Message);
+        Assert.Equal(["Stopping", "Stopped"], events);
     }
 
     [Fact]
@@ -858,6 +917,94 @@ public class WinFormsApplicationBuilderTests
     }
 
     [Fact]
+    public void Run_PumpsMessagesWhileHostStarts()
+    {
+        RunOnStaThread(() =>
+        {
+            List<string> events = [];
+            bool dispatchedToUiThread = false;
+            TestHost host = new(
+                events,
+                startAsync: _ =>
+                {
+                    if (!Application.MessageLoop)
+                    {
+                        return Task.FromException(
+                            new InvalidOperationException("The message loop was not running during host startup."));
+                    }
+
+                    TaskCompletionSource uiWorkCompleted = new(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    SynchronizationContext.Current!.Post(
+                        _ =>
+                        {
+                            dispatchedToUiThread = true;
+                            events.Add("UiWork");
+                            uiWorkCompleted.TrySetResult();
+                        },
+                        null);
+
+                    return uiWorkCompleted.Task;
+                });
+            using Form form = new();
+            form.Shown += (_, _) => form.Close();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(form)
+                .UseHost(host)
+                .Build();
+            application.Lifetime.ApplicationStarted += (_, _) => events.Add("ApplicationStarted");
+
+            application.Run();
+
+            Assert.True(dispatchedToUiThread);
+            Assert.True(events.IndexOf("UiWork") < events.IndexOf("ApplicationStarted"));
+        });
+    }
+
+    [Fact]
+    public void StopAsync_PumpsMessagesWhileHostShutdownIsAwaitingWork()
+    {
+        RunOnStaThread(() =>
+        {
+            TaskCompletionSource hostStopStarted = new(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource finishHostStop = new(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            TestHost host = new(
+                stopAsync: async _ =>
+                {
+                    hostStopStarted.TrySetResult();
+                    await finishHostStop.Task.ConfigureAwait(false);
+                });
+            using Form form = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(form)
+                .UseHost(host)
+                .Build();
+            bool uiWorkDispatched = false;
+            Task? dispatchWork = null;
+            form.Shown += (_, _) =>
+            {
+                _ = application.StopAsync();
+                dispatchWork = Task.Run(async () =>
+                {
+                    await hostStopStarted.Task.ConfigureAwait(false);
+                    form.BeginInvoke((Action)(() =>
+                    {
+                        uiWorkDispatched = true;
+                        finishHostStop.TrySetResult();
+                    }));
+                });
+            };
+
+            application.Run();
+            dispatchWork!.GetAwaiter().GetResult();
+
+            Assert.True(uiWorkDispatched);
+        });
+    }
+
+    [Fact]
     public void StopAsync_StopsHostAndExitsTheMessageLoop()
     {
         RunOnStaThread(() =>
@@ -878,6 +1025,69 @@ public class WinFormsApplicationBuilderTests
     }
 
     [Fact]
+    public void StopAsync_FromWorker_RaisesLifecycleEventsOnApplicationThread()
+    {
+        RunOnStaThread(() =>
+        {
+            int uiThreadId = Environment.CurrentManagedThreadId;
+            int startedThreadId = 0;
+            int stoppingThreadId = 0;
+            int stoppedThreadId = 0;
+            TestHost host = new();
+            using Form form = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(form)
+                .UseHost(host)
+                .Build();
+            Task? stopRequest = null;
+            application.Lifetime.ApplicationStarted += (_, _) =>
+                startedThreadId = Environment.CurrentManagedThreadId;
+            application.Lifetime.ApplicationStopping += (_, _) =>
+                stoppingThreadId = Environment.CurrentManagedThreadId;
+            application.Lifetime.ApplicationStopped += (_, _) =>
+                stoppedThreadId = Environment.CurrentManagedThreadId;
+            form.Shown += (_, _) => stopRequest = Task.Run(() => application.StopAsync());
+
+            application.Run();
+            stopRequest!.GetAwaiter().GetResult();
+
+            Assert.Equal(uiThreadId, startedThreadId);
+            Assert.Equal(uiThreadId, stoppingThreadId);
+            Assert.Equal(uiThreadId, stoppedThreadId);
+        });
+    }
+
+    [Fact]
+    public void Dispose_FromWorker_RaisesLifecycleEventsOnApplicationThread()
+    {
+        RunOnStaThread(() =>
+        {
+            int uiThreadId = Environment.CurrentManagedThreadId;
+            int stoppingThreadId = 0;
+            int stoppedThreadId = 0;
+            TestHost host = new();
+            using Form form = new();
+            WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(form)
+                .UseHost(host)
+                .Build();
+            Task? disposeRequest = null;
+            application.Lifetime.ApplicationStopping += (_, _) =>
+                stoppingThreadId = Environment.CurrentManagedThreadId;
+            application.Lifetime.ApplicationStopped += (_, _) =>
+                stoppedThreadId = Environment.CurrentManagedThreadId;
+            form.Shown += (_, _) => disposeRequest = Task.Run(application.Dispose);
+
+            application.Run();
+            disposeRequest!.GetAwaiter().GetResult();
+
+            Assert.Equal(uiThreadId, stoppingThreadId);
+            Assert.Equal(uiThreadId, stoppedThreadId);
+            Assert.Equal(1, host.DisposeCount);
+        });
+    }
+
+    [Fact]
     public void Run_ExternalHostStop_ExitsTheMessageLoop()
     {
         RunOnStaThread(() =>
@@ -888,7 +1098,73 @@ public class WinFormsApplicationBuilderTests
                 .UseStartupForm(form)
                 .UseHost(host)
                 .Build();
-            form.Shown += (_, _) => _ = Task.Run(() => host.StopAsync());
+            Task? externalStop = null;
+            form.Shown += (_, _) => externalStop = Task.Run(() => host.StopAsync());
+
+            application.Run();
+            externalStop!.GetAwaiter().GetResult();
+
+            Assert.Equal(1, host.StopCount);
+            Assert.True(host.Lifetime.ApplicationStopped.IsCancellationRequested);
+            Assert.Equal(0, host.DisposeCount);
+
+            host.Dispose();
+            Assert.Equal(1, host.DisposeCount);
+        });
+    }
+
+    [Fact]
+    public void Run_ExternalHostStop_DoesNotDisposeHostBeforeStopAsyncCompletes()
+    {
+        RunOnStaThread(() =>
+        {
+            TaskCompletionSource finishHostStop = new(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            TestHost? host = null;
+            host = new(
+                stopAsync: async _ =>
+                {
+                    host!.Lifetime.NotifyStopped();
+                    await finishHostStop.Task.ConfigureAwait(false);
+                });
+            using Form form = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(form)
+                .UseHost(host)
+                .Build();
+            Task? externalStop = null;
+            form.Shown += (_, _) => externalStop = Task.Run(() => host.StopAsync());
+
+            application.Run();
+
+            Assert.NotNull(externalStop);
+            Assert.False(externalStop.IsCompleted);
+            Assert.Equal(0, host.DisposeCount);
+
+            finishHostStop.TrySetResult();
+            externalStop.GetAwaiter().GetResult();
+            host.Dispose();
+
+            Assert.Equal(1, host.DisposeCount);
+        });
+    }
+
+    [Fact]
+    public void Run_LifetimeStopApplication_StopsHostWhenApplicationExits()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new();
+            using Form form = new();
+            form.Shown += (_, _) =>
+            {
+                host.Lifetime.StopApplication();
+                form.Close();
+            };
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(form)
+                .UseHost(host)
+                .Build();
 
             application.Run();
 
@@ -919,6 +1195,24 @@ public class WinFormsApplicationBuilderTests
     }
 
     [Fact]
+    public void Run_DisposesApplicationContextOnce()
+    {
+        RunOnStaThread(() =>
+        {
+            using Form form = new();
+            form.Shown += (_, _) => form.Close();
+            TrackingApplicationContext context = new(form);
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseApplicationContext(context)
+                .Build();
+
+            application.Run();
+
+            Assert.Equal(1, context.DisposeCount);
+        });
+    }
+
+    [Fact]
     public void Run_StartupFormFailureRaisesStoppingAndStoppedWithoutStartingHost()
     {
         RunOnStaThread(() =>
@@ -943,6 +1237,46 @@ public class WinFormsApplicationBuilderTests
     }
 
     [Fact]
+    public void Run_StartupFailure_StoppingHandlerFailureStillRaisesStopped()
+    {
+        RunOnStaThread(() =>
+        {
+            List<string> events = [];
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm<ThrowingForm>()
+                .Build();
+            application.Lifetime.ApplicationStopping += (_, _) =>
+            {
+                events.Add("Stopping");
+                throw new InvalidOperationException("Stopping handler failed.");
+            };
+            application.Lifetime.ApplicationStopped += (_, _) => events.Add("Stopped");
+
+            AggregateException exception = Assert.Throws<AggregateException>(application.Run);
+
+            Assert.Contains("Startup form construction failed.", exception.ToString());
+            Assert.Contains("Stopping handler failed.", exception.ToString());
+            Assert.Equal(["Stopping", "Stopped"], events);
+        });
+    }
+
+    [Fact]
+    public void Run_StartupFailure_CleansUpNewThreadContext()
+    {
+        RunOnStaThread(() =>
+        {
+            Assert.Null(Application.ThreadContext.Current);
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm<ThrowingForm>()
+                .Build();
+
+            Assert.Throws<TargetInvocationException>(application.Run);
+
+            Assert.Null(Application.ThreadContext.Current);
+        });
+    }
+
+    [Fact]
     public void Run_HostStartupFailure_StopsHostAndRaisesStopped()
     {
         RunOnStaThread(() =>
@@ -962,7 +1296,7 @@ public class WinFormsApplicationBuilderTests
 
             Assert.Equal("Host startup failed.", exception.Message);
             Assert.Equal(
-                ["HostStarted", "HostStopping", "ApplicationStopping", "ApplicationStopped"],
+                ["HostStarted", "ApplicationStopping", "HostStopping", "ApplicationStopped"],
                 events);
             Assert.Equal(1, host.StartCount);
             Assert.Equal(1, host.StopCount);
@@ -1330,6 +1664,21 @@ public class WinFormsApplicationBuilderTests
         public ThrowingForm()
         {
             throw new InvalidOperationException("Startup form construction failed.");
+        }
+    }
+
+    private sealed class TrackingApplicationContext(Form mainForm) : ApplicationContext(mainForm)
+    {
+        internal int DisposeCount { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                DisposeCount++;
+            }
+
+            base.Dispose(disposing);
         }
     }
 
