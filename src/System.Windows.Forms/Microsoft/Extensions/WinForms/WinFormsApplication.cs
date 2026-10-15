@@ -25,6 +25,7 @@ public sealed class WinFormsApplication : IDisposable
     private readonly Lock _stopLock = new();
     private readonly Lock _formScopesLock = new();
     private readonly List<WinFormsFormScope> _formScopes = [];
+    private readonly List<Task> _formScopeDisposalTasks = [];
     private readonly TaskCompletionSource _hostStoppedSource =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _applicationStoppingSource =
@@ -258,6 +259,15 @@ public sealed class WinFormsApplication : IDisposable
                 failure = CombineFailures(failure, exception);
             }
 
+            try
+            {
+                AwaitFormScopeDisposals();
+            }
+            catch (Exception exception)
+            {
+                failure = CombineFailures(failure, exception);
+            }
+
             if (_hostStopTask is not null
                 || (Volatile.Read(ref _hostStartAttempted) != 0
                     && Volatile.Read(ref _hostStopped) == 0))
@@ -431,6 +441,7 @@ public sealed class WinFormsApplication : IDisposable
         try
         {
             formScope.DisposeForm();
+            formScope.DisposalTask.GetAwaiter().GetResult();
         }
         catch (Exception exception)
         {
@@ -491,32 +502,23 @@ public sealed class WinFormsApplication : IDisposable
 
         if (options.StartupFormFactory is not null)
         {
-            return new ApplicationContext(
-                ActivateForm(_ => options.StartupFormFactory(), out _));
+            return new ApplicationContext(options.StartupFormFactory());
         }
 
         if (options.StartupForm is not null)
         {
-            AttachFormScope(options.StartupForm);
-
             return new ApplicationContext(options.StartupForm);
         }
 
         if (options.ApplicationContextFactory is not null)
         {
-            ApplicationContext context = options.ApplicationContextFactory()
+            return options.ApplicationContextFactory()
                 ?? throw new InvalidOperationException("The application context factory returned null.");
-            AttachMainFormScope(context);
-
-            return context;
         }
 
-        ApplicationContext applicationContext = options.ApplicationContext
+        return options.ApplicationContext
             ?? throw new InvalidOperationException(
                 "Configure a startup form or application context before running the application.");
-        AttachMainFormScope(applicationContext);
-
-        return applicationContext;
     }
 
     private TForm ActivateForm<TForm>(
@@ -554,6 +556,7 @@ public sealed class WinFormsApplication : IDisposable
             try
             {
                 formScope.Dispose();
+                formScope.DisposalTask.GetAwaiter().GetResult();
             }
             catch (Exception exception)
             {
@@ -594,7 +597,7 @@ public sealed class WinFormsApplication : IDisposable
 
                 try
                 {
-                    serviceScope.Dispose();
+                    WinFormsFormScope.DisposeServiceScopeAsync(serviceScope).GetAwaiter().GetResult();
                 }
                 catch (Exception disposalException)
                 {
@@ -614,39 +617,6 @@ public sealed class WinFormsApplication : IDisposable
         }
 
         return formScope;
-    }
-
-    private void AttachFormScope(Form form)
-    {
-        WinFormsFormScope formScope = CreateFormScope();
-
-        try
-        {
-            formScope.Attach(form);
-        }
-        catch (Exception exception)
-        {
-            Exception failure = exception;
-
-            try
-            {
-                formScope.Dispose();
-            }
-            catch (Exception disposalException)
-            {
-                failure = CombineFailures(failure, disposalException)!;
-            }
-
-            ExceptionDispatchInfo.Capture(failure).Throw();
-        }
-    }
-
-    private void AttachMainFormScope(ApplicationContext applicationContext)
-    {
-        if (applicationContext.MainForm is Form mainForm)
-        {
-            AttachFormScope(mainForm);
-        }
     }
 
     private void EnsureActivationThread()
@@ -669,6 +639,7 @@ public sealed class WinFormsApplication : IDisposable
         lock (_formScopesLock)
         {
             _formScopes.Remove(formScope);
+            _formScopeDisposalTasks.Add(formScope.DisposalTask);
         }
     }
 
@@ -699,6 +670,19 @@ public sealed class WinFormsApplication : IDisposable
         {
             ExceptionDispatchInfo.Capture(failure).Throw();
         }
+    }
+
+    private void AwaitFormScopeDisposals()
+    {
+        Task[] disposalTasks;
+
+        lock (_formScopesLock)
+        {
+            disposalTasks = [.. _formScopeDisposalTasks];
+            _formScopeDisposalTasks.Clear();
+        }
+
+        Task.WhenAll(disposalTasks).GetAwaiter().GetResult();
     }
 
     private void InitializeHostLifetime()

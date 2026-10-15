@@ -10,12 +10,14 @@ namespace Microsoft.Extensions.WinForms;
 /// <summary>
 ///  Associates an activated form with the service scope for its lifetime.
 /// </summary>
-internal sealed class WinFormsFormScope : IDisposable
+internal sealed class WinFormsFormScope : IDisposable, IAsyncDisposable
 {
+    private readonly Lock _disposeLock = new();
     private readonly IServiceProvider _services;
     private Action<WinFormsFormScope>? _disposedCallback;
     private Form? _form;
     private IServiceScope? _scope;
+    private Task? _disposalTask;
 
     /// <summary>
     ///  Initializes a new instance of the <see cref="WinFormsFormScope"/> class.
@@ -97,34 +99,70 @@ internal sealed class WinFormsFormScope : IDisposable
     /// </summary>
     public void Dispose()
     {
-        Form? form = Interlocked.Exchange(ref _form, null);
-        form?.Disposed -= OnFormDisposed;
+        _ = BeginDispose();
+    }
 
-        IServiceScope? scope = Interlocked.Exchange(ref _scope, null);
-        Action<WinFormsFormScope>? disposedCallback = Interlocked.Exchange(ref _disposedCallback, null);
-        Exception? failure = null;
+    /// <inheritdoc/>
+    public async ValueTask DisposeAsync()
+        => await BeginDispose().ConfigureAwait(false);
+
+    /// <summary>
+    ///  Gets the asynchronous completion of this scope's disposal.
+    /// </summary>
+    internal Task DisposalTask
+        => Volatile.Read(ref _disposalTask) ?? Task.CompletedTask;
+
+    /// <summary>
+    ///  Disposes a service scope asynchronously when it supports that contract.
+    /// </summary>
+    /// <param name="scope">The service scope to dispose.</param>
+    /// <returns>A task that completes when the scope has been disposed.</returns>
+    internal static Task DisposeServiceScopeAsync(IServiceScope? scope)
+    {
+        if (scope is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (scope is IAsyncDisposable asyncDisposable)
+        {
+            // Application.Run coordinates disposal synchronously, so async cleanup must not capture its UI context.
+            return Task.Run(async () => await asyncDisposable.DisposeAsync().ConfigureAwait(false));
+        }
 
         try
         {
-            scope?.Dispose();
+            scope.Dispose();
+            return Task.CompletedTask;
         }
         catch (Exception exception)
         {
-            failure = exception;
+            return Task.FromException(exception);
         }
+    }
 
-        try
+    private Task BeginDispose()
+    {
+        lock (_disposeLock)
         {
+            Task? disposalTask = Volatile.Read(ref _disposalTask);
+
+            if (disposalTask is not null)
+            {
+                return disposalTask;
+            }
+
+            Form? form = Interlocked.Exchange(ref _form, null);
+            form?.Disposed -= OnFormDisposed;
+
+            IServiceScope? scope = Interlocked.Exchange(ref _scope, null);
+            Action<WinFormsFormScope>? disposedCallback =
+                Interlocked.Exchange(ref _disposedCallback, null);
+            disposalTask = DisposeServiceScopeAsync(scope);
+            Volatile.Write(ref _disposalTask, disposalTask);
             disposedCallback?.Invoke(this);
-        }
-        catch (Exception exception)
-        {
-            failure = CombineFailures(failure, exception);
-        }
 
-        if (failure is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure).Throw();
+            return disposalTask;
         }
     }
 

@@ -535,6 +535,82 @@ public class WinFormsApplicationBuilderTests
     }
 
     [WinFormsFact]
+    public void Run_OrdinaryStartupObjectsDoNotRequireHostScopeFactory()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost parameterlessFormHost = new(supportsScopes: false);
+            using WinFormsApplication parameterlessFormApplication =
+                WinFormsApplication.CreateBuilder()
+                    .UseStartupForm<CloseOnShownForm>()
+                    .UseHost(parameterlessFormHost)
+                    .Build();
+
+            parameterlessFormApplication.Run();
+
+            Assert.Equal(1, parameterlessFormHost.StartCount);
+            Assert.Equal(1, parameterlessFormHost.StopCount);
+            Assert.Equal(0, parameterlessFormHost.ScopeFactory.CreatedCount);
+
+            TestHost suppliedFormHost = new(supportsScopes: false);
+            using Form suppliedForm = new CloseOnShownForm();
+            using WinFormsApplication suppliedFormApplication =
+                WinFormsApplication.CreateBuilder()
+                    .UseStartupForm(suppliedForm)
+                    .UseHost(suppliedFormHost)
+                    .Build();
+
+            suppliedFormApplication.Run();
+
+            Assert.Equal(1, suppliedFormHost.StartCount);
+            Assert.Equal(1, suppliedFormHost.StopCount);
+            Assert.Equal(0, suppliedFormHost.ScopeFactory.CreatedCount);
+
+            TestHost applicationContextHost = new(supportsScopes: false);
+            using Form contextMainForm = new CloseOnShownForm();
+            using ApplicationContext context = new(contextMainForm);
+            using WinFormsApplication applicationContextApplication =
+                WinFormsApplication.CreateBuilder()
+                    .UseApplicationContext(context)
+                    .UseHost(applicationContextHost)
+                    .Build();
+
+            applicationContextApplication.Run();
+
+            Assert.Equal(1, applicationContextHost.StartCount);
+            Assert.Equal(1, applicationContextHost.StopCount);
+            Assert.Equal(0, applicationContextHost.ScopeFactory.CreatedCount);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_ServiceAwareStartupFormAsyncOnlyScopeIsDisposedBeforeShutdownCompletes()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new(asyncOnlyScopedService: true);
+            AsyncOnlyTestService? resolvedService = null;
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(services =>
+                {
+                    resolvedService = Assert.IsType<AsyncOnlyTestService>(
+                        services.GetService(typeof(AsyncOnlyTestService)));
+
+                    return new CloseOnShownForm();
+                })
+                .UseHost(host)
+                .Build();
+
+            application.Run();
+
+            Assert.NotNull(resolvedService);
+            Assert.True(resolvedService.IsDisposed);
+            Assert.Equal(1, host.ScopeFactory.CreatedCount);
+            Assert.Equal(1, host.ScopeFactory.DisposedCount);
+        });
+    }
+
+    [WinFormsFact]
     public void Run_WithoutHostProvidesEmptyServicesToStartupFactory()
     {
         RunOnStaThread(() =>
@@ -582,8 +658,8 @@ public class WinFormsApplicationBuilderTests
 
             Assert.NotNull(modelessForm);
             Assert.True(modelessForm.IsDisposed);
-            Assert.Equal(2, host.ScopeFactory.CreatedCount);
-            Assert.Equal(2, host.ScopeFactory.DisposedCount);
+            Assert.Equal(1, host.ScopeFactory.CreatedCount);
+            Assert.Equal(1, host.ScopeFactory.DisposedCount);
         });
     }
 
@@ -622,8 +698,8 @@ public class WinFormsApplicationBuilderTests
             Assert.Equal(2, scopedServices.Count);
             Assert.NotSame(scopedServices[0], scopedServices[1]);
             Assert.All(scopedServices, service => Assert.True(service.IsDisposed));
-            Assert.Equal(3, host.ScopeFactory.CreatedCount);
-            Assert.Equal(3, host.ScopeFactory.DisposedCount);
+            Assert.Equal(2, host.ScopeFactory.CreatedCount);
+            Assert.Equal(2, host.ScopeFactory.DisposedCount);
         });
     }
 
@@ -652,7 +728,7 @@ public class WinFormsApplicationBuilderTests
 
             Assert.NotNull(modelessForm);
             Assert.True(modelessForm.IsDisposed);
-            Assert.Equal(2, host.ScopeFactory.DisposedCount);
+            Assert.Equal(1, host.ScopeFactory.DisposedCount);
         });
     }
 
@@ -687,8 +763,8 @@ public class WinFormsApplicationBuilderTests
 
             application.Run();
 
-            Assert.Equal(2, host.ScopeFactory.CreatedCount);
-            Assert.Equal(2, host.ScopeFactory.DisposedCount);
+            Assert.Equal(1, host.ScopeFactory.CreatedCount);
+            Assert.Equal(1, host.ScopeFactory.DisposedCount);
         });
     }
 
@@ -745,8 +821,8 @@ public class WinFormsApplicationBuilderTests
             Assert.True(dialogService.IsDisposed);
             Assert.NotNull(parentForm);
             Assert.True(parentForm.IsDisposed);
-            Assert.Equal(3, host.ScopeFactory.CreatedCount);
-            Assert.Equal(3, host.ScopeFactory.DisposedCount);
+            Assert.Equal(2, host.ScopeFactory.CreatedCount);
+            Assert.Equal(2, host.ScopeFactory.DisposedCount);
         });
     }
 
@@ -802,15 +878,15 @@ public class WinFormsApplicationBuilderTests
                     () => application.CreateForm<TestForm>(_ => null!));
 
                 Assert.Equal("The form factory returned null.", nullFormException.Message);
-                Assert.Equal(3, host.ScopeFactory.CreatedCount);
+                Assert.Equal(2, host.ScopeFactory.CreatedCount);
                 Assert.Equal(2, host.ScopeFactory.DisposedCount);
                 startupForm.Close();
             };
 
             application.Run();
 
-            Assert.Equal(3, host.ScopeFactory.CreatedCount);
-            Assert.Equal(3, host.ScopeFactory.DisposedCount);
+            Assert.Equal(2, host.ScopeFactory.CreatedCount);
+            Assert.Equal(2, host.ScopeFactory.DisposedCount);
         });
     }
 
@@ -822,7 +898,7 @@ public class WinFormsApplicationBuilderTests
             TestHost host = new(
                 createScope: () => throw new InvalidOperationException("Scope creation failed."));
             using WinFormsApplication application = WinFormsApplication.CreateBuilder()
-                .UseStartupForm<TestForm>()
+                .UseStartupForm<TestForm>(_ => new())
                 .UseHost(host)
                 .Build();
 
@@ -1574,6 +1650,19 @@ public class WinFormsApplicationBuilderTests
         public void Dispose() => IsDisposed = true;
     }
 
+    private sealed class AsyncOnlyTestService : IAsyncDisposable
+    {
+        private int _disposed;
+
+        internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+
+        public async ValueTask DisposeAsync()
+        {
+            await Task.Yield();
+            Interlocked.Exchange(ref _disposed, 1);
+        }
+    }
+
     /// <summary>
     ///  Represents a service that is intentionally not registered in test scopes.
     /// </summary>
@@ -1693,14 +1782,18 @@ public class WinFormsApplicationBuilderTests
             List<string>? events = null,
             Func<CancellationToken, Task>? startAsync = null,
             Func<CancellationToken, Task>? stopAsync = null,
-            Func<IServiceScope>? createScope = null)
+            Func<IServiceScope>? createScope = null,
+            bool supportsScopes = true,
+            bool asyncOnlyScopedService = false)
         {
             _events = events;
             _startAsync = startAsync;
             _stopAsync = stopAsync;
             Lifetime = new TestHostApplicationLifetime();
-            ScopeFactory = new(Lifetime, createScope);
-            _services = new TestServiceProvider(Lifetime, ScopeFactory);
+            ScopeFactory = new(Lifetime, createScope, asyncOnlyScopedService);
+            _services = new TestServiceProvider(
+                Lifetime,
+                supportsScopes ? ScopeFactory : null);
         }
 
         internal TestHostApplicationLifetime Lifetime { get; }
@@ -1781,8 +1874,9 @@ public class WinFormsApplicationBuilderTests
 
     private sealed class TestServiceProvider(
         TestHostApplicationLifetime lifetime,
-        TestServiceScopeFactory scopeFactory,
-        TestScopedService? scopedService = null) : IServiceProvider
+        TestServiceScopeFactory? scopeFactory,
+        TestScopedService? scopedService = null,
+        AsyncOnlyTestService? asyncOnlyScopedService = null) : IServiceProvider
     {
         public object? GetService(Type serviceType)
             => serviceType switch
@@ -1790,6 +1884,7 @@ public class WinFormsApplicationBuilderTests
                 _ when serviceType == typeof(IHostApplicationLifetime) => lifetime,
                 _ when serviceType == typeof(IServiceScopeFactory) => scopeFactory,
                 _ when serviceType == typeof(TestScopedService) => scopedService,
+                _ when serviceType == typeof(AsyncOnlyTestService) => asyncOnlyScopedService,
                 _ => null
             };
     }
@@ -1798,15 +1893,18 @@ public class WinFormsApplicationBuilderTests
     {
         private readonly Func<IServiceScope>? _createScope;
         private readonly TestHostApplicationLifetime _lifetime;
+        private readonly bool _asyncOnlyScopedService;
         private int _createdCount;
         private int _disposedCount;
 
         internal TestServiceScopeFactory(
             TestHostApplicationLifetime lifetime,
-            Func<IServiceScope>? createScope)
+            Func<IServiceScope>? createScope,
+            bool asyncOnlyScopedService)
         {
             _lifetime = lifetime;
             _createScope = createScope;
+            _asyncOnlyScopedService = asyncOnlyScopedService;
         }
 
         internal int CreatedCount => Volatile.Read(ref _createdCount);
@@ -1817,6 +1915,17 @@ public class WinFormsApplicationBuilderTests
         {
             Interlocked.Increment(ref _createdCount);
 
+            if (_asyncOnlyScopedService)
+            {
+                AsyncOnlyTestService service = new();
+                IServiceProvider asyncServices = new TestServiceProvider(
+                    _lifetime,
+                    this,
+                    asyncOnlyScopedService: service);
+
+                return new AsyncOnlyTestServiceScope(this, asyncServices, service);
+            }
+
             return _createScope?.Invoke()
                 ?? new TestServiceScope(
                     this,
@@ -1824,6 +1933,28 @@ public class WinFormsApplicationBuilderTests
         }
 
         internal void OnScopeDisposed() => Interlocked.Increment(ref _disposedCount);
+    }
+
+    private sealed class AsyncOnlyTestServiceScope(
+        TestServiceScopeFactory owner,
+        IServiceProvider serviceProvider,
+        AsyncOnlyTestService service) : IServiceScope, IAsyncDisposable
+    {
+        private int _disposed;
+
+        public IServiceProvider ServiceProvider { get; } = serviceProvider;
+
+        public void Dispose()
+            => throw new InvalidOperationException("This scope requires asynchronous disposal.");
+
+        public async ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                await service.DisposeAsync();
+                owner.OnScopeDisposed();
+            }
+        }
     }
 
     private sealed class TestServiceScope(

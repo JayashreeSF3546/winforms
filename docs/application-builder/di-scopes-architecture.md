@@ -128,7 +128,7 @@ The activation methods added for #14950 are prototype public APIs recorded in
 | Object/lifetime | Activation and service access | Scope owner and end |
 |---|---|---|
 | Application | The Generic Host owns the root provider and application lifetime. A custom `ApplicationContext` is part of that lifetime, not a second DI root. | The application disposes activated Forms and their scopes before disposing the host. The host disposes its root provider when the application is disposed. |
-| Startup or modeless Form | Create a Form activation scope and invoke the service-aware factory. `CreateForm` returns the modeless Form without showing it. | The Form's scope is disposed when its `Disposed` event is raised, after child controls and container-owned components are torn down. A canceled close keeps both alive. Any activated Forms remaining when the application loop exits are disposed by the application. |
+| Service-aware startup or modeless Form | Create a Form activation scope and invoke the service-aware factory. `CreateForm` returns the modeless Form without showing it. Parameterless startup Forms and supplied Form instances do not require scope support from the host. | The Form's scope is disposed when its `Disposed` event is raised, after child controls and container-owned components are torn down. A canceled close keeps both alive. Any activated Forms remaining when the application loop exits are disposed by the application. Async-only scoped services are disposed asynchronously and awaited during application shutdown. |
 | Modal dialog | `ShowDialog` creates a distinct activation scope, invokes the factory, shows the dialog, and disposes the Form and scope after the modal loop, including failure paths. | The modal invocation owns cleanup. The caller's Form ownership does not transfer DI scope ownership. |
 | UserControl | Keep Designer construction parameterless. The root Form factory may explicitly assign declared dependencies after normal control construction. | It participates through dependencies from the owning Form's activation. It receives no automatic provider and creates no scope. |
 | Component | Continue to support `IContainer`/Designer construction. The root Form factory may explicitly assign declared dependencies to components it owns. | Its owner disposes it before the Form's `Disposed` event and Form scope. It receives no automatic provider and creates no scope. |
@@ -165,12 +165,15 @@ passed explicitly; they must not be obtained through a parent or global
 service locator.
 
 An application context owns the application lifetime, not a separate service
-scope. Its initial `MainForm`, when present, receives a Form scope. Forms
+scope. Its initial `MainForm` does not implicitly receive a Form scope. Forms
 created later by custom context code should use `CreateForm` or `ShowDialog`;
 direct `new Form()` calls remain outside builder activation. Modeless windows
 each own their activation scopes, even when one window is the native owner of
-another. With no Generic Host, the factory receives an empty provider; when a
-host is supplied, its provider must expose `IServiceScopeFactory`.
+another. With no Generic Host, an activation factory receives an empty
+provider. When a host is supplied, its provider must expose
+`IServiceScopeFactory` only for service-aware startup activation or calls to
+`CreateForm` and `ShowDialog`; ordinary startup paths do not require scope
+support.
 
 ## Alternatives evaluated
 

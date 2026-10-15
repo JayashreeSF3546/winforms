@@ -110,11 +110,12 @@ The same factory boundary is exposed through `WinFormsApplication.CreateForm`
 for modeless Forms and `WinFormsApplication.ShowDialog` for modal dialogs.
 Modeless scopes remain alive through canceled closes and are cleaned up when
 the Form is disposed or the application loop ends. Modal helpers dispose the
-dialog and scope after the modal operation, including exceptional exits. A
-startup Form supplied as an instance, by a parameterless factory, or as the
-`MainForm` of a supplied context also receives an activation scope. The
-application context remains the application lifetime owner and does not itself
-acquire a Form scope.
+dialog and scope after the modal operation, including exceptional exits.
+Parameterless startup Forms, supplied Form instances, and the `MainForm` of a
+supplied context retain their ordinary WinForms construction and lifetime
+behavior; they do not acquire an activation scope. The application context
+remains the application lifetime owner and does not itself acquire a Form
+scope.
 
 ## Alternatives reviewed
 

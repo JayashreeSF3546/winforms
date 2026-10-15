@@ -32,6 +32,9 @@ public sealed partial class WinFormsApplicationLeakTests
     private const long ManagedMemoryGrowthToleranceBytes = 1_048_576;
     private const int ProcessHandleGrowthTolerance = 16;
     private const uint GuiResourceGrowthTolerance = 4;
+    private const uint WmQuit = 0x0012;
+    private static readonly TimeSpan s_staThreadCompletionTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan s_staThreadCleanupTimeout = TimeSpan.FromSeconds(15);
 
     private readonly ITestOutputHelper _output;
 
@@ -44,7 +47,9 @@ public sealed partial class WinFormsApplicationLeakTests
     public void ScopedActivationStress_ReleasesScopesObjectsAndNativeResources()
     {
         List<string> report = [];
-        RunOnStaThread(() => RunStressScenario(report));
+        RunOnStaThread(
+            () => RunStressScenario(report),
+            TestContext.Current.CancellationToken);
 
         foreach (string line in report)
         {
@@ -337,6 +342,17 @@ public sealed partial class WinFormsApplicationLeakTests
     [LibraryImport("user32.dll", SetLastError = true)]
     private static partial uint GetGuiResources(nint processHandle, GuiResourceFlags flags);
 
+    [LibraryImport("kernel32.dll")]
+    private static partial uint GetCurrentThreadId();
+
+    [LibraryImport("user32.dll", EntryPoint = "PostThreadMessageW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool PostThreadMessage(
+        uint threadId,
+        uint message,
+        nint wParam,
+        nint lParam);
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void CollectGarbage()
     {
@@ -386,11 +402,15 @@ public sealed partial class WinFormsApplicationLeakTests
         }
     }
 
-    private static void RunOnStaThread(Action action)
+    private static void RunOnStaThread(Action action, CancellationToken cancellationToken = default)
     {
         Exception? failure = null;
+        uint nativeThreadId = 0;
+        TaskCompletionSource completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         Thread thread = new(() =>
         {
+            nativeThreadId = GetCurrentThreadId();
+
             try
             {
                 action();
@@ -399,15 +419,78 @@ public sealed partial class WinFormsApplicationLeakTests
             {
                 failure = exception;
             }
-        });
+            finally
+            {
+                completed.TrySetResult();
+            }
+        })
+        {
+            IsBackground = true
+        };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        thread.Join();
+
+        bool finished;
+
+        try
+        {
+            completed.Task
+                .WaitAsync(s_staThreadCompletionTimeout, cancellationToken)
+                .GetAwaiter()
+                .GetResult();
+            finished = true;
+        }
+        catch (OperationCanceledException)
+        {
+            RequestStaThreadExit(nativeThreadId, out _);
+            _ = thread.Join(s_staThreadCleanupTimeout);
+            throw;
+        }
+        catch (TimeoutException)
+        {
+            finished = false;
+        }
+
+        if (!finished)
+        {
+            bool exitPosted = RequestStaThreadExit(nativeThreadId, out int lastWin32Error);
+            bool terminated = thread.Join(s_staThreadCleanupTimeout);
+
+            throw new TimeoutException(
+                $"The STA test thread did not complete within {s_staThreadCompletionTimeout}. "
+                    + $"Posting WM_QUIT succeeded: {exitPosted}; Win32 error: {lastWin32Error}; "
+                    + $"thread terminated during cleanup: {terminated}.");
+        }
+
+        if (!thread.Join(s_staThreadCleanupTimeout))
+        {
+            bool exitPosted = RequestStaThreadExit(nativeThreadId, out int lastWin32Error);
+            bool terminated = thread.Join(s_staThreadCleanupTimeout);
+
+            throw new TimeoutException(
+                "The STA test thread signaled completion but did not exit. "
+                    + $"Posting WM_QUIT succeeded: {exitPosted}; Win32 error: {lastWin32Error}; "
+                    + $"thread terminated during cleanup: {terminated}.");
+        }
 
         if (failure is not null)
         {
             ExceptionDispatchInfo.Capture(failure).Throw();
         }
+    }
+
+    private static bool RequestStaThreadExit(uint nativeThreadId, out int lastWin32Error)
+    {
+        if (nativeThreadId == 0)
+        {
+            lastWin32Error = 0;
+            return false;
+        }
+
+        bool posted = PostThreadMessage(nativeThreadId, WmQuit, 0, 0);
+        lastWin32Error = posted ? 0 : Marshal.GetLastWin32Error();
+
+        return posted;
     }
 
     /// <summary>
