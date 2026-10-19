@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Collections.Concurrent;
@@ -14,6 +14,9 @@ internal sealed class LifecycleRecorder
         Path.Combine(AppContext.BaseDirectory, "lifecycle.log");
 
     public event EventHandler<string>? EntryRecorded;
+
+
+
 
     public void Record(string eventName)
     {
