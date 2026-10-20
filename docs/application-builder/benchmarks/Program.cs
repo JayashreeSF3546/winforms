@@ -86,7 +86,10 @@ internal static partial class Program
             Console.WriteLine();
         }
 
-        InfrastructureBenchmarks.Run(args);
+        if (Array.IndexOf(args, "--skip-infrastructure") < 0)
+        {
+            InfrastructureBenchmarks.Run(args);
+        }
 
         Console.WriteLine("These comparative measurements are diagnostic, not CI thresholds.");
     }
@@ -258,7 +261,8 @@ internal static partial class Program
             process.Threads.Count,
             process.WorkingSet64,
             process.PrivateMemorySize64,
-            GC.GetTotalMemory(forceFullCollection: true));
+            GC.GetTotalMemory(forceFullCollection: true),
+            AppDomain.CurrentDomain.GetAssemblies().Length);
     }
 
     private static WorkerExecution RunWorkerProcess(
@@ -377,12 +381,19 @@ internal static partial class Program
             int cycleCount = Math.Min(snapshotIndex * cyclesPerCheckpoint, iterationCount);
 
             Console.WriteLine(
-                $"  Resource delta after cycle {cycleCount} (post-GC): "
-                    + $"handles {current.HandleCount - previous.HandleCount:+#;-#;0}, "
-                    + $"threads {current.ThreadCount - previous.ThreadCount:+#;-#;0}, "
-                    + $"working set {current.WorkingSetBytes - previous.WorkingSetBytes:+#;-#;0}, "
-                    + $"private bytes {current.PrivateBytes - previous.PrivateBytes:+#;-#;0}, "
-                    + $"managed live bytes {current.ManagedLiveBytes - previous.ManagedLiveBytes:+#;-#;0}");
+                $"  Resources after cycle {cycleCount} (post-GC): "
+                    + $"handles {current.HandleCount} "
+                    + $"(delta {current.HandleCount - previous.HandleCount:+#;-#;0}), "
+                    + $"threads {current.ThreadCount} "
+                    + $"(delta {current.ThreadCount - previous.ThreadCount:+#;-#;0}), "
+                    + $"working set {current.WorkingSetBytes:N0} B "
+                    + $"(delta {current.WorkingSetBytes - previous.WorkingSetBytes:+#;-#;0}), "
+                    + $"private bytes {current.PrivateBytes:N0} B "
+                    + $"(delta {current.PrivateBytes - previous.PrivateBytes:+#;-#;0}), "
+                    + $"managed live bytes {current.ManagedLiveBytes:N0} B "
+                    + $"(delta {current.ManagedLiveBytes - previous.ManagedLiveBytes:+#;-#;0}), "
+                    + $"assemblies {current.ManagedAssemblyCount} "
+                    + $"(delta {current.ManagedAssemblyCount - previous.ManagedAssemblyCount:+#;-#;0})");
         }
     }
 
@@ -431,7 +442,8 @@ internal static partial class Program
         int ThreadCount,
         long WorkingSetBytes,
         long PrivateBytes,
-        long ManagedLiveBytes);
+        long ManagedLiveBytes,
+        int ManagedAssemblyCount);
 
     /// <summary>
     ///  Carries a worker's measurements and optional resource snapshots.
