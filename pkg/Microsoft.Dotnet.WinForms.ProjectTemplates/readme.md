@@ -5,6 +5,7 @@ We provide the following templates:
 * [Windows Forms app (VB)](./content/WinFormsApplication-VisualBasic)
 * [Windows Forms app with Application Builder (C#)](./content/WinFormsApplicationBuilder-CSharp)
 * [Windows Forms app with Application Builder (VB)](./content/WinFormsApplicationBuilder-VisualBasic)
+* [Windows Forms Blazor Hybrid app with Application Builder (C#)](./content/WinFormsBlazorHybrid-CSharp)
 * [Windows Forms class library (C#)](./content/WinFormsLibrary-CSharp)
 * [Windows Forms class library (VB)](./content/WinFormsLibrary-VisualBasic)
 * [Windows Forms control library (C#)](./content/WinFormsControlLibrary-CSharp)
@@ -63,3 +64,23 @@ They include a Designer-compatible startup Form, typed greeting options,
 structured logging through `ILogger<T>`, and per-user JSON settings. A custom
 user-settings file location and application identifier can be configured in
 the generated code if needed.
+
+## Blazor Hybrid Application Builder template
+
+The C# `winforms-blazor` template adds a Razor SDK project and the
+`Microsoft.AspNetCore.Components.WebView.WindowsForms` package. It composes
+`BlazorWebView` into the Application Builder's host and dependency-injection
+scope, so Forms and Razor components share configuration, logging, and
+registered services without constructing a second service provider.
+
+Install and generate the template with:
+
+```powershell
+dotnet new install .\pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\content\WinFormsBlazorHybrid-CSharp
+dotnet new winforms-blazor --name BuilderBlazorSample
+```
+
+The generated app uses Razor routing and static assets under `wwwroot`. Target
+machines must have the WebView2 Runtime available. See
+[the Hybrid template architecture](../../docs/application-builder/blazor-hybrid-template.md)
+for host, disposal, deployment, and dependency decisions.

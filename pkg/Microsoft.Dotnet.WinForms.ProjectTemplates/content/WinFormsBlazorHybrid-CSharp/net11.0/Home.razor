@@ -1,0 +1,22 @@
+@page "/"
+@inject IConfiguration Configuration
+@inject ILogger<Home> Logger
+@inject GreetingService GreetingService
+
+<main>
+    <h1>WinForms + Blazor Hybrid</h1>
+    <p>Greeting prefix from the shared host configuration: <strong>@Configuration["Greeting:Prefix"]</strong></p>
+    <p role="status">@_message</p>
+    <button @onclick="ShowGreeting">Show greeting</button>
+    <p><NavLink href="/details">Open the details page</NavLink></p>
+</main>
+
+@code {
+    private string _message = "Select the button to call the shared application service.";
+
+    private void ShowGreeting()
+    {
+        _message = GreetingService.CreateGreeting("Blazor");
+        Logger.LogInformation("Displayed the Blazor Hybrid greeting.");
+    }
+}

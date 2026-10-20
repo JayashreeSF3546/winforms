@@ -1,0 +1,12 @@
+{
+  "version": "1.0.0.0",
+  "strings": {
+    "name": "Windows Forms Blazor Hybrid App (Application Builder)",
+    "description": "A Windows Forms Blazor Hybrid app using the Application Builder and a shared host.",
+    "symbols/skipRestore/description": "If specified, skips the automatic restore of the project on create.",
+    "symbols/skipRestore/displayName": "Skip restore",
+    "postActions/restore/description": "Restores NuGet packages required by this project.",
+    "postActions/restore/manualInstructions/default/text": "Run 'dotnet restore'",
+    "postActions/open-file/description": "Opens MainForm.cs in the editor"
+  }
+}

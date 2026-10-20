@@ -1,0 +1,17 @@
+@page "/details"
+@inject IConfiguration Configuration
+@inject ILogger<Details> Logger
+
+<main>
+    <h1>Shared application services</h1>
+    <p>This component reads <code>Greeting:Prefix</code> from the host configuration.</p>
+    <p>Current prefix: <strong>@Configuration["Greeting:Prefix"]</strong></p>
+    <p><NavLink href="/">Return to the home page</NavLink></p>
+</main>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Logger.LogInformation("Opened the Blazor Hybrid details page.");
+    }
+}
