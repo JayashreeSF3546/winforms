@@ -1,0 +1,20 @@
+<LoggingErrorBoundary>
+    <ChildContent>
+        <Router AppAssembly="@typeof(App).Assembly">
+            <Found Context="routeData">
+                <RouteView RouteData="@routeData" />
+                <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+            </Found>
+            <NotFound>
+                <h1>Page not found</h1>
+                <NavLink href="/">Return to the home page</NavLink>
+            </NotFound>
+        </Router>
+    </ChildContent>
+    <ErrorContent>
+        <main role="alert">
+            <h1>Something went wrong</h1>
+            <p>An unexpected error occurred. Check the application logs for details.</p>
+        </main>
+    </ErrorContent>
+</LoggingErrorBoundary>
