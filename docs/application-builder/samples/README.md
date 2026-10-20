@@ -159,6 +159,57 @@ for Visual Basic, and preserve a copy before editing it. The migration renames
 `themeName` to `theme` and supplies a default for `showTips`. Do not edit
 settings while another sample instance is running.
 
+## Migration, enterprise, system tray, and backend samples (#14968)
+
+These focused C# samples show architectures that are materially different from
+the basic startup and infrastructure examples. Each project references the
+WinForms implementation in this checkout and can be built from the repository
+root:
+
+```powershell
+dotnet build docs\application-builder\samples\Migration\CSharp\WinFormsApplicationBuilder.Migration.CSharp.csproj
+dotnet build docs\application-builder\samples\Enterprise\CSharp\WinFormsApplicationBuilder.Enterprise.CSharp.csproj
+dotnet build docs\application-builder\samples\SystemTray\CSharp\WinFormsApplicationBuilder.SystemTray.CSharp.csproj
+dotnet build docs\application-builder\samples\Backend\CSharp\WinFormsApplicationBuilder.Backend.CSharp.csproj
+```
+
+Run one of the examples from the repository root with its matching project:
+
+```powershell
+dotnet run --project docs\application-builder\samples\Migration\CSharp\WinFormsApplicationBuilder.Migration.CSharp.csproj
+dotnet run --project docs\application-builder\samples\Enterprise\CSharp\WinFormsApplicationBuilder.Enterprise.CSharp.csproj
+dotnet run --project docs\application-builder\samples\SystemTray\CSharp\WinFormsApplicationBuilder.SystemTray.CSharp.csproj
+dotnet run --project docs\application-builder\samples\Backend\CSharp\WinFormsApplicationBuilder.Backend.CSharp.csproj
+```
+
+- **Migration** keeps an ordinary existing Form and moves startup to
+  `WinFormsApplication.CreateBuilder`. The host supplies validated
+  configuration and logging; the Form's controls and event-driven UI remain
+  normal WinForms code. The old startup call is
+  `Application.Run(new MainForm())`; the sample adds injected configuration
+  and logging, then uses `UseStartupForm` for activation instead.
+- **Enterprise** separates the UI from a scoped order service, validates
+  configuration before showing the window, and logs host start/stop through an
+  `IHostedService`. It demonstrates service boundaries and lifetime ownership
+  without adding a framework-like application layer.
+- **System tray** runs an `ApplicationContext` without a visible startup Form.
+  The tray icon opens and hides the window; only the explicit tray **Exit**
+  command ends the message loop. The context disposes the icon, menu, and
+  optional window during Application Builder shutdown, before the host stops.
+  Run this sample in an interactive Windows session.
+- **Backend** uses a configured singleton `HttpClient`, a small health-client
+  service, and a cancellable `BackgroundService` to poll a backend endpoint.
+  Request status and transient connection failures go through the host logging
+  pipeline; response bodies and credentials are not logged. Set
+  `Backend:BaseAddress` in `appsettings.json` to a service that exposes
+  `/health`; the default loopback URL is a placeholder.
+
+The samples use the host and dependency-injection mechanisms already provided
+by the Application Builder. They do not introduce shared sample frameworks,
+extra message loops, or additional service providers. Backend availability and
+system-tray behavior require runtime checks in the target Windows environment;
+successful builds alone do not validate those scenarios.
+
 ## Decisions and scope
 
 - The samples use the existing `IHost` integration and do not add a
