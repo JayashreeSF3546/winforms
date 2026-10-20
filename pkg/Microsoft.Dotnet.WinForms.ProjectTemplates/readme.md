@@ -84,3 +84,14 @@ The generated app uses Razor routing and static assets under `wwwroot`. Target
 machines must have the WebView2 Runtime available. See
 [the Hybrid template architecture](../../docs/application-builder/blazor-hybrid-template.md)
 for host, disposal, deployment, and dependency decisions.
+
+## Automated validation
+
+The pull request pipeline runs
+[`eng/scripts/ValidateProjectTemplates.ps1`](../../eng/scripts/ValidateProjectTemplates.ps1)
+on the Windows x64 Debug leg. The script installs the template set into an isolated
+CLI home, verifies generated files for all nine variants, restores and builds each
+project, publishes applications as framework-dependent and self-contained, publishes
+libraries, and launches the classic C# and VB applications for a bounded startup
+smoke test. Application Builder templates compile against the locally built WinForms
+reference assemblies because their APIs are not yet present in the installed SDK.

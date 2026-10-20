@@ -8,11 +8,11 @@ Namespace WinFormsApplicationBuilderApp
         Inherits Form
 
         Private components As IContainer
-        Private greetingLabel As Label
-        Private nameTextBox As TextBox
+        Private WithEvents greetingLabel As Label
+        Private WithEvents nameTextBox As TextBox
         Private WithEvents greetButton As Button
         Private WithEvents saveButton As Button
-        Private statusLabel As Label
+        Private WithEvents statusLabel As Label
 
         Protected Overrides Sub Dispose(disposing As Boolean)
             Try
