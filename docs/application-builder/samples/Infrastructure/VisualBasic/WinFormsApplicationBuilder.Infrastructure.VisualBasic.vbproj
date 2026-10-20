@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net11.0-windows7.0</TargetFramework>
+    <DisableTransitiveFrameworkReferences>true</DisableTransitiveFrameworkReferences>
+    <RootNamespace>ApplicationBuilderSample</RootNamespace>
+    <StartupObject>ApplicationBuilderSample.Infrastructure.VisualBasic.Program</StartupObject>
+    <LangVersion>latest</LangVersion>
+    <OptionExplicit>On</OptionExplicit>
+    <OptionStrict>On</OptionStrict>
+    <OptionInfer>On</OptionInfer>
+    <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+    <UserSecretsId>WinFormsApplicationBuilder.InfrastructureSample.VisualBasic</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <ProjectReference Include="..\..\..\..\..\src\System.Windows.Forms\System.Windows.Forms.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

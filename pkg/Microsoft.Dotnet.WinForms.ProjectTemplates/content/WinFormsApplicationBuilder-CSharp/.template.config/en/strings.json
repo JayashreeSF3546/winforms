@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0.0",
+  "strings": {
+    "name": "Windows Forms App (Application Builder)",
+    "description": "A Windows Forms app using the Application Builder, dependency injection, configuration, logging, and user settings."
+  }
+}
