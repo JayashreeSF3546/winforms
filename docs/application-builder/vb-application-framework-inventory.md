@@ -10,6 +10,8 @@
 
 The existing builder infrastructure already supplies language-neutral startup selection, Generic Host integration, lifetime notifications, opt-in exception logging, and user-settings services. These are useful shared primitives, but they are not drop-in replacements for all legacy events or `My.*` APIs. Preserve the existing VB framework for compatibility; add shared capabilities through the `Microsoft.Extensions.WinForms` contracts and use explicit migration adapters where needed. Do not build a second VB-only host or lifecycle system.
 
+The corresponding shared contract map, usage examples, threading rules, and adapter boundaries are documented in [Shared Visual Basic and C# application-feature contracts](vb-application-framework-contracts.md).
+
 ## Legacy startup and shutdown sequence
 
 For a non-single-instance application, `WindowsFormsApplicationBase.Run(args)` stores the arguments and invokes the application model:
