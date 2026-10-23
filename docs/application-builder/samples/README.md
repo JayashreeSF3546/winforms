@@ -159,6 +159,16 @@ for Visual Basic, and preserve a copy before editing it. The migration renames
 `themeName` to `theme` and supplies a default for `showTips`. Do not edit
 settings while another sample instance is running.
 
+## VB Application Framework migration (#14979)
+
+The paired C# and Visual Basic migration samples demonstrate shared lifecycle
+notifications, single-instance activation with forwarded arguments, and
+splash-screen coordination without running `WindowsFormsApplicationBase`
+alongside the builder. Build and run the projects using the
+[migration guide](../vb-application-framework-migration.md), which maps the
+legacy `ApplicationEvents.vb` and `MyApplication` features, explains
+incremental adoption, and documents compatibility differences.
+
 ## Decisions and scope
 
 - The samples use the existing `IHost` integration and do not add a
