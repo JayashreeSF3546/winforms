@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections.Concurrent;
 using System.Runtime.ExceptionServices;
 using System.Windows.Forms;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,6 +25,7 @@ public sealed class WinFormsApplication : IDisposable
 {
     private readonly Lock _stopLock = new();
     private readonly Lock _formScopesLock = new();
+    private readonly ConcurrentQueue<string[]> _pendingActivations = new();
     private readonly List<WinFormsFormScope> _formScopes = [];
     private readonly List<Task> _formScopeDisposalTasks = [];
     private readonly IReadOnlyList<string> _commandLineArgs;
@@ -34,6 +36,7 @@ public sealed class WinFormsApplication : IDisposable
     private WinFormsApplicationOptions? _options;
     private IHost? _host;
     private IHostApplicationLifetime? _hostLifetime;
+    private WinFormsSingleInstanceCoordinator? _singleInstanceCoordinator;
     private ApplicationContext? _applicationContext;
     private Control? _marshallingControl;
     private Thread? _uiThread;
@@ -51,6 +54,9 @@ public sealed class WinFormsApplication : IDisposable
     private int _hostOwnershipTransferred;
     private int _disposeRequested;
     private int _applicationStoppingDispatchScheduled;
+    private int _applicationStarted;
+    private int _activationDispatchScheduled;
+    private int _singleInstanceStopping;
 
     internal WinFormsApplication(WinFormsApplicationOptions options)
     {
@@ -95,6 +101,23 @@ public sealed class WinFormsApplication : IDisposable
     ///  Gets a read-only snapshot of the command-line arguments supplied when the application was built.
     /// </summary>
     public IReadOnlyList<string> CommandLineArgs => _commandLineArgs;
+
+    /// <summary>
+    ///  Occurs when another process requests activation of this application.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   The event is raised on the application UI thread after
+    ///   <see cref="WinFormsApplicationLifetime.ApplicationStarted"/>. Requests
+    ///   received earlier are queued until startup completes.
+    ///  </para>
+    ///  <para>
+    ///   After the handler returns, the runtime restores and activates the main
+    ///   form when <see cref="WinFormsApplicationActivationEventArgs.BringToForeground"/>
+    ///   is true and a main form is available.
+    ///  </para>
+    /// </remarks>
+    public event EventHandler<WinFormsApplicationActivationEventArgs>? ActivationRequested;
 
     /// <summary>
     ///  Starts the configured host and runs the Windows Forms message loop.
@@ -143,6 +166,7 @@ public sealed class WinFormsApplication : IDisposable
         ApplicationContext? applicationContext = null;
         Form? startupForm = null;
         bool startupNotificationRaised = false;
+        bool secondaryInstance = false;
 
         _uiThread = Thread.CurrentThread;
 
@@ -168,13 +192,38 @@ public sealed class WinFormsApplication : IDisposable
             threadContext = Application.ThreadContext.FromCurrent();
             _marshallingControl = threadContext.MarshallingControl;
 
-            InitializeHostLifetime();
-
             if (!HasStartupSelection(options))
             {
+                InitializeHostLifetime();
+
                 throw new InvalidOperationException(
                     "Configure a startup form or application context before running the application.");
             }
+
+            if (options.UseSingleInstance)
+            {
+                string pipeName = WinFormsSingleInstanceIdentity.CreatePipeName(
+                    options.SingleInstanceApplicationId);
+
+                if (WinFormsSingleInstanceCoordinator.TryCreatePrimary(
+                    pipeName,
+                    OnSingleInstanceActivationReceived,
+                    OnSingleInstanceListenerFailure,
+                    out WinFormsSingleInstanceCoordinator? coordinator))
+                {
+                    _singleInstanceCoordinator = coordinator
+                        ?? throw new InvalidOperationException("The primary instance coordinator was not created.");
+                }
+                else
+                {
+                    secondaryInstance = true;
+                    WinFormsSingleInstanceCoordinator.SendActivation(pipeName, options.CommandLineArgs);
+
+                    return;
+                }
+            }
+
+            InitializeHostLifetime();
 
             startupNotificationRaised = true;
             bool startupCancelled = Lifetime.NotifyApplicationStarting();
@@ -190,6 +239,7 @@ public sealed class WinFormsApplication : IDisposable
                 if (_host is null)
                 {
                     Lifetime.NotifyApplicationStarted();
+                    OnApplicationStarted();
                 }
                 else
                 {
@@ -220,10 +270,14 @@ public sealed class WinFormsApplication : IDisposable
         }
         finally
         {
-            NotifyApplicationStopping();
+            if (!secondaryInstance)
+            {
+                NotifyApplicationStopping();
+            }
+
             threadContext ??= Application.ThreadContext.Current;
 
-            if (startupNotificationRaised && applicationContext is null)
+            if ((startupNotificationRaised || secondaryInstance) && applicationContext is null)
             {
                 try
                 {
@@ -316,13 +370,38 @@ public sealed class WinFormsApplication : IDisposable
                 }
             }
 
+            if (secondaryInstance)
+            {
+                try
+                {
+                    StopHostForSecondaryInstance();
+                }
+                catch (Exception exception)
+                {
+                    failure = CombineFailures(failure, exception);
+                }
+            }
+
             try
             {
-                Lifetime.NotifyApplicationStopped();
+                _singleInstanceCoordinator?.Dispose();
+                _singleInstanceCoordinator = null;
             }
             catch (Exception exception)
             {
                 failure = CombineFailures(failure, exception);
+            }
+
+            if (!secondaryInstance)
+            {
+                try
+                {
+                    Lifetime.NotifyApplicationStopped();
+                }
+                catch (Exception exception)
+                {
+                    failure = CombineFailures(failure, exception);
+                }
             }
 
             _applicationStoppingRegistration.Dispose();
@@ -832,6 +911,12 @@ public sealed class WinFormsApplication : IDisposable
             if (Volatile.Read(ref _allowThreadExit) == 0 && startupForm is not null)
             {
                 applicationContext.MainForm = startupForm;
+            }
+
+            OnApplicationStarted();
+
+            if (Volatile.Read(ref _allowThreadExit) == 0 && startupForm is not null)
+            {
                 startupForm.Visible = true;
             }
         }
@@ -904,6 +989,17 @@ public sealed class WinFormsApplication : IDisposable
 
     private void NotifyApplicationStopping()
     {
+        Volatile.Write(ref _singleInstanceStopping, 1);
+
+        try
+        {
+            _singleInstanceCoordinator?.Stop();
+        }
+        catch (Exception exception)
+        {
+            RecordRuntimeException(exception);
+        }
+
         try
         {
             Lifetime.NotifyApplicationStopping();
@@ -915,6 +1011,93 @@ public sealed class WinFormsApplication : IDisposable
         finally
         {
             _applicationStoppingSource.TrySetResult();
+        }
+    }
+
+    private bool OnSingleInstanceActivationReceived(string[] arguments)
+    {
+        if (Volatile.Read(ref _singleInstanceStopping) != 0)
+        {
+            return false;
+        }
+
+        _pendingActivations.Enqueue(arguments);
+
+        if (Volatile.Read(ref _applicationStarted) != 0)
+        {
+            ScheduleActivationDispatch();
+        }
+
+        return true;
+    }
+
+    private void OnSingleInstanceListenerFailure(Exception exception)
+    {
+        RecordRuntimeException(exception);
+        _ = EnsureHostStopStarted(CancellationToken.None);
+    }
+
+    private void OnApplicationStarted()
+    {
+        Volatile.Write(ref _applicationStarted, 1);
+
+        if (!_pendingActivations.IsEmpty)
+        {
+            ScheduleActivationDispatch();
+        }
+    }
+
+    private void ScheduleActivationDispatch()
+    {
+        if (Volatile.Read(ref _singleInstanceStopping) != 0
+            || Interlocked.CompareExchange(ref _activationDispatchScheduled, 1, 0) != 0)
+        {
+            return;
+        }
+
+        if (_marshallingControl is not { IsDisposed: false, IsHandleCreated: true } marshallingControl)
+        {
+            Interlocked.Exchange(ref _activationDispatchScheduled, 0);
+
+            return;
+        }
+
+        marshallingControl.BeginInvoke((Action)DispatchPendingActivations);
+    }
+
+    private void DispatchPendingActivations()
+    {
+        Interlocked.Exchange(ref _activationDispatchScheduled, 0);
+
+        while (Volatile.Read(ref _singleInstanceStopping) == 0
+            && _pendingActivations.TryDequeue(out string[]? arguments))
+        {
+            WinFormsApplicationActivationEventArgs eventArgs = new(arguments);
+            ActivationRequested?.Invoke(this, eventArgs);
+
+            if (eventArgs.BringToForeground
+                && _applicationContext?.MainForm is Form mainForm
+                && !mainForm.IsDisposed)
+            {
+                if (mainForm.WindowState == FormWindowState.Minimized)
+                {
+                    mainForm.WindowState = FormWindowState.Normal;
+                }
+
+                mainForm.Activate();
+            }
+        }
+    }
+
+    private void StopHostForSecondaryInstance()
+    {
+        IHost? host = _host;
+
+        if (host?.Services.GetService(typeof(IHostApplicationLifetime)) is IHostApplicationLifetime hostLifetime
+            && hostLifetime.ApplicationStarted.IsCancellationRequested
+            && !hostLifetime.ApplicationStopped.IsCancellationRequested)
+        {
+            host.StopAsync().GetAwaiter().GetResult();
         }
     }
 

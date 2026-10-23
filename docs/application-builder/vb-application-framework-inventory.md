@@ -72,7 +72,7 @@ Related issue reports are inputs to the later single-instance work, not proof of
 - [#4805](https://github.com/dotnet/winforms/issues/4805) reports missing `StartupNextInstance` when no main form is set; current source has a synchronization-context fallback, but this path lacks focused regression coverage.
 - [#3296](https://github.com/dotnet/winforms/issues/3296) discusses instance identity compatibility with .NET Framework. Current source uses GUID plus major/minor when available and MVID only as a fallback.
 
-The shared builder has no single-instance detection, activation, or argument-forwarding contract today. These features belong to #14976, which must specify user/session/elevation boundaries, pipe naming, races, error behavior, and validation scope before adding a shared API.
+The shared builder implements single-instance detection, activation, and argument forwarding through `UseSingleInstance(...)` and `ActivationRequested`. Its default identity separates installation paths, major/minor versions, Windows users, and Windows sessions; an explicit application ID permits deliberate identity sharing across installation paths. The implementation and its security, transport, event-ordering, and failure boundaries are described in [Single-instance activation architecture](single-instance-architecture.md). Multi-user, multi-session, elevation, and remote-desktop environment validation remains part of #14980.
 
 ## Splash-screen behavior
 
@@ -107,8 +107,8 @@ For this inventory, **full parity** means a behavior has a shared builder contra
 | Classification | Capabilities and decision |
 |---|---|
 | Full parity target | Both languages use the same `WinFormsApplicationBuilder`, `WinFormsApplication`, `WinFormsApplicationLifetime`, Generic Host, and service contracts. No VB-only builder/host/lifecycle implementation. |
-| Partial parity | Startup form/application-context selection maps to builder startup selection. `ApplicationStarted`/`ApplicationStopping`/`ApplicationStopped` provide shared host lifecycle notifications, but do not match cancelable VB `Startup`, post-loop `Shutdown`, or `ShutdownStyle`. Generic Host command-line configuration is not the same as VB's read-only application args or activation args. Exception logging is not the VB exception event. |
-| Migration-only | `ApplicationEvents.vb`/`MyApplication` event wiring, `My.Settings` save behavior, `StartupNextInstance`, the VB splash screen, VB `Log`, and legacy `My.Application` services remain supported through their existing APIs; adapters and migration samples are explicit and opt-in. |
+| Partial parity | Startup form/application-context selection maps to builder startup selection. `ApplicationStarted`/`ApplicationStopping`/`ApplicationStopped` provide shared host lifecycle notifications, but do not match cancelable VB `Startup`, post-loop `Shutdown`, or `ShutdownStyle`. `CommandLineArgs` and `ActivationRequested` provide shared argument snapshots, but are not automatic aliases for VB events. Exception logging is not the VB exception event. |
+| Migration-only | `ApplicationEvents.vb`/`MyApplication` event wiring, `My.Settings` save behavior, the legacy `StartupNextInstance` event, the VB splash screen, VB `Log`, and legacy `My.Application` services remain supported through their existing APIs; adapters and migration samples are explicit and opt-in. |
 | Non-goal | Reimplementing `ConsoleApplicationBase`, VB compiler/project-system generation, all of `My.Computer`, authentication/principal management, or a new settings/logging/configuration/DI/host infrastructure. Reuse platform and Generic Host services where they meet the intended contract. |
 
 ### Architecture decisions

@@ -53,6 +53,16 @@ internal sealed class WinFormsApplicationOptions
     internal ReadOnlyCollection<string> CommandLineArgs { get; set; } = Array.AsReadOnly(Array.Empty<string>());
 
     /// <summary>
+    ///  Gets or sets whether the application accepts forwarded single-instance activations.
+    /// </summary>
+    internal bool UseSingleInstance { get; set; }
+
+    /// <summary>
+    ///  Gets or sets the explicit identity used by single-instance applications.
+    /// </summary>
+    internal string? SingleInstanceApplicationId { get; set; }
+
+    /// <summary>
     ///  Gets or sets whether the host was supplied by the caller.
     /// </summary>
     internal bool HostWasSupplied { get; set; }
@@ -78,6 +88,8 @@ internal sealed class WinFormsApplicationOptions
             Host = Host,
             HostWasSupplied = HostWasSupplied,
             CommandLineArgs = CommandLineArgs,
+            UseSingleInstance = UseSingleInstance,
+            SingleInstanceApplicationId = SingleInstanceApplicationId,
             EnableExceptionLogging = EnableExceptionLogging
         };
 }

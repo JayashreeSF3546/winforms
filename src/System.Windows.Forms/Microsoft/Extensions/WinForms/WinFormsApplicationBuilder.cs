@@ -310,6 +310,50 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
     }
 
     /// <summary>
+    ///  Enables single-instance execution using an identity derived from the entry assembly.
+    /// </summary>
+    /// <returns>This builder.</returns>
+    /// <remarks>
+    ///  <para>
+    ///   The default identity is scoped to the entry assembly, its major and minor
+    ///   version, its installation path, the current Windows user, and the current
+    ///   Windows session.
+    ///  </para>
+    /// </remarks>
+    public WinFormsApplicationBuilder UseSingleInstance()
+    {
+        _options.UseSingleInstance = true;
+        _options.SingleInstanceApplicationId = null;
+
+        return this;
+    }
+
+    /// <summary>
+    ///  Enables single-instance execution using the specified application identity.
+    /// </summary>
+    /// <param name="applicationId">The identity used to group application instances.</param>
+    /// <returns>This builder.</returns>
+    /// <remarks>
+    ///  <para>
+    ///   The identity is scoped to the current Windows user, session, and the
+    ///   entry assembly's major and minor version. The same explicit identity
+    ///   can share activation across installation paths.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    ///  <paramref name="applicationId"/> is null, empty, or whitespace.
+    /// </exception>
+    public WinFormsApplicationBuilder UseSingleInstance(string applicationId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationId);
+
+        _options.UseSingleInstance = true;
+        _options.SingleInstanceApplicationId = applicationId;
+
+        return this;
+    }
+
+    /// <summary>
     ///  Enables opt-in logging for unhandled WinForms and CLR exceptions.
     /// </summary>
     /// <returns>This builder.</returns>

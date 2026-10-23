@@ -1,7 +1,9 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Buffers.Binary;
 using System.ComponentModel;
+using System.IO.Pipes;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 
@@ -21,6 +23,142 @@ public class WinFormsApplicationBuilderTests
         WinFormsApplicationBuilder builder = WinFormsApplicationBuilder.CreateBuilder();
 
         Assert.NotNull(builder);
+    }
+
+    [Fact]
+    public void SingleInstanceIdentity_ScopesDefaultAndExplicitIdentities()
+    {
+        const string assemblyId = "application-guid";
+        const string userSid = "S-1-5-21-123";
+        const string firstPath = @"C:\Apps\First\Sample.dll";
+        const string secondPath = @"C:\Apps\Second\Sample.dll";
+
+        string defaultIdentity = WinFormsSingleInstanceIdentity.CreatePipeName(
+            applicationId: null,
+            assemblyId,
+            new Version(1, 2, 3),
+            firstPath,
+            userSid,
+            sessionId: 1);
+
+        Assert.Equal(
+            defaultIdentity,
+            WinFormsSingleInstanceIdentity.CreatePipeName(
+                applicationId: null,
+                assemblyId,
+                new Version(1, 2, 99),
+                firstPath,
+                userSid,
+                sessionId: 1));
+        Assert.NotEqual(
+            defaultIdentity,
+            WinFormsSingleInstanceIdentity.CreatePipeName(
+                applicationId: null,
+                assemblyId,
+                new Version(1, 3, 0),
+                firstPath,
+                userSid,
+                sessionId: 1));
+        Assert.NotEqual(
+            defaultIdentity,
+            WinFormsSingleInstanceIdentity.CreatePipeName(
+                applicationId: null,
+                assemblyId,
+                new Version(1, 2, 3),
+                secondPath,
+                userSid,
+                sessionId: 1));
+        Assert.NotEqual(
+            defaultIdentity,
+            WinFormsSingleInstanceIdentity.CreatePipeName(
+                applicationId: null,
+                assemblyId,
+                new Version(1, 2, 3),
+                firstPath,
+                "S-1-5-21-456",
+                sessionId: 1));
+        Assert.NotEqual(
+            defaultIdentity,
+            WinFormsSingleInstanceIdentity.CreatePipeName(
+                applicationId: null,
+                assemblyId,
+                new Version(1, 2, 3),
+                firstPath,
+                userSid,
+                sessionId: 2));
+
+        string explicitIdentity = WinFormsSingleInstanceIdentity.CreatePipeName(
+            "shared-app",
+            assemblyId,
+            new Version(1, 2, 3),
+            firstPath,
+            userSid,
+            sessionId: 1);
+        string explicitIdentityFromOtherPath = WinFormsSingleInstanceIdentity.CreatePipeName(
+            "shared-app",
+            assemblyId,
+            new Version(1, 2, 3),
+            secondPath,
+            userSid,
+            sessionId: 1);
+
+        Assert.Equal(explicitIdentity, explicitIdentityFromOtherPath);
+    }
+
+    [Fact]
+    public void SingleInstanceCoordinator_RejectsMalformedFrameAndForwardsArguments()
+    {
+        string pipeName = $"WinFormsApplicationTest-{Guid.NewGuid():N}";
+        string[]? receivedArguments = null;
+        using ManualResetEventSlim activationReceived = new();
+        bool isPrimary = WinFormsSingleInstanceCoordinator.TryCreatePrimary(
+            pipeName,
+            arguments =>
+            {
+                receivedArguments = arguments;
+                activationReceived.Set();
+
+                return true;
+            },
+            _ => { },
+            out WinFormsSingleInstanceCoordinator? coordinator);
+        Assert.True(isPrimary);
+        using WinFormsSingleInstanceCoordinator primary = coordinator!;
+
+        using (NamedPipeClientStream malformedClient = new(
+            ".",
+            pipeName,
+            PipeDirection.InOut,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
+        {
+            malformedClient.Connect(2500);
+
+            byte[] malformedFrame = new byte[sizeof(int) + sizeof(int)];
+            BinaryPrimitives.WriteInt32LittleEndian(malformedFrame, sizeof(int));
+            malformedClient.Write(malformedFrame);
+            malformedClient.Flush();
+
+            Assert.Equal(0, malformedClient.ReadByte());
+        }
+
+        string[] arguments = ["open", @"C:\Documents\file.txt"];
+        WinFormsSingleInstanceCoordinator.SendActivation(pipeName, arguments);
+
+        Assert.True(activationReceived.Wait(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken));
+        Assert.Equal(arguments, receivedArguments);
+    }
+
+    [Fact]
+    public void SingleInstanceCoordinator_RejectsOversizedArgumentsBeforeConnecting()
+    {
+        string[] arguments = [new string('x', 256 * 1024 + 1)];
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => WinFormsSingleInstanceCoordinator.SendActivation("unused-pipe", arguments));
+
+        Assert.Equal("arguments", exception.ParamName);
     }
 
     [Fact]
@@ -467,6 +605,61 @@ public class WinFormsApplicationBuilderTests
                 nameof(lifetime.ApplicationStopped)
             ],
             events);
+    }
+
+    [WinFormsFact]
+    public void Run_SingleInstance_QueuesActivationDuringApplicationStarting()
+    {
+        RunOnStaThread(() =>
+        {
+            string applicationId = $"BuilderTests-{Guid.NewGuid():N}";
+            string[] forwardedArguments = ["open", @"C:\Documents\file.txt"];
+            using ApplicationContext applicationContext = new();
+            using Timer timeoutTimer = new()
+            {
+                Interval = 10000
+            };
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseApplicationContext(applicationContext)
+                .UseSingleInstance(applicationId)
+                .Build();
+            string[]? receivedArguments = null;
+            int activationThreadId = 0;
+
+            timeoutTimer.Tick += (_, _) =>
+            {
+                timeoutTimer.Stop();
+                applicationContext.ExitThread();
+            };
+            application.Lifetime.ApplicationStarting += (_, _) =>
+            {
+                RunOnStaThread(() =>
+                {
+                    using WinFormsApplication secondary = WinFormsApplication.CreateBuilder(forwardedArguments)
+                        .UseApplicationContext()
+                        .UseSingleInstance(applicationId)
+                        .Build();
+
+                    secondary.Run();
+                });
+
+                timeoutTimer.Start();
+            };
+            application.ActivationRequested += (_, eventArgs) =>
+            {
+                receivedArguments = [.. eventArgs.Arguments];
+                activationThreadId = Environment.CurrentManagedThreadId;
+                eventArgs.BringToForeground = false;
+                timeoutTimer.Stop();
+                applicationContext.ExitThread();
+            };
+
+            application.Run();
+
+            Assert.Equal(forwardedArguments, receivedArguments);
+            Assert.Equal(Environment.CurrentManagedThreadId, activationThreadId);
+            Assert.Null(applicationContext.MainForm);
+        });
     }
 
     [Fact]
