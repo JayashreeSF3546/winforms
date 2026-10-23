@@ -37,6 +37,8 @@ public sealed class WinFormsApplication : IDisposable
     private IHost? _host;
     private IHostApplicationLifetime? _hostLifetime;
     private WinFormsSingleInstanceCoordinator? _singleInstanceCoordinator;
+    private WinFormsNetworkAvailabilityService? _networkAvailabilityService;
+    private WinFormsSplashScreen? _splashScreen;
     private ApplicationContext? _applicationContext;
     private Control? _marshallingControl;
     private Thread? _uiThread;
@@ -224,6 +226,7 @@ public sealed class WinFormsApplication : IDisposable
             }
 
             InitializeHostLifetime();
+            InitializeApplicationServices();
 
             startupNotificationRaised = true;
             bool startupCancelled = Lifetime.NotifyApplicationStarting();
@@ -235,11 +238,20 @@ public sealed class WinFormsApplication : IDisposable
                 startupForm = applicationContext.MainForm;
                 _previousExitThreadHandler = applicationContext.ExitThreadHandler;
                 applicationContext.ExitThreadHandler = OnExitThreadRequested;
+                ShowSplashScreen(options, startupForm);
 
                 if (_host is null)
                 {
-                    Lifetime.NotifyApplicationStarted();
-                    OnApplicationStarted();
+                    if (_splashScreen is null)
+                    {
+                        Lifetime.NotifyApplicationStarted();
+                        OnApplicationStarted();
+                    }
+                    else
+                    {
+                        applicationContext.MainForm = null;
+                        StartHostlessStartup(applicationContext, startupForm);
+                    }
                 }
                 else
                 {
@@ -273,6 +285,15 @@ public sealed class WinFormsApplication : IDisposable
             if (!secondaryInstance)
             {
                 NotifyApplicationStopping();
+            }
+
+            try
+            {
+                DisposeSplashScreen();
+            }
+            catch (Exception exception)
+            {
+                failure = CombineFailures(failure, exception);
             }
 
             threadContext ??= Application.ThreadContext.Current;
@@ -883,6 +904,46 @@ public sealed class WinFormsApplication : IDisposable
         }
     }
 
+    private void InitializeApplicationServices()
+    {
+        if (_host?.Services.GetService(typeof(IWinFormsNetworkAvailabilityService))
+            is WinFormsNetworkAvailabilityService networkAvailabilityService)
+        {
+            SynchronizationContext synchronizationContext = SynchronizationContext.Current
+                ?? throw new InvalidOperationException(
+                    "A synchronization context must be installed before application services are initialized.");
+            networkAvailabilityService.Initialize(synchronizationContext);
+            _networkAvailabilityService = networkAvailabilityService;
+        }
+    }
+
+    private void ShowSplashScreen(WinFormsApplicationOptions options, Form? startupForm)
+    {
+        if (options.SplashScreenFactory is null)
+        {
+            return;
+        }
+
+        Form splashForm = options.SplashScreenFactory()
+            ?? throw new InvalidOperationException("The splash screen factory returned null.");
+
+        if (ReferenceEquals(splashForm, startupForm))
+        {
+            throw new InvalidOperationException("The splash screen and startup form must be different forms.");
+        }
+
+        _splashScreen = new WinFormsSplashScreen(
+            splashForm,
+            options.MinimumSplashScreenDisplayDuration);
+        _splashScreen.Show();
+    }
+
+    private void DisposeSplashScreen()
+    {
+        WinFormsSplashScreen? splashScreen = Interlocked.Exchange(ref _splashScreen, null);
+        splashScreen?.Dispose();
+    }
+
     private void StartHost(ApplicationContext applicationContext, Form? startupForm)
     {
         if (_hostLifetime?.ApplicationStopped.IsCancellationRequested == true
@@ -897,13 +958,26 @@ public sealed class WinFormsApplication : IDisposable
             (Action)(() => StartHostAsync(applicationContext, startupForm)));
     }
 
-    private async void StartHostAsync(ApplicationContext applicationContext, Form? startupForm)
+    private void StartHostlessStartup(ApplicationContext applicationContext, Form? startupForm)
+    {
+        _marshallingControl!.BeginInvoke(
+            (Action)(() => CompleteHostlessStartupAsync(applicationContext, startupForm)));
+    }
+
+    private async void CompleteHostlessStartupAsync(ApplicationContext applicationContext, Form? startupForm)
     {
         try
         {
-            if (_hostLifetime?.ApplicationStarted.IsCancellationRequested != true)
+            if (_splashScreen is not null)
             {
-                await _host!.StartAsync().ConfigureAwait(true);
+                await _splashScreen.WaitForMinimumDisplayDurationAsync().ConfigureAwait(true);
+
+                if (_applicationStoppingSource.Task.IsCompleted)
+                {
+                    return;
+                }
+
+                DisposeSplashScreen();
             }
 
             Lifetime.NotifyApplicationStarted();
@@ -920,10 +994,82 @@ public sealed class WinFormsApplication : IDisposable
                 startupForm.Visible = true;
             }
         }
+        catch (OperationCanceledException) when (_applicationStoppingSource.Task.IsCompleted)
+        {
+        }
         catch (Exception exception)
         {
             RecordRuntimeException(exception);
             _ = EnsureHostStopStarted(CancellationToken.None);
+        }
+        finally
+        {
+            try
+            {
+                DisposeSplashScreen();
+            }
+            catch (Exception exception)
+            {
+                RecordRuntimeException(exception);
+                _ = EnsureHostStopStarted(CancellationToken.None);
+            }
+        }
+    }
+
+    private async void StartHostAsync(ApplicationContext applicationContext, Form? startupForm)
+    {
+        try
+        {
+            if (_hostLifetime?.ApplicationStarted.IsCancellationRequested != true)
+            {
+                await _host!.StartAsync().ConfigureAwait(true);
+            }
+
+            if (_splashScreen is not null)
+            {
+                await _splashScreen.WaitForMinimumDisplayDurationAsync().ConfigureAwait(true);
+
+                if (_applicationStoppingSource.Task.IsCompleted)
+                {
+                    return;
+                }
+
+                DisposeSplashScreen();
+            }
+
+            Lifetime.NotifyApplicationStarted();
+
+            if (Volatile.Read(ref _allowThreadExit) == 0 && startupForm is not null)
+            {
+                applicationContext.MainForm = startupForm;
+            }
+
+            OnApplicationStarted();
+
+            if (Volatile.Read(ref _allowThreadExit) == 0 && startupForm is not null)
+            {
+                startupForm.Visible = true;
+            }
+        }
+        catch (OperationCanceledException) when (_applicationStoppingSource.Task.IsCompleted)
+        {
+        }
+        catch (Exception exception)
+        {
+            RecordRuntimeException(exception);
+            _ = EnsureHostStopStarted(CancellationToken.None);
+        }
+        finally
+        {
+            try
+            {
+                DisposeSplashScreen();
+            }
+            catch (Exception exception)
+            {
+                RecordRuntimeException(exception);
+                _ = EnsureHostStopStarted(CancellationToken.None);
+            }
         }
     }
 
@@ -1011,6 +1157,24 @@ public sealed class WinFormsApplication : IDisposable
         finally
         {
             _applicationStoppingSource.TrySetResult();
+
+            try
+            {
+                _networkAvailabilityService?.Stop();
+            }
+            catch (Exception exception)
+            {
+                RecordRuntimeException(exception);
+            }
+
+            try
+            {
+                _splashScreen?.Stop();
+            }
+            catch (Exception exception)
+            {
+                RecordRuntimeException(exception);
+            }
         }
     }
 

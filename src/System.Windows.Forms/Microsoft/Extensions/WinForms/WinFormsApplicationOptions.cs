@@ -28,6 +28,16 @@ internal sealed class WinFormsApplicationOptions
     internal Form? StartupForm { get; set; }
 
     /// <summary>
+    ///  Gets or sets the factory for creating the splash form.
+    /// </summary>
+    internal Func<Form>? SplashScreenFactory { get; set; }
+
+    /// <summary>
+    ///  Gets or sets the minimum splash display duration.
+    /// </summary>
+    internal TimeSpan MinimumSplashScreenDisplayDuration { get; set; }
+
+    /// <summary>
     ///  Gets or sets the factory for creating the application context.
     /// </summary>
     internal Func<ApplicationContext>? ApplicationContextFactory { get; set; }
@@ -82,6 +92,8 @@ internal sealed class WinFormsApplicationOptions
             StartupFormFactory = StartupFormFactory,
             StartupServiceFormFactory = StartupServiceFormFactory,
             StartupForm = StartupForm,
+            SplashScreenFactory = SplashScreenFactory,
+            MinimumSplashScreenDisplayDuration = MinimumSplashScreenDisplayDuration,
             ApplicationContextFactory = ApplicationContextFactory,
             ApplicationContext = ApplicationContext,
             StartupObjectThread = StartupObjectThread,

@@ -29,6 +29,7 @@ namespace Microsoft.Extensions.WinForms;
 /// </remarks>
 public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
 {
+    private static readonly TimeSpan s_defaultSplashScreenMinimumDisplayDuration = TimeSpan.FromSeconds(2);
     private readonly WinFormsApplicationOptions _options = new();
     private readonly HashSet<object> _builtOwnedOptions = new(ReferenceEqualityComparer.Instance);
     private HostApplicationBuilder? _hostBuilder;
@@ -232,6 +233,52 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
         _options.ApplicationContextFactory = null;
         _options.ApplicationContext = applicationContext;
         _options.StartupObjectThread = Thread.CurrentThread;
+
+        return this;
+    }
+
+    /// <summary>
+    ///  Configures a splash screen with the default minimum display duration of two seconds.
+    /// </summary>
+    /// <typeparam name="TSplashScreen">The type of the splash form.</typeparam>
+    /// <returns>This builder.</returns>
+    public WinFormsApplicationBuilder UseSplashScreen<TSplashScreen>()
+        where TSplashScreen : Form, new()
+        => UseSplashScreen(static () => new TSplashScreen(), s_defaultSplashScreenMinimumDisplayDuration);
+
+    /// <summary>
+    ///  Configures a splash screen with the specified minimum display duration.
+    /// </summary>
+    /// <typeparam name="TSplashScreen">The type of the splash form.</typeparam>
+    /// <param name="minimumDisplayDuration">The minimum time the splash screen is displayed.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///  <paramref name="minimumDisplayDuration"/> is negative.
+    /// </exception>
+    public WinFormsApplicationBuilder UseSplashScreen<TSplashScreen>(TimeSpan minimumDisplayDuration)
+        where TSplashScreen : Form, new()
+        => UseSplashScreen(static () => new TSplashScreen(), minimumDisplayDuration);
+
+    /// <summary>
+    ///  Configures a splash screen created by a factory.
+    /// </summary>
+    /// <param name="splashScreenFactory">The factory that creates the splash form.</param>
+    /// <param name="minimumDisplayDuration">The minimum time the splash screen is displayed.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="splashScreenFactory"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///  <paramref name="minimumDisplayDuration"/> is negative.
+    /// </exception>
+    public WinFormsApplicationBuilder UseSplashScreen(
+        Func<Form> splashScreenFactory,
+        TimeSpan minimumDisplayDuration)
+    {
+        ArgumentNullException.ThrowIfNull(splashScreenFactory);
+
+        ArgumentOutOfRangeException.ThrowIfLessThan(minimumDisplayDuration, TimeSpan.Zero);
+
+        _options.SplashScreenFactory = splashScreenFactory;
+        _options.MinimumSplashScreenDisplayDuration = minimumDisplayDuration;
 
         return this;
     }
@@ -516,6 +563,26 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
         ArgumentNullException.ThrowIfNull(settingsService);
 
         return AddUserSettingsService(settingsService, includeInConfiguration, settingKeys);
+    }
+
+    /// <summary>
+    ///  Registers the default application information, runtime information, and network availability services.
+    /// </summary>
+    /// <returns>This builder.</returns>
+    /// <exception cref="InvalidOperationException">
+    ///  An external host was supplied or the builder has already been built.
+    /// </exception>
+    public WinFormsApplicationBuilder AddApplicationServices()
+    {
+        if (_options.Host is not null || _hostBuilt)
+        {
+            throw new InvalidOperationException(
+                "Application services must be registered before an external host is supplied or the builder is built.");
+        }
+
+        Services.AddWinFormsApplicationServices();
+
+        return this;
     }
 
     private WinFormsApplicationBuilder AddUserSettingsService(

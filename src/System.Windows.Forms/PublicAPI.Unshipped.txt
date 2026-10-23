@@ -38,6 +38,10 @@ Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddUserSettings(Microso
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddUserSettings(Microsoft.Extensions.WinForms.UserSettingsOptions! options, bool includeInConfiguration, params string![]! settingKeys) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddUserSettings(Microsoft.Extensions.WinForms.IUserSettingsService! settingsService) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddUserSettings(Microsoft.Extensions.WinForms.IUserSettingsService! settingsService, bool includeInConfiguration, params string![]! settingKeys) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.AddApplicationServices() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseSplashScreen<TSplashScreen>() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseSplashScreen<TSplashScreen>(System.TimeSpan minimumDisplayDuration) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseSplashScreen(System.Func<System.Windows.Forms.Form!>! splashScreenFactory, System.TimeSpan minimumDisplayDuration) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationLifetime
 Microsoft.Extensions.WinForms.WinFormsApplicationLifetime.ApplicationStarting -> System.EventHandler<System.ComponentModel.CancelEventArgs!>?
 Microsoft.Extensions.WinForms.WinFormsApplicationLifetime.ApplicationStarted -> System.EventHandler?
@@ -59,6 +63,28 @@ Microsoft.Extensions.WinForms.IUserSettingsService.SaveAsync<TSettings>(TSetting
 Microsoft.Extensions.WinForms.IUserSettingsService.ResetAsync<TSettings>(TSettings! defaults, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 Microsoft.Extensions.WinForms.IUserSettingsService.UpgradeAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 Microsoft.Extensions.WinForms.IUserSettingsService.MigrateFromLegacySettingsAsync(System.Configuration.ApplicationSettingsBase! legacySettings, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Microsoft.Extensions.WinForms.IWinFormsApplicationInfo
+Microsoft.Extensions.WinForms.IWinFormsApplicationInfo.Name.get -> string!
+Microsoft.Extensions.WinForms.IWinFormsApplicationInfo.Version.get -> System.Version!
+Microsoft.Extensions.WinForms.IWinFormsApplicationInfo.BaseDirectory.get -> string!
+Microsoft.Extensions.WinForms.IWinFormsApplicationInfo.Company.get -> string!
+Microsoft.Extensions.WinForms.IWinFormsApplicationInfo.Product.get -> string!
+Microsoft.Extensions.WinForms.IWinFormsApplicationInfo.Title.get -> string!
+Microsoft.Extensions.WinForms.IWinFormsApplicationInfo.Description.get -> string!
+Microsoft.Extensions.WinForms.IWinFormsApplicationInfo.Copyright.get -> string!
+Microsoft.Extensions.WinForms.IWinFormsApplicationInfo.Trademark.get -> string!
+Microsoft.Extensions.WinForms.IWinFormsApplicationInfo.LoadedAssemblies.get -> System.Collections.Generic.IReadOnlyList<System.Reflection.Assembly!>!
+Microsoft.Extensions.WinForms.IWinFormsRuntimeInfo
+Microsoft.Extensions.WinForms.IWinFormsRuntimeInfo.FrameworkDescription.get -> string!
+Microsoft.Extensions.WinForms.IWinFormsRuntimeInfo.OperatingSystemDescription.get -> string!
+Microsoft.Extensions.WinForms.IWinFormsRuntimeInfo.ProcessArchitecture.get -> System.Runtime.InteropServices.Architecture
+Microsoft.Extensions.WinForms.IWinFormsRuntimeInfo.ProcessPath.get -> string?
+Microsoft.Extensions.WinForms.IWinFormsRuntimeInfo.ProcessId.get -> int
+Microsoft.Extensions.WinForms.IWinFormsRuntimeInfo.WorkingSet.get -> long
+Microsoft.Extensions.WinForms.IWinFormsRuntimeInfo.StackTrace.get -> string!
+Microsoft.Extensions.WinForms.IWinFormsNetworkAvailabilityService
+Microsoft.Extensions.WinForms.IWinFormsNetworkAvailabilityService.IsAvailable.get -> bool
+Microsoft.Extensions.WinForms.IWinFormsNetworkAvailabilityService.NetworkAvailabilityChanged -> System.EventHandler<Microsoft.Extensions.WinForms.WinFormsNetworkAvailabilityChangedEventArgs!>?
 Microsoft.Extensions.WinForms.JsonUserSettingsService
 Microsoft.Extensions.WinForms.JsonUserSettingsService.JsonUserSettingsService(Microsoft.Extensions.WinForms.UserSettingsOptions! options) -> void
 Microsoft.Extensions.WinForms.JsonUserSettingsService.Changed -> System.EventHandler<Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs!>?
@@ -85,6 +111,10 @@ Microsoft.Extensions.WinForms.UserSettingsOptions.SerializerOptions.get -> Syste
 Microsoft.Extensions.WinForms.UserSettingsOptions.SerializerOptions.set -> void
 Microsoft.Extensions.WinForms.UserSettingsOptions.LockTimeout.get -> System.TimeSpan
 Microsoft.Extensions.WinForms.UserSettingsOptions.LockTimeout.set -> void
+Microsoft.Extensions.WinForms.WinFormsNetworkAvailabilityChangedEventArgs
+Microsoft.Extensions.WinForms.WinFormsNetworkAvailabilityChangedEventArgs.IsAvailable.get -> bool
+Microsoft.Extensions.WinForms.WinFormsApplicationServiceCollectionExtensions
+static Microsoft.Extensions.WinForms.WinFormsApplicationServiceCollectionExtensions.AddWinFormsApplicationServices(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 Microsoft.Extensions.WinForms.UserSettingsConfigurationExtensions
 static Microsoft.Extensions.WinForms.UserSettingsConfigurationExtensions.AddUserSettings(this Microsoft.Extensions.Configuration.IConfigurationBuilder! configurationBuilder, Microsoft.Extensions.WinForms.IUserSettingsService! settingsService, params string![]! settingKeys) -> Microsoft.Extensions.Configuration.IConfigurationBuilder!
 override System.Windows.Forms.GroupBox.OnPaintBackground(System.Windows.Forms.PaintEventArgs! pevent) -> void
