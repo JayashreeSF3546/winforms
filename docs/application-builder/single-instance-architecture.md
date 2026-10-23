@@ -32,4 +32,4 @@ The listener uses asynchronous local named pipes and does not create global mute
 
 ## Validation ownership
 
-Focused tests cover identity partitioning, version grouping, malformed-frame rejection, argument forwarding, and startup-race queueing. Cross-user, elevation, RDP/terminal-services, multi-session, and rapid-relaunch environment validation remains assigned to #14980; this document does not claim those environments were exercised.
+Focused tests cover identity partitioning, version grouping, malformed-frame rejection, argument forwarding, and startup-race queueing. The local Windows x64 exploratory results and remaining environment gaps are recorded in the [multi-instance validation report](multi-instance-validation.md). Cross-user, elevation, RDP/terminal-services, multi-session, ARM64, and constrained-device validation remains unverified; the report does not claim those environments were exercised.
