@@ -26,6 +26,7 @@ public sealed class WinFormsApplication : IDisposable
     private readonly Lock _formScopesLock = new();
     private readonly List<WinFormsFormScope> _formScopes = [];
     private readonly List<Task> _formScopeDisposalTasks = [];
+    private readonly IReadOnlyList<string> _commandLineArgs;
     private readonly TaskCompletionSource _hostStoppedSource =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _applicationStoppingSource =
@@ -55,6 +56,7 @@ public sealed class WinFormsApplication : IDisposable
     {
         _options = options;
         _host = options.Host;
+        _commandLineArgs = options.CommandLineArgs;
     }
 
     /// <summary>
@@ -88,6 +90,11 @@ public sealed class WinFormsApplication : IDisposable
     ///  Gets the lifetime notifications for this application.
     /// </summary>
     public WinFormsApplicationLifetime Lifetime { get; } = new();
+
+    /// <summary>
+    ///  Gets a read-only snapshot of the command-line arguments supplied when the application was built.
+    /// </summary>
+    public IReadOnlyList<string> CommandLineArgs => _commandLineArgs;
 
     /// <summary>
     ///  Starts the configured host and runs the Windows Forms message loop.
@@ -135,6 +142,7 @@ public sealed class WinFormsApplication : IDisposable
         WinFormsExceptionLogging? exceptionLogging = null;
         ApplicationContext? applicationContext = null;
         Form? startupForm = null;
+        bool startupNotificationRaised = false;
 
         _uiThread = Thread.CurrentThread;
 
@@ -160,34 +168,48 @@ public sealed class WinFormsApplication : IDisposable
             threadContext = Application.ThreadContext.FromCurrent();
             _marshallingControl = threadContext.MarshallingControl;
 
-            applicationContext = CreateApplicationContext(options);
-            _applicationContext = applicationContext;
-            startupForm = applicationContext.MainForm;
-            _previousExitThreadHandler = applicationContext.ExitThreadHandler;
-            applicationContext.ExitThreadHandler = OnExitThreadRequested;
-
             InitializeHostLifetime();
-            if (_host is null)
+
+            if (!HasStartupSelection(options))
             {
-                Lifetime.NotifyApplicationStarted();
+                throw new InvalidOperationException(
+                    "Configure a startup form or application context before running the application.");
             }
-            else
+
+            startupNotificationRaised = true;
+            bool startupCancelled = Lifetime.NotifyApplicationStarting();
+
+            if (!startupCancelled && Volatile.Read(ref _allowThreadExit) == 0)
             {
-                applicationContext.MainForm = null;
-                StartHost(applicationContext, startupForm);
+                applicationContext = CreateApplicationContext(options);
+                _applicationContext = applicationContext;
+                startupForm = applicationContext.MainForm;
+                _previousExitThreadHandler = applicationContext.ExitThreadHandler;
+                applicationContext.ExitThreadHandler = OnExitThreadRequested;
+
+                if (_host is null)
+                {
+                    Lifetime.NotifyApplicationStarted();
+                }
+                else
+                {
+                    applicationContext.MainForm = null;
+                    StartHost(applicationContext, startupForm);
+                }
             }
 
             bool enterMessageLoop;
             lock (_stopLock)
             {
-                enterMessageLoop = Volatile.Read(ref _allowThreadExit) == 0;
+                enterMessageLoop = applicationContext is not null
+                    && Volatile.Read(ref _allowThreadExit) == 0;
                 if (enterMessageLoop)
                 {
                     Volatile.Write(ref _messageLoopEntered, 1);
                 }
             }
 
-            if (enterMessageLoop)
+            if (enterMessageLoop && applicationContext is not null)
             {
                 Application.Run(applicationContext);
             }
@@ -200,6 +222,18 @@ public sealed class WinFormsApplication : IDisposable
         {
             NotifyApplicationStopping();
             threadContext ??= Application.ThreadContext.Current;
+
+            if (startupNotificationRaised && applicationContext is null)
+            {
+                try
+                {
+                    DisposeConfiguredStartupObject(options);
+                }
+                catch (Exception exception)
+                {
+                    failure = CombineFailures(failure, exception);
+                }
+            }
 
             if (applicationContext is not null)
             {
@@ -521,6 +555,52 @@ public sealed class WinFormsApplication : IDisposable
                 "Configure a startup form or application context before running the application.");
     }
 
+    private static bool HasStartupSelection(WinFormsApplicationOptions options)
+        => options.StartupServiceFormFactory is not null
+            || options.StartupFormFactory is not null
+            || options.StartupForm is not null
+            || options.ApplicationContextFactory is not null
+            || options.ApplicationContext is not null;
+
+    private static void DisposeConfiguredStartupObject(WinFormsApplicationOptions options)
+    {
+        if (options.ApplicationContext is not null)
+        {
+            Form? mainForm = options.ApplicationContext.MainForm;
+            Exception? failure = null;
+
+            try
+            {
+                options.ApplicationContext.Dispose();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+
+            if (mainForm is not null)
+            {
+                try
+                {
+                    mainForm.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    failure = CombineFailures(failure, exception);
+                }
+            }
+
+            if (failure is not null)
+            {
+                ExceptionDispatchInfo.Capture(failure).Throw();
+            }
+        }
+        else
+        {
+            options.StartupForm?.Dispose();
+        }
+    }
+
     private TForm ActivateForm<TForm>(
         Func<IServiceProvider, TForm> factory,
         out WinFormsFormScope formScope)
@@ -706,6 +786,11 @@ public sealed class WinFormsApplication : IDisposable
         _applicationStoppedRegistration = _hostLifetime.ApplicationStopped.Register(
             static state => ((WinFormsApplication)state!).OnHostStopped(),
             this);
+
+        if (_hostLifetime.ApplicationStarted.IsCancellationRequested)
+        {
+            Volatile.Write(ref _hostStartAttempted, 1);
+        }
 
         if (_hostLifetime.ApplicationStopped.IsCancellationRequested)
         {

@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections.ObjectModel;
 using System.Windows.Forms;
 using Microsoft.Extensions.Hosting;
 
@@ -47,6 +48,11 @@ internal sealed class WinFormsApplicationOptions
     internal IHost? Host { get; set; }
 
     /// <summary>
+    ///  Gets or sets the command-line arguments supplied to the application.
+    /// </summary>
+    internal ReadOnlyCollection<string> CommandLineArgs { get; set; } = Array.AsReadOnly(Array.Empty<string>());
+
+    /// <summary>
     ///  Gets or sets whether the host was supplied by the caller.
     /// </summary>
     internal bool HostWasSupplied { get; set; }
@@ -71,6 +77,7 @@ internal sealed class WinFormsApplicationOptions
             StartupObjectThread = StartupObjectThread,
             Host = Host,
             HostWasSupplied = HostWasSupplied,
+            CommandLineArgs = CommandLineArgs,
             EnableExceptionLogging = EnableExceptionLogging
         };
 }

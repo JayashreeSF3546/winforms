@@ -39,6 +39,32 @@ public class WinFormsApplicationBuilderTests
         using WinFormsApplication application = builder.UseApplicationContext().Build();
 
         Assert.Equal("loaded", builder.Configuration["BuilderTests:CommandLine"]);
+        Assert.Equal(args, application.CommandLineArgs);
+    }
+
+    [Fact]
+    public void ApplicationCreateBuilder_WithArguments_SnapshotsArguments()
+    {
+        string[] args = ["--BuilderTests:Mode=sample"];
+        using WinFormsApplication application = WinFormsApplication.CreateBuilder(args)
+            .UseApplicationContext()
+            .Build();
+        args[0] = "--BuilderTests:Mode=changed";
+
+        Assert.Equal(["--BuilderTests:Mode=sample"], application.CommandLineArgs);
+    }
+
+    [Fact]
+    public void CreateBuilder_WithSettings_SnapshotsArguments()
+    {
+        string[] args = ["--BuilderTests:Mode=sample"];
+        using WinFormsApplication application = WinFormsApplication.CreateBuilder(
+            new HostApplicationBuilderSettings { Args = args })
+            .UseApplicationContext()
+            .Build();
+        args[0] = "--BuilderTests:Mode=changed";
+
+        Assert.Equal(["--BuilderTests:Mode=sample"], application.CommandLineArgs);
     }
 
     [Fact]
@@ -444,6 +470,35 @@ public class WinFormsApplicationBuilderTests
     }
 
     [Fact]
+    public void Lifetime_StartingCancellationRaisesStoppingAndStoppedWithoutStarted()
+    {
+        using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+            .UseApplicationContext()
+            .Build();
+        List<string> events = [];
+        WinFormsApplicationLifetime lifetime = application.Lifetime;
+        lifetime.ApplicationStarting += (_, eventArgs) =>
+        {
+            events.Add(nameof(lifetime.ApplicationStarting));
+            eventArgs.Cancel = true;
+        };
+        lifetime.ApplicationStarted += (_, _) => events.Add(nameof(lifetime.ApplicationStarted));
+        lifetime.ApplicationStopping += (_, _) => events.Add(nameof(lifetime.ApplicationStopping));
+        lifetime.ApplicationStopped += (_, _) => events.Add(nameof(lifetime.ApplicationStopped));
+
+        Assert.True(lifetime.NotifyApplicationStarting());
+        lifetime.NotifyApplicationStopped();
+
+        Assert.Equal(
+            [
+                nameof(lifetime.ApplicationStarting),
+                nameof(lifetime.ApplicationStopping),
+                nameof(lifetime.ApplicationStopped)
+            ],
+            events);
+    }
+
+    [Fact]
     public void Lifetime_StoppingBeforeStarted_OmitsStartedAndRaisesStoppedAfterStopping()
     {
         using WinFormsApplication application = WinFormsApplication.CreateBuilder()
@@ -498,13 +553,121 @@ public class WinFormsApplicationBuilderTests
             using WinFormsApplication application = WinFormsApplication.CreateBuilder()
                 .UseStartupForm<CloseOnShownForm>()
                 .Build();
+            application.Lifetime.ApplicationStarting += (_, _) => events.Add("Starting");
             application.Lifetime.ApplicationStarted += (_, _) => events.Add("Started");
             application.Lifetime.ApplicationStopping += (_, _) => events.Add("Stopping");
             application.Lifetime.ApplicationStopped += (_, _) => events.Add("Stopped");
 
             application.Run();
 
-            Assert.Equal(["Started", "Stopping", "Stopped"], events);
+            Assert.Equal(["Starting", "Started", "Stopping", "Stopped"], events);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_StartingCancellationSkipsHostAndDisposesStartupForm()
+    {
+        RunOnStaThread(() =>
+        {
+            List<string> events = [];
+            TestHost host = new();
+            Form startupForm = new();
+            string[] args = ["--BuilderTests:Activation=first"];
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(startupForm)
+                .UseHost(host, args)
+                .Build();
+            args[0] = "--BuilderTests:Activation=changed";
+            application.Lifetime.ApplicationStarting += (_, eventArgs) =>
+            {
+                events.Add("Starting");
+                Assert.Equal(["--BuilderTests:Activation=first"], application.CommandLineArgs);
+                eventArgs.Cancel = true;
+            };
+            application.Lifetime.ApplicationStarted += (_, _) => events.Add("Started");
+            application.Lifetime.ApplicationStopping += (_, _) => events.Add("Stopping");
+            application.Lifetime.ApplicationStopped += (_, _) => events.Add("Stopped");
+
+            application.Run();
+
+            Assert.Equal(["Starting", "Stopping", "Stopped"], events);
+            Assert.True(startupForm.IsDisposed);
+            Assert.Equal(0, host.StartCount);
+            Assert.Equal(0, host.StopCount);
+            Assert.Equal(1, host.DisposeCount);
+            Assert.False(Application.MessageLoop);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_StartingCancellationStopsAnAlreadyStartedSuppliedHost()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new();
+            host.Lifetime.NotifyStarted();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseApplicationContext()
+                .UseHost(host)
+                .Build();
+            application.Lifetime.ApplicationStarting += (_, eventArgs) => eventArgs.Cancel = true;
+
+            application.Run();
+
+            Assert.Equal(0, host.StartCount);
+            Assert.Equal(1, host.StopCount);
+            Assert.Equal(1, host.DisposeCount);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_StartingCancellationSkipsDeferredStartupFormFactory()
+    {
+        RunOnStaThread(() =>
+        {
+            int factoryCalls = 0;
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm<Form>(_ =>
+                {
+                    factoryCalls++;
+
+                    return new();
+                })
+                .Build();
+            application.Lifetime.ApplicationStarting += (_, eventArgs) => eventArgs.Cancel = true;
+
+            application.Run();
+
+            Assert.Equal(0, factoryCalls);
+            Assert.False(Application.MessageLoop);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_StartingHandlerFailureCleansUpAndPropagates()
+    {
+        RunOnStaThread(() =>
+        {
+            List<string> events = [];
+            InvalidOperationException expectedException = new("Starting handler failed.");
+            Form startupForm = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(startupForm)
+                .Build();
+            application.Lifetime.ApplicationStarting += (_, _) =>
+            {
+                events.Add("Starting");
+                throw expectedException;
+            };
+            application.Lifetime.ApplicationStopping += (_, _) => events.Add("Stopping");
+            application.Lifetime.ApplicationStopped += (_, _) => events.Add("Stopped");
+
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(application.Run);
+
+            Assert.Same(expectedException, exception);
+            Assert.True(startupForm.IsDisposed);
+            Assert.Equal(["Starting", "Stopping", "Stopped"], events);
+            Assert.False(Application.MessageLoop);
         });
     }
 
@@ -979,6 +1142,7 @@ public class WinFormsApplicationBuilderTests
                 .UseStartupForm(form)
                 .UseHost(host)
                 .Build();
+            application.Lifetime.ApplicationStarting += (_, _) => events.Add("ApplicationStarting");
             application.Lifetime.ApplicationStarted += (_, _) => events.Add("ApplicationStarted");
             application.Lifetime.ApplicationStopping += (_, _) => events.Add("ApplicationStopping");
             application.Lifetime.ApplicationStopped += (_, _) => events.Add("ApplicationStopped");
@@ -986,7 +1150,14 @@ public class WinFormsApplicationBuilderTests
             application.Run();
 
             Assert.Equal(
-                ["HostStarted", "ApplicationStarted", "ApplicationStopping", "HostStopping", "ApplicationStopped"],
+                [
+                    "ApplicationStarting",
+                    "HostStarted",
+                    "ApplicationStarted",
+                    "ApplicationStopping",
+                    "HostStopping",
+                    "ApplicationStopped"
+                ],
                 events);
             Assert.Equal(1, host.StopCount);
         });

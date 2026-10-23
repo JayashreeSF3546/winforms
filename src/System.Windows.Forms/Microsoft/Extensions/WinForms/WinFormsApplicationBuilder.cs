@@ -40,7 +40,17 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
 
     private WinFormsApplicationBuilder(HostApplicationBuilderSettings settings)
     {
-        _hostBuilder = CreateHostBuilder(settings);
+        string[]? args = settings.Args is null ? null : [.. settings.Args];
+        _options.CommandLineArgs = Array.AsReadOnly(args ?? []);
+        _hostBuilder = CreateHostBuilder(new HostApplicationBuilderSettings
+        {
+            ApplicationName = settings.ApplicationName,
+            Args = args,
+            Configuration = settings.Configuration,
+            ContentRootPath = settings.ContentRootPath,
+            DisableDefaults = settings.DisableDefaults,
+            EnvironmentName = settings.EnvironmentName
+        });
     }
 
     /// <summary>
@@ -258,6 +268,43 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
 
         _options.Host = host;
         _options.HostWasSupplied = true;
+
+        return this;
+    }
+
+    /// <summary>
+    ///  Associates a Generic Host and command-line arguments with the application.
+    /// </summary>
+    /// <param name="host">The host to start and stop with the application.</param>
+    /// <param name="args">The command-line arguments for the application.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException">
+    ///  <paramref name="host"/> or <paramref name="args"/> is null.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    ///  A builder-owned host has already been initialized.
+    /// </exception>
+    /// <remarks>
+    ///  <para>
+    ///   This overload has the same host ownership and configuration restrictions
+    ///   as <see cref="UseHost(IHost)"/>. The arguments are copied and exposed by
+    ///   <see cref="WinFormsApplication.CommandLineArgs"/>.
+    ///  </para>
+    /// </remarks>
+    public WinFormsApplicationBuilder UseHost(IHost host, string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(args);
+
+        if (_hostBuilder is not null)
+        {
+            throw new InvalidOperationException(
+                "A supplied host cannot be combined with host configuration on this builder.");
+        }
+
+        _options.Host = host;
+        _options.HostWasSupplied = true;
+        _options.CommandLineArgs = Array.AsReadOnly([.. args]);
 
         return this;
     }
