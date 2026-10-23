@@ -10,7 +10,7 @@ This document records the lifetime and hosting decisions that should constrain t
 
 1. The thread that calls `WinFormsApplication.Run` is the UI thread. The builder does not create a second UI thread.
 2. The hosting layer delegates to the existing `Application.Run(Form)` or `Application.Run(ApplicationContext)` implementation. It does not implement another message pump or replace WinForms modal-loop behavior.
-3. Host construction (`Build`) is distinct from host startup (`IHost.StartAsync`). The host can be built before the UI synchronization context exists. At run time, establish the WinForms synchronization context and create/obtain the startup UI object before completing host startup and publishing the WinForms `ApplicationStarted` event. This ensures that the WinForms started event follows UI initialization and precedes entry into `Application.Run`.
+3. Host construction (`Build`) is distinct from host startup (`IHost.StartAsync`). The host can be built before the UI synchronization context exists. At run time, establish the WinForms synchronization context, raise a cancellable `ApplicationStarting` notification, and create/obtain the startup UI object. For a host-backed application, enter the existing message loop while asynchronous host startup completes so UI dispatch remains available; publish WinForms `ApplicationStarted` after successful host startup and before showing the startup form. In hostless mode, publish `ApplicationStarted` after UI initialization and before entering `Application.Run`.
 4. Host-initiated exit must be marshaled to the UI thread. Shutdown coordination must be asynchronous and idempotent; a UI-thread caller must not synchronously wait for host work that needs UI dispatch.
 5. Form-close cancellation and `ApplicationContext.ExitThread` are materially different shutdown paths. The latter is synchronous and has no cancellation point. Graceful asynchronous host shutdown for an arbitrary supplied `ApplicationContext` requires an explicit pre-exit coordination mechanism; subscribing to `ThreadExit` or `ApplicationExit` alone is too late to guarantee it.
 6. Generic Host lifetime tokens remain the host-facing lifecycle source. WinForms lifetime notifications must be one-shot and ordered, not an independent competing host lifetime.
@@ -47,11 +47,12 @@ The terms in the expected WinForms startup sequence must distinguish building th
 
 1. `CreateBuilder` and `Build` compose the host; they do not start hosted services.
 2. `Run` binds execution to the caller's UI thread and establishes the WinForms synchronization context.
-3. Startup form or application context creation/selection happens on that UI thread.
-4. `IHost.StartAsync` completes host startup; its `ApplicationStarted` token and the WinForms `ApplicationStarted` notification must not precede successful UI initialization.
-5. The hosting layer enters `Application.Run` using the selected form or application context.
+3. `WinFormsApplicationLifetime.ApplicationStarting` runs on that thread before deferred startup UI activation or builder-owned host startup. Setting `Cancel` skips startup UI activation, host startup, and the message loop; cleanup still raises `ApplicationStopping` and `ApplicationStopped`.
+4. Startup form or application context creation/selection happens on that UI thread.
+5. In host-backed mode, enter `Application.Run` while `IHost.StartAsync` completes. This allows host startup callbacks to dispatch to the UI synchronization context without blocking the UI thread.
+6. After successful host startup, raise the WinForms `ApplicationStarted` notification before showing the startup form. In hostless mode, raise it after UI initialization and before entering `Application.Run`.
 
-This keeps host construction before UI setup while avoiding signaling that the WinForms application is started before its startup UI object exists. If future API constraints force host startup earlier, the relationship between the two `ApplicationStarted` signals must be reconsidered explicitly rather than publishing contradictory lifecycle events.
+This keeps host construction separate from startup while allowing host startup callbacks to post UI work safely. If host startup fails, the loop is exited after the failure is recorded; the startup form is not shown and the WinForms `ApplicationStarted` notification is omitted.
 
 ## Ownership and lifecycle decisions
 
@@ -71,10 +72,12 @@ This keeps host construction before UI setup while avoiding signaling that the W
 
 ### Startup and lifetime events
 
-- `ApplicationStarted` is raised once, only after host startup succeeds and startup UI initialization has completed, and immediately before entering the main message loop.
+- `ApplicationStarting` is raised once on the UI thread before deferred startup UI activation and builder-owned host startup. It uses `CancelEventArgs`; cancellation is terminal and skips UI activation, host startup, and message-loop entry. The application still raises `ApplicationStopping` and `ApplicationStopped` during cleanup.
+- `ApplicationStarted` is raised once, only after host startup succeeds and startup UI initialization has completed. In host-backed mode, it is raised while the main message loop is pumping and before the startup form is shown; in hostless mode, it is raised immediately before entering the main message loop.
 - `ApplicationStopping` is raised once when terminal shutdown coordination begins, before requesting loop exit.
 - `ApplicationStopped` is raised once after the message loop has exited and hosted-service shutdown/cleanup has completed. The outer `IHost.StopAsync` may still be completing `IHostLifetime.StopAsync`; cleanup must still run when startup, runtime, shutdown, or cancellation paths fail.
 - Repeated or concurrent stop requests converge on the same shutdown operation. They must not raise lifetime notifications more than once.
+- `WinFormsApplication.CommandLineArgs` exposes a read-only snapshot of the raw arguments supplied through `CreateBuilder(args)`, `HostApplicationBuilderSettings.Args`, or `UseHost(host, args)`. Generic Host command-line configuration continues to process builder-owned host arguments; the property does not parse or rewrite them.
 
 The existing Generic Host token semantics should be exposed consistently; the WinForms layer must not create a second independent set of host tokens with different ordering. The implementation must also account for Generic Host's synchronous lifetime-token callbacks: callbacks may request UI work, but must not block waiting for the UI loop to exit.
 
@@ -95,8 +98,9 @@ An arbitrary `ApplicationContext.ExitThread()` is not cancellable: `ThreadExit` 
 ## Exception and cancellation model
 
 - Builder validation and `Build` failures are synchronous and do not start a message loop.
+- An `ApplicationStarting` handler can cancel startup or throw. Cancellation prevents UI activation, host startup, and loop entry; a handler exception propagates after cleanup. Both paths omit `ApplicationStarted`.
 - Startup-form or context construction failures occur on the UI thread before the loop starts. They prevent `ApplicationStarted`; cleanup still runs.
-- Host `StartAsync` failures/cancellation prevent `ApplicationStarted` and prevent entering `Application.Run`. Any partially started host services are stopped according to Generic Host behavior, and cleanup failures must not hide the original startup failure.
+- Host `StartAsync` failures/cancellation prevent `ApplicationStarted` and prevent showing the startup form. The message loop may already be pumping to service UI dispatch during startup; it exits after the failure is recorded. Any partially started host services are stopped according to Generic Host behavior, and cleanup failures must not hide the original startup failure.
 - Exceptions routed by WinForms' UI-thread exception mechanism retain that mechanism. Exceptions escaping the outer run operation are surfaced to the caller after cleanup.
 - Host-stop exceptions and cancellation are surfaced after best-effort cleanup. Preserve the primary runtime/startup error and retain shutdown errors as additional failure information.
 - A startup or stop `CancellationToken` is cooperative and distinct from a WinForms `FormClosing` veto. A canceled shutdown request must not cause duplicate lifetime events or skip cleanup. Exact public cancellation overloads are deferred to API design.

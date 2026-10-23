@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections.Concurrent;
 using System.Runtime.ExceptionServices;
 using System.Windows.Forms;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,8 +25,10 @@ public sealed class WinFormsApplication : IDisposable
 {
     private readonly Lock _stopLock = new();
     private readonly Lock _formScopesLock = new();
+    private readonly ConcurrentQueue<string[]> _pendingActivations = new();
     private readonly List<WinFormsFormScope> _formScopes = [];
     private readonly List<Task> _formScopeDisposalTasks = [];
+    private readonly IReadOnlyList<string> _commandLineArgs;
     private readonly TaskCompletionSource _hostStoppedSource =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _applicationStoppingSource =
@@ -33,6 +36,9 @@ public sealed class WinFormsApplication : IDisposable
     private WinFormsApplicationOptions? _options;
     private IHost? _host;
     private IHostApplicationLifetime? _hostLifetime;
+    private WinFormsSingleInstanceCoordinator? _singleInstanceCoordinator;
+    private WinFormsNetworkAvailabilityService? _networkAvailabilityService;
+    private WinFormsSplashScreen? _splashScreen;
     private ApplicationContext? _applicationContext;
     private Control? _marshallingControl;
     private Thread? _uiThread;
@@ -50,11 +56,15 @@ public sealed class WinFormsApplication : IDisposable
     private int _hostOwnershipTransferred;
     private int _disposeRequested;
     private int _applicationStoppingDispatchScheduled;
+    private int _applicationStarted;
+    private int _activationDispatchScheduled;
+    private int _singleInstanceStopping;
 
     internal WinFormsApplication(WinFormsApplicationOptions options)
     {
         _options = options;
         _host = options.Host;
+        _commandLineArgs = options.CommandLineArgs;
     }
 
     /// <summary>
@@ -88,6 +98,28 @@ public sealed class WinFormsApplication : IDisposable
     ///  Gets the lifetime notifications for this application.
     /// </summary>
     public WinFormsApplicationLifetime Lifetime { get; } = new();
+
+    /// <summary>
+    ///  Gets a read-only snapshot of the command-line arguments supplied when the application was built.
+    /// </summary>
+    public IReadOnlyList<string> CommandLineArgs => _commandLineArgs;
+
+    /// <summary>
+    ///  Occurs when another process requests activation of this application.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   The event is raised on the application UI thread after
+    ///   <see cref="WinFormsApplicationLifetime.ApplicationStarted"/>. Requests
+    ///   received earlier are queued until startup completes.
+    ///  </para>
+    ///  <para>
+    ///   After the handler returns, the runtime restores and activates the main
+    ///   form when <see cref="WinFormsApplicationActivationEventArgs.BringToForeground"/>
+    ///   is true and a main form is available.
+    ///  </para>
+    /// </remarks>
+    public event EventHandler<WinFormsApplicationActivationEventArgs>? ActivationRequested;
 
     /// <summary>
     ///  Starts the configured host and runs the Windows Forms message loop.
@@ -135,6 +167,8 @@ public sealed class WinFormsApplication : IDisposable
         WinFormsExceptionLogging? exceptionLogging = null;
         ApplicationContext? applicationContext = null;
         Form? startupForm = null;
+        bool startupNotificationRaised = false;
+        bool secondaryInstance = false;
 
         _uiThread = Thread.CurrentThread;
 
@@ -160,34 +194,84 @@ public sealed class WinFormsApplication : IDisposable
             threadContext = Application.ThreadContext.FromCurrent();
             _marshallingControl = threadContext.MarshallingControl;
 
-            applicationContext = CreateApplicationContext(options);
-            _applicationContext = applicationContext;
-            startupForm = applicationContext.MainForm;
-            _previousExitThreadHandler = applicationContext.ExitThreadHandler;
-            applicationContext.ExitThreadHandler = OnExitThreadRequested;
+            if (!HasStartupSelection(options))
+            {
+                InitializeHostLifetime();
+
+                throw new InvalidOperationException(
+                    "Configure a startup form or application context before running the application.");
+            }
+
+            if (options.UseSingleInstance)
+            {
+                string pipeName = WinFormsSingleInstanceIdentity.CreatePipeName(
+                    options.SingleInstanceApplicationId);
+
+                if (WinFormsSingleInstanceCoordinator.TryCreatePrimary(
+                    pipeName,
+                    OnSingleInstanceActivationReceived,
+                    OnSingleInstanceListenerFailure,
+                    out WinFormsSingleInstanceCoordinator? coordinator))
+                {
+                    _singleInstanceCoordinator = coordinator
+                        ?? throw new InvalidOperationException("The primary instance coordinator was not created.");
+                }
+                else
+                {
+                    secondaryInstance = true;
+                    WinFormsSingleInstanceCoordinator.SendActivation(pipeName, options.CommandLineArgs);
+
+                    return;
+                }
+            }
 
             InitializeHostLifetime();
-            if (_host is null)
+            InitializeApplicationServices();
+
+            startupNotificationRaised = true;
+            bool startupCancelled = Lifetime.NotifyApplicationStarting();
+
+            if (!startupCancelled && Volatile.Read(ref _allowThreadExit) == 0)
             {
-                Lifetime.NotifyApplicationStarted();
-            }
-            else
-            {
-                applicationContext.MainForm = null;
-                StartHost(applicationContext, startupForm);
+                applicationContext = CreateApplicationContext(options);
+                _applicationContext = applicationContext;
+                startupForm = applicationContext.MainForm;
+                _previousExitThreadHandler = applicationContext.ExitThreadHandler;
+                applicationContext.ExitThreadHandler = OnExitThreadRequested;
+                ShowSplashScreen(options, startupForm);
+
+                if (_host is null)
+                {
+                    if (_splashScreen is null)
+                    {
+                        Lifetime.NotifyApplicationStarted();
+                        OnApplicationStarted();
+                    }
+                    else
+                    {
+                        applicationContext.MainForm = null;
+                        StartHostlessStartup(applicationContext, startupForm);
+                    }
+                }
+                else
+                {
+                    applicationContext.MainForm = null;
+                    StartHost(applicationContext, startupForm);
+                }
             }
 
             bool enterMessageLoop;
             lock (_stopLock)
             {
-                enterMessageLoop = Volatile.Read(ref _allowThreadExit) == 0;
+                enterMessageLoop = applicationContext is not null
+                    && Volatile.Read(ref _allowThreadExit) == 0;
                 if (enterMessageLoop)
                 {
                     Volatile.Write(ref _messageLoopEntered, 1);
                 }
             }
 
-            if (enterMessageLoop)
+            if (enterMessageLoop && applicationContext is not null)
             {
                 Application.Run(applicationContext);
             }
@@ -198,8 +282,33 @@ public sealed class WinFormsApplication : IDisposable
         }
         finally
         {
-            NotifyApplicationStopping();
+            if (!secondaryInstance)
+            {
+                NotifyApplicationStopping();
+            }
+
+            try
+            {
+                DisposeSplashScreen();
+            }
+            catch (Exception exception)
+            {
+                failure = CombineFailures(failure, exception);
+            }
+
             threadContext ??= Application.ThreadContext.Current;
+
+            if ((startupNotificationRaised || secondaryInstance) && applicationContext is null)
+            {
+                try
+                {
+                    DisposeConfiguredStartupObject(options);
+                }
+                catch (Exception exception)
+                {
+                    failure = CombineFailures(failure, exception);
+                }
+            }
 
             if (applicationContext is not null)
             {
@@ -282,13 +391,38 @@ public sealed class WinFormsApplication : IDisposable
                 }
             }
 
+            if (secondaryInstance)
+            {
+                try
+                {
+                    StopHostForSecondaryInstance();
+                }
+                catch (Exception exception)
+                {
+                    failure = CombineFailures(failure, exception);
+                }
+            }
+
             try
             {
-                Lifetime.NotifyApplicationStopped();
+                _singleInstanceCoordinator?.Dispose();
+                _singleInstanceCoordinator = null;
             }
             catch (Exception exception)
             {
                 failure = CombineFailures(failure, exception);
+            }
+
+            if (!secondaryInstance)
+            {
+                try
+                {
+                    Lifetime.NotifyApplicationStopped();
+                }
+                catch (Exception exception)
+                {
+                    failure = CombineFailures(failure, exception);
+                }
             }
 
             _applicationStoppingRegistration.Dispose();
@@ -521,6 +655,52 @@ public sealed class WinFormsApplication : IDisposable
                 "Configure a startup form or application context before running the application.");
     }
 
+    private static bool HasStartupSelection(WinFormsApplicationOptions options)
+        => options.StartupServiceFormFactory is not null
+            || options.StartupFormFactory is not null
+            || options.StartupForm is not null
+            || options.ApplicationContextFactory is not null
+            || options.ApplicationContext is not null;
+
+    private static void DisposeConfiguredStartupObject(WinFormsApplicationOptions options)
+    {
+        if (options.ApplicationContext is not null)
+        {
+            Form? mainForm = options.ApplicationContext.MainForm;
+            Exception? failure = null;
+
+            try
+            {
+                options.ApplicationContext.Dispose();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+
+            if (mainForm is not null)
+            {
+                try
+                {
+                    mainForm.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    failure = CombineFailures(failure, exception);
+                }
+            }
+
+            if (failure is not null)
+            {
+                ExceptionDispatchInfo.Capture(failure).Throw();
+            }
+        }
+        else
+        {
+            options.StartupForm?.Dispose();
+        }
+    }
+
     private TForm ActivateForm<TForm>(
         Func<IServiceProvider, TForm> factory,
         out WinFormsFormScope formScope)
@@ -707,6 +887,11 @@ public sealed class WinFormsApplication : IDisposable
             static state => ((WinFormsApplication)state!).OnHostStopped(),
             this);
 
+        if (_hostLifetime.ApplicationStarted.IsCancellationRequested)
+        {
+            Volatile.Write(ref _hostStartAttempted, 1);
+        }
+
         if (_hostLifetime.ApplicationStopped.IsCancellationRequested)
         {
             Volatile.Write(ref _hostStopped, 1);
@@ -717,6 +902,46 @@ public sealed class WinFormsApplication : IDisposable
 
             _hostStoppedSource.TrySetResult();
         }
+    }
+
+    private void InitializeApplicationServices()
+    {
+        if (_host?.Services.GetService(typeof(IWinFormsNetworkAvailabilityService))
+            is WinFormsNetworkAvailabilityService networkAvailabilityService)
+        {
+            SynchronizationContext synchronizationContext = SynchronizationContext.Current
+                ?? throw new InvalidOperationException(
+                    "A synchronization context must be installed before application services are initialized.");
+            networkAvailabilityService.Initialize(synchronizationContext);
+            _networkAvailabilityService = networkAvailabilityService;
+        }
+    }
+
+    private void ShowSplashScreen(WinFormsApplicationOptions options, Form? startupForm)
+    {
+        if (options.SplashScreenFactory is null)
+        {
+            return;
+        }
+
+        Form splashForm = options.SplashScreenFactory()
+            ?? throw new InvalidOperationException("The splash screen factory returned null.");
+
+        if (ReferenceEquals(splashForm, startupForm))
+        {
+            throw new InvalidOperationException("The splash screen and startup form must be different forms.");
+        }
+
+        _splashScreen = new WinFormsSplashScreen(
+            splashForm,
+            options.MinimumSplashScreenDisplayDuration);
+        _splashScreen.Show();
+    }
+
+    private void DisposeSplashScreen()
+    {
+        WinFormsSplashScreen? splashScreen = Interlocked.Exchange(ref _splashScreen, null);
+        splashScreen?.Dispose();
     }
 
     private void StartHost(ApplicationContext applicationContext, Form? startupForm)
@@ -733,6 +958,64 @@ public sealed class WinFormsApplication : IDisposable
             (Action)(() => StartHostAsync(applicationContext, startupForm)));
     }
 
+    private void StartHostlessStartup(ApplicationContext applicationContext, Form? startupForm)
+    {
+        _marshallingControl!.BeginInvoke(
+            (Action)(() => CompleteHostlessStartupAsync(applicationContext, startupForm)));
+    }
+
+    private async void CompleteHostlessStartupAsync(ApplicationContext applicationContext, Form? startupForm)
+    {
+        try
+        {
+            if (_splashScreen is not null)
+            {
+                await _splashScreen.WaitForMinimumDisplayDurationAsync().ConfigureAwait(true);
+
+                if (_applicationStoppingSource.Task.IsCompleted)
+                {
+                    return;
+                }
+
+                DisposeSplashScreen();
+            }
+
+            Lifetime.NotifyApplicationStarted();
+
+            if (Volatile.Read(ref _allowThreadExit) == 0 && startupForm is not null)
+            {
+                applicationContext.MainForm = startupForm;
+            }
+
+            OnApplicationStarted();
+
+            if (Volatile.Read(ref _allowThreadExit) == 0 && startupForm is not null)
+            {
+                startupForm.Visible = true;
+            }
+        }
+        catch (OperationCanceledException) when (_applicationStoppingSource.Task.IsCompleted)
+        {
+        }
+        catch (Exception exception)
+        {
+            RecordRuntimeException(exception);
+            _ = EnsureHostStopStarted(CancellationToken.None);
+        }
+        finally
+        {
+            try
+            {
+                DisposeSplashScreen();
+            }
+            catch (Exception exception)
+            {
+                RecordRuntimeException(exception);
+                _ = EnsureHostStopStarted(CancellationToken.None);
+            }
+        }
+    }
+
     private async void StartHostAsync(ApplicationContext applicationContext, Form? startupForm)
     {
         try
@@ -742,18 +1025,51 @@ public sealed class WinFormsApplication : IDisposable
                 await _host!.StartAsync().ConfigureAwait(true);
             }
 
+            if (_splashScreen is not null)
+            {
+                await _splashScreen.WaitForMinimumDisplayDurationAsync().ConfigureAwait(true);
+
+                if (_applicationStoppingSource.Task.IsCompleted)
+                {
+                    return;
+                }
+
+                DisposeSplashScreen();
+            }
+
             Lifetime.NotifyApplicationStarted();
 
             if (Volatile.Read(ref _allowThreadExit) == 0 && startupForm is not null)
             {
                 applicationContext.MainForm = startupForm;
+            }
+
+            OnApplicationStarted();
+
+            if (Volatile.Read(ref _allowThreadExit) == 0 && startupForm is not null)
+            {
                 startupForm.Visible = true;
             }
+        }
+        catch (OperationCanceledException) when (_applicationStoppingSource.Task.IsCompleted)
+        {
         }
         catch (Exception exception)
         {
             RecordRuntimeException(exception);
             _ = EnsureHostStopStarted(CancellationToken.None);
+        }
+        finally
+        {
+            try
+            {
+                DisposeSplashScreen();
+            }
+            catch (Exception exception)
+            {
+                RecordRuntimeException(exception);
+                _ = EnsureHostStopStarted(CancellationToken.None);
+            }
         }
     }
 
@@ -819,6 +1135,17 @@ public sealed class WinFormsApplication : IDisposable
 
     private void NotifyApplicationStopping()
     {
+        Volatile.Write(ref _singleInstanceStopping, 1);
+
+        try
+        {
+            _singleInstanceCoordinator?.Stop();
+        }
+        catch (Exception exception)
+        {
+            RecordRuntimeException(exception);
+        }
+
         try
         {
             Lifetime.NotifyApplicationStopping();
@@ -830,6 +1157,111 @@ public sealed class WinFormsApplication : IDisposable
         finally
         {
             _applicationStoppingSource.TrySetResult();
+
+            try
+            {
+                _networkAvailabilityService?.Stop();
+            }
+            catch (Exception exception)
+            {
+                RecordRuntimeException(exception);
+            }
+
+            try
+            {
+                _splashScreen?.Stop();
+            }
+            catch (Exception exception)
+            {
+                RecordRuntimeException(exception);
+            }
+        }
+    }
+
+    private bool OnSingleInstanceActivationReceived(string[] arguments)
+    {
+        if (Volatile.Read(ref _singleInstanceStopping) != 0)
+        {
+            return false;
+        }
+
+        _pendingActivations.Enqueue(arguments);
+
+        if (Volatile.Read(ref _applicationStarted) != 0)
+        {
+            ScheduleActivationDispatch();
+        }
+
+        return true;
+    }
+
+    private void OnSingleInstanceListenerFailure(Exception exception)
+    {
+        RecordRuntimeException(exception);
+        _ = EnsureHostStopStarted(CancellationToken.None);
+    }
+
+    private void OnApplicationStarted()
+    {
+        Volatile.Write(ref _applicationStarted, 1);
+
+        if (!_pendingActivations.IsEmpty)
+        {
+            ScheduleActivationDispatch();
+        }
+    }
+
+    private void ScheduleActivationDispatch()
+    {
+        if (Volatile.Read(ref _singleInstanceStopping) != 0
+            || Interlocked.CompareExchange(ref _activationDispatchScheduled, 1, 0) != 0)
+        {
+            return;
+        }
+
+        if (_marshallingControl is not { IsDisposed: false, IsHandleCreated: true } marshallingControl)
+        {
+            Interlocked.Exchange(ref _activationDispatchScheduled, 0);
+
+            return;
+        }
+
+        marshallingControl.BeginInvoke((Action)DispatchPendingActivations);
+    }
+
+    private void DispatchPendingActivations()
+    {
+        Interlocked.Exchange(ref _activationDispatchScheduled, 0);
+
+        while (Volatile.Read(ref _singleInstanceStopping) == 0
+            && _pendingActivations.TryDequeue(out string[]? arguments))
+        {
+            WinFormsApplicationActivationEventArgs eventArgs = new(arguments);
+            ActivationRequested?.Invoke(this, eventArgs);
+
+            if (eventArgs.BringToForeground
+                && _applicationContext?.MainForm is Form mainForm
+                && !mainForm.IsDisposed)
+            {
+                if (mainForm.WindowState == FormWindowState.Minimized)
+                {
+                    mainForm.WindowState = FormWindowState.Normal;
+                }
+
+                mainForm.Activate();
+            }
+        }
+    }
+
+    private void StopHostForSecondaryInstance()
+    {
+        IHost? host = _host;
+
+        if (host?.Services.GetService(typeof(IHostApplicationLifetime)) is IHostApplicationLifetime hostLifetime
+            && hostLifetime.ApplicationStarted.IsCancellationRequested
+            && !hostLifetime.ApplicationStopped.IsCancellationRequested)
+        {
+            host.StopAsync().GetAwaiter().GetResult();
         }
     }
 

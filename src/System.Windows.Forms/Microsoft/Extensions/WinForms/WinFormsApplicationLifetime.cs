@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.ComponentModel;
 using System.Runtime.ExceptionServices;
 
 namespace Microsoft.Extensions.WinForms;
@@ -10,8 +11,8 @@ namespace Microsoft.Extensions.WinForms;
 /// </summary>
 /// <remarks>
 ///  <para>
-///   Notifications are raised at most once and in startup, stopping, stopped
-///   order. If startup fails, the started notification is omitted.
+///   Notifications are raised at most once and in starting, started, stopping,
+///   stopped order. Startup cancellation or failure omits the started notification.
 ///  </para>
 ///  <para>
 ///   Runtime coordination raises these events on the application lifecycle
@@ -26,6 +27,7 @@ public sealed class WinFormsApplicationLifetime
     private enum LifecycleState
     {
         NotStarted,
+        Starting,
         Started,
         Stopping,
         Stopped
@@ -37,6 +39,18 @@ public sealed class WinFormsApplicationLifetime
     internal WinFormsApplicationLifetime()
     {
     }
+
+    /// <summary>
+    ///  Occurs on the application thread before startup UI activation or host startup.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   Set <see cref="CancelEventArgs.Cancel"/> to prevent startup. The
+    ///   application still raises <see cref="ApplicationStopping"/> and
+    ///   <see cref="ApplicationStopped"/> during cleanup.
+    ///  </para>
+    /// </remarks>
+    public event EventHandler<CancelEventArgs>? ApplicationStarting;
 
     /// <summary>
     ///  Occurs after the application has started successfully.
@@ -53,11 +67,28 @@ public sealed class WinFormsApplicationLifetime
     /// </summary>
     public event EventHandler? ApplicationStopped;
 
-    internal void NotifyApplicationStarted()
+    internal bool NotifyApplicationStarting()
     {
         lock (_stateLock)
         {
             if (_state != LifecycleState.NotStarted)
+            {
+                return false;
+            }
+
+            _state = LifecycleState.Starting;
+            CancelEventArgs eventArgs = new();
+            ApplicationStarting?.Invoke(this, eventArgs);
+
+            return eventArgs.Cancel;
+        }
+    }
+
+    internal void NotifyApplicationStarted()
+    {
+        lock (_stateLock)
+        {
+            if (_state is not (LifecycleState.NotStarted or LifecycleState.Starting))
             {
                 return;
             }

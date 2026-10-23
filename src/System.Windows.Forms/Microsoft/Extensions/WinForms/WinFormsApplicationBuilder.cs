@@ -29,6 +29,7 @@ namespace Microsoft.Extensions.WinForms;
 /// </remarks>
 public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
 {
+    private static readonly TimeSpan s_defaultSplashScreenMinimumDisplayDuration = TimeSpan.FromSeconds(2);
     private readonly WinFormsApplicationOptions _options = new();
     private readonly HashSet<object> _builtOwnedOptions = new(ReferenceEqualityComparer.Instance);
     private HostApplicationBuilder? _hostBuilder;
@@ -40,7 +41,17 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
 
     private WinFormsApplicationBuilder(HostApplicationBuilderSettings settings)
     {
-        _hostBuilder = CreateHostBuilder(settings);
+        string[]? args = settings.Args is null ? null : [.. settings.Args];
+        _options.CommandLineArgs = Array.AsReadOnly(args ?? []);
+        _hostBuilder = CreateHostBuilder(new HostApplicationBuilderSettings
+        {
+            ApplicationName = settings.ApplicationName,
+            Args = args,
+            Configuration = settings.Configuration,
+            ContentRootPath = settings.ContentRootPath,
+            DisableDefaults = settings.DisableDefaults,
+            EnvironmentName = settings.EnvironmentName
+        });
     }
 
     /// <summary>
@@ -227,6 +238,52 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
     }
 
     /// <summary>
+    ///  Configures a splash screen with the default minimum display duration of two seconds.
+    /// </summary>
+    /// <typeparam name="TSplashScreen">The type of the splash form.</typeparam>
+    /// <returns>This builder.</returns>
+    public WinFormsApplicationBuilder UseSplashScreen<TSplashScreen>()
+        where TSplashScreen : Form, new()
+        => UseSplashScreen(static () => new TSplashScreen(), s_defaultSplashScreenMinimumDisplayDuration);
+
+    /// <summary>
+    ///  Configures a splash screen with the specified minimum display duration.
+    /// </summary>
+    /// <typeparam name="TSplashScreen">The type of the splash form.</typeparam>
+    /// <param name="minimumDisplayDuration">The minimum time the splash screen is displayed.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///  <paramref name="minimumDisplayDuration"/> is negative.
+    /// </exception>
+    public WinFormsApplicationBuilder UseSplashScreen<TSplashScreen>(TimeSpan minimumDisplayDuration)
+        where TSplashScreen : Form, new()
+        => UseSplashScreen(static () => new TSplashScreen(), minimumDisplayDuration);
+
+    /// <summary>
+    ///  Configures a splash screen created by a factory.
+    /// </summary>
+    /// <param name="splashScreenFactory">The factory that creates the splash form.</param>
+    /// <param name="minimumDisplayDuration">The minimum time the splash screen is displayed.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="splashScreenFactory"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///  <paramref name="minimumDisplayDuration"/> is negative.
+    /// </exception>
+    public WinFormsApplicationBuilder UseSplashScreen(
+        Func<Form> splashScreenFactory,
+        TimeSpan minimumDisplayDuration)
+    {
+        ArgumentNullException.ThrowIfNull(splashScreenFactory);
+
+        ArgumentOutOfRangeException.ThrowIfLessThan(minimumDisplayDuration, TimeSpan.Zero);
+
+        _options.SplashScreenFactory = splashScreenFactory;
+        _options.MinimumSplashScreenDisplayDuration = minimumDisplayDuration;
+
+        return this;
+    }
+
+    /// <summary>
     ///  Associates a Generic Host with the application.
     /// </summary>
     /// <param name="host">The host to start and stop with the application.</param>
@@ -258,6 +315,87 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
 
         _options.Host = host;
         _options.HostWasSupplied = true;
+
+        return this;
+    }
+
+    /// <summary>
+    ///  Associates a Generic Host and command-line arguments with the application.
+    /// </summary>
+    /// <param name="host">The host to start and stop with the application.</param>
+    /// <param name="args">The command-line arguments for the application.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException">
+    ///  <paramref name="host"/> or <paramref name="args"/> is null.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    ///  A builder-owned host has already been initialized.
+    /// </exception>
+    /// <remarks>
+    ///  <para>
+    ///   This overload has the same host ownership and configuration restrictions
+    ///   as <see cref="UseHost(IHost)"/>. The arguments are copied and exposed by
+    ///   <see cref="WinFormsApplication.CommandLineArgs"/>.
+    ///  </para>
+    /// </remarks>
+    public WinFormsApplicationBuilder UseHost(IHost host, string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(args);
+
+        if (_hostBuilder is not null)
+        {
+            throw new InvalidOperationException(
+                "A supplied host cannot be combined with host configuration on this builder.");
+        }
+
+        _options.Host = host;
+        _options.HostWasSupplied = true;
+        _options.CommandLineArgs = Array.AsReadOnly([.. args]);
+
+        return this;
+    }
+
+    /// <summary>
+    ///  Enables single-instance execution using an identity derived from the entry assembly.
+    /// </summary>
+    /// <returns>This builder.</returns>
+    /// <remarks>
+    ///  <para>
+    ///   The default identity is scoped to the entry assembly, its major and minor
+    ///   version, its installation path, the current Windows user, and the current
+    ///   Windows session.
+    ///  </para>
+    /// </remarks>
+    public WinFormsApplicationBuilder UseSingleInstance()
+    {
+        _options.UseSingleInstance = true;
+        _options.SingleInstanceApplicationId = null;
+
+        return this;
+    }
+
+    /// <summary>
+    ///  Enables single-instance execution using the specified application identity.
+    /// </summary>
+    /// <param name="applicationId">The identity used to group application instances.</param>
+    /// <returns>This builder.</returns>
+    /// <remarks>
+    ///  <para>
+    ///   The identity is scoped to the current Windows user, session, and the
+    ///   entry assembly's major and minor version. The same explicit identity
+    ///   can share activation across installation paths.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    ///  <paramref name="applicationId"/> is null, empty, or whitespace.
+    /// </exception>
+    public WinFormsApplicationBuilder UseSingleInstance(string applicationId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationId);
+
+        _options.UseSingleInstance = true;
+        _options.SingleInstanceApplicationId = applicationId;
 
         return this;
     }
@@ -425,6 +563,26 @@ public sealed class WinFormsApplicationBuilder : IHostApplicationBuilder
         ArgumentNullException.ThrowIfNull(settingsService);
 
         return AddUserSettingsService(settingsService, includeInConfiguration, settingKeys);
+    }
+
+    /// <summary>
+    ///  Registers the default application information, runtime information, and network availability services.
+    /// </summary>
+    /// <returns>This builder.</returns>
+    /// <exception cref="InvalidOperationException">
+    ///  An external host was supplied or the builder has already been built.
+    /// </exception>
+    public WinFormsApplicationBuilder AddApplicationServices()
+    {
+        if (_options.Host is not null || _hostBuilt)
+        {
+            throw new InvalidOperationException(
+                "Application services must be registered before an external host is supplied or the builder is built.");
+        }
+
+        Services.AddWinFormsApplicationServices();
+
+        return this;
     }
 
     private WinFormsApplicationBuilder AddUserSettingsService(

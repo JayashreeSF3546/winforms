@@ -1,7 +1,9 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Buffers.Binary;
 using System.ComponentModel;
+using System.IO.Pipes;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 
@@ -24,6 +26,142 @@ public class WinFormsApplicationBuilderTests
     }
 
     [Fact]
+    public void SingleInstanceIdentity_ScopesDefaultAndExplicitIdentities()
+    {
+        const string assemblyId = "application-guid";
+        const string userSid = "S-1-5-21-123";
+        const string firstPath = @"C:\Apps\First\Sample.dll";
+        const string secondPath = @"C:\Apps\Second\Sample.dll";
+
+        string defaultIdentity = WinFormsSingleInstanceIdentity.CreatePipeName(
+            applicationId: null,
+            assemblyId,
+            new Version(1, 2, 3),
+            firstPath,
+            userSid,
+            sessionId: 1);
+
+        Assert.Equal(
+            defaultIdentity,
+            WinFormsSingleInstanceIdentity.CreatePipeName(
+                applicationId: null,
+                assemblyId,
+                new Version(1, 2, 99),
+                firstPath,
+                userSid,
+                sessionId: 1));
+        Assert.NotEqual(
+            defaultIdentity,
+            WinFormsSingleInstanceIdentity.CreatePipeName(
+                applicationId: null,
+                assemblyId,
+                new Version(1, 3, 0),
+                firstPath,
+                userSid,
+                sessionId: 1));
+        Assert.NotEqual(
+            defaultIdentity,
+            WinFormsSingleInstanceIdentity.CreatePipeName(
+                applicationId: null,
+                assemblyId,
+                new Version(1, 2, 3),
+                secondPath,
+                userSid,
+                sessionId: 1));
+        Assert.NotEqual(
+            defaultIdentity,
+            WinFormsSingleInstanceIdentity.CreatePipeName(
+                applicationId: null,
+                assemblyId,
+                new Version(1, 2, 3),
+                firstPath,
+                "S-1-5-21-456",
+                sessionId: 1));
+        Assert.NotEqual(
+            defaultIdentity,
+            WinFormsSingleInstanceIdentity.CreatePipeName(
+                applicationId: null,
+                assemblyId,
+                new Version(1, 2, 3),
+                firstPath,
+                userSid,
+                sessionId: 2));
+
+        string explicitIdentity = WinFormsSingleInstanceIdentity.CreatePipeName(
+            "shared-app",
+            assemblyId,
+            new Version(1, 2, 3),
+            firstPath,
+            userSid,
+            sessionId: 1);
+        string explicitIdentityFromOtherPath = WinFormsSingleInstanceIdentity.CreatePipeName(
+            "shared-app",
+            assemblyId,
+            new Version(1, 2, 3),
+            secondPath,
+            userSid,
+            sessionId: 1);
+
+        Assert.Equal(explicitIdentity, explicitIdentityFromOtherPath);
+    }
+
+    [Fact]
+    public void SingleInstanceCoordinator_RejectsMalformedFrameAndForwardsArguments()
+    {
+        string pipeName = $"WinFormsApplicationTest-{Guid.NewGuid():N}";
+        string[]? receivedArguments = null;
+        using ManualResetEventSlim activationReceived = new();
+        bool isPrimary = WinFormsSingleInstanceCoordinator.TryCreatePrimary(
+            pipeName,
+            arguments =>
+            {
+                receivedArguments = arguments;
+                activationReceived.Set();
+
+                return true;
+            },
+            _ => { },
+            out WinFormsSingleInstanceCoordinator? coordinator);
+        Assert.True(isPrimary);
+        using WinFormsSingleInstanceCoordinator primary = coordinator!;
+
+        using (NamedPipeClientStream malformedClient = new(
+            ".",
+            pipeName,
+            PipeDirection.InOut,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
+        {
+            malformedClient.Connect(2500);
+
+            byte[] malformedFrame = new byte[sizeof(int) + sizeof(int)];
+            BinaryPrimitives.WriteInt32LittleEndian(malformedFrame, sizeof(int));
+            malformedClient.Write(malformedFrame);
+            malformedClient.Flush();
+
+            Assert.Equal(0, malformedClient.ReadByte());
+        }
+
+        string[] arguments = ["open", @"C:\Documents\file.txt"];
+        WinFormsSingleInstanceCoordinator.SendActivation(pipeName, arguments);
+
+        Assert.True(activationReceived.Wait(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken));
+        Assert.Equal(arguments, receivedArguments);
+    }
+
+    [Fact]
+    public void SingleInstanceCoordinator_RejectsOversizedArgumentsBeforeConnecting()
+    {
+        string[] arguments = [new string('x', 256 * 1024 + 1)];
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => WinFormsSingleInstanceCoordinator.SendActivation("unused-pipe", arguments));
+
+        Assert.Equal("arguments", exception.ParamName);
+    }
+
+    [Fact]
     public void ApplicationCreateBuilder_ReturnsBuilder()
     {
         WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder();
@@ -39,6 +177,32 @@ public class WinFormsApplicationBuilderTests
         using WinFormsApplication application = builder.UseApplicationContext().Build();
 
         Assert.Equal("loaded", builder.Configuration["BuilderTests:CommandLine"]);
+        Assert.Equal(args, application.CommandLineArgs);
+    }
+
+    [Fact]
+    public void ApplicationCreateBuilder_WithArguments_SnapshotsArguments()
+    {
+        string[] args = ["--BuilderTests:Mode=sample"];
+        using WinFormsApplication application = WinFormsApplication.CreateBuilder(args)
+            .UseApplicationContext()
+            .Build();
+        args[0] = "--BuilderTests:Mode=changed";
+
+        Assert.Equal(["--BuilderTests:Mode=sample"], application.CommandLineArgs);
+    }
+
+    [Fact]
+    public void CreateBuilder_WithSettings_SnapshotsArguments()
+    {
+        string[] args = ["--BuilderTests:Mode=sample"];
+        using WinFormsApplication application = WinFormsApplication.CreateBuilder(
+            new HostApplicationBuilderSettings { Args = args })
+            .UseApplicationContext()
+            .Build();
+        args[0] = "--BuilderTests:Mode=changed";
+
+        Assert.Equal(["--BuilderTests:Mode=sample"], application.CommandLineArgs);
     }
 
     [Fact]
@@ -443,6 +607,90 @@ public class WinFormsApplicationBuilderTests
             events);
     }
 
+    [WinFormsFact]
+    public void Run_SingleInstance_QueuesActivationDuringApplicationStarting()
+    {
+        RunOnStaThread(() =>
+        {
+            string applicationId = $"BuilderTests-{Guid.NewGuid():N}";
+            string[] forwardedArguments = ["open", @"C:\Documents\file.txt"];
+            using ApplicationContext applicationContext = new();
+            using Timer timeoutTimer = new()
+            {
+                Interval = 10000
+            };
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseApplicationContext(applicationContext)
+                .UseSingleInstance(applicationId)
+                .Build();
+            string[]? receivedArguments = null;
+            int activationThreadId = 0;
+
+            timeoutTimer.Tick += (_, _) =>
+            {
+                timeoutTimer.Stop();
+                applicationContext.ExitThread();
+            };
+            application.Lifetime.ApplicationStarting += (_, _) =>
+            {
+                RunOnStaThread(() =>
+                {
+                    using WinFormsApplication secondary = WinFormsApplication.CreateBuilder(forwardedArguments)
+                        .UseApplicationContext()
+                        .UseSingleInstance(applicationId)
+                        .Build();
+
+                    secondary.Run();
+                });
+
+                timeoutTimer.Start();
+            };
+            application.ActivationRequested += (_, eventArgs) =>
+            {
+                receivedArguments = [.. eventArgs.Arguments];
+                activationThreadId = Environment.CurrentManagedThreadId;
+                eventArgs.BringToForeground = false;
+                timeoutTimer.Stop();
+                applicationContext.ExitThread();
+            };
+
+            application.Run();
+
+            Assert.Equal(forwardedArguments, receivedArguments);
+            Assert.Equal(Environment.CurrentManagedThreadId, activationThreadId);
+            Assert.Null(applicationContext.MainForm);
+        });
+    }
+
+    [Fact]
+    public void Lifetime_StartingCancellationRaisesStoppingAndStoppedWithoutStarted()
+    {
+        using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+            .UseApplicationContext()
+            .Build();
+        List<string> events = [];
+        WinFormsApplicationLifetime lifetime = application.Lifetime;
+        lifetime.ApplicationStarting += (_, eventArgs) =>
+        {
+            events.Add(nameof(lifetime.ApplicationStarting));
+            eventArgs.Cancel = true;
+        };
+        lifetime.ApplicationStarted += (_, _) => events.Add(nameof(lifetime.ApplicationStarted));
+        lifetime.ApplicationStopping += (_, _) => events.Add(nameof(lifetime.ApplicationStopping));
+        lifetime.ApplicationStopped += (_, _) => events.Add(nameof(lifetime.ApplicationStopped));
+
+        Assert.True(lifetime.NotifyApplicationStarting());
+        lifetime.NotifyApplicationStopped();
+
+        Assert.Equal(
+            [
+                nameof(lifetime.ApplicationStarting),
+                nameof(lifetime.ApplicationStopping),
+                nameof(lifetime.ApplicationStopped)
+            ],
+            events);
+    }
+
     [Fact]
     public void Lifetime_StoppingBeforeStarted_OmitsStartedAndRaisesStoppedAfterStopping()
     {
@@ -498,13 +746,121 @@ public class WinFormsApplicationBuilderTests
             using WinFormsApplication application = WinFormsApplication.CreateBuilder()
                 .UseStartupForm<CloseOnShownForm>()
                 .Build();
+            application.Lifetime.ApplicationStarting += (_, _) => events.Add("Starting");
             application.Lifetime.ApplicationStarted += (_, _) => events.Add("Started");
             application.Lifetime.ApplicationStopping += (_, _) => events.Add("Stopping");
             application.Lifetime.ApplicationStopped += (_, _) => events.Add("Stopped");
 
             application.Run();
 
-            Assert.Equal(["Started", "Stopping", "Stopped"], events);
+            Assert.Equal(["Starting", "Started", "Stopping", "Stopped"], events);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_StartingCancellationSkipsHostAndDisposesStartupForm()
+    {
+        RunOnStaThread(() =>
+        {
+            List<string> events = [];
+            TestHost host = new();
+            Form startupForm = new();
+            string[] args = ["--BuilderTests:Activation=first"];
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(startupForm)
+                .UseHost(host, args)
+                .Build();
+            args[0] = "--BuilderTests:Activation=changed";
+            application.Lifetime.ApplicationStarting += (_, eventArgs) =>
+            {
+                events.Add("Starting");
+                Assert.Equal(["--BuilderTests:Activation=first"], application.CommandLineArgs);
+                eventArgs.Cancel = true;
+            };
+            application.Lifetime.ApplicationStarted += (_, _) => events.Add("Started");
+            application.Lifetime.ApplicationStopping += (_, _) => events.Add("Stopping");
+            application.Lifetime.ApplicationStopped += (_, _) => events.Add("Stopped");
+
+            application.Run();
+
+            Assert.Equal(["Starting", "Stopping", "Stopped"], events);
+            Assert.True(startupForm.IsDisposed);
+            Assert.Equal(0, host.StartCount);
+            Assert.Equal(0, host.StopCount);
+            Assert.Equal(1, host.DisposeCount);
+            Assert.False(Application.MessageLoop);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_StartingCancellationStopsAnAlreadyStartedSuppliedHost()
+    {
+        RunOnStaThread(() =>
+        {
+            TestHost host = new();
+            host.Lifetime.NotifyStarted();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseApplicationContext()
+                .UseHost(host)
+                .Build();
+            application.Lifetime.ApplicationStarting += (_, eventArgs) => eventArgs.Cancel = true;
+
+            application.Run();
+
+            Assert.Equal(0, host.StartCount);
+            Assert.Equal(1, host.StopCount);
+            Assert.Equal(1, host.DisposeCount);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_StartingCancellationSkipsDeferredStartupFormFactory()
+    {
+        RunOnStaThread(() =>
+        {
+            int factoryCalls = 0;
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm<Form>(_ =>
+                {
+                    factoryCalls++;
+
+                    return new();
+                })
+                .Build();
+            application.Lifetime.ApplicationStarting += (_, eventArgs) => eventArgs.Cancel = true;
+
+            application.Run();
+
+            Assert.Equal(0, factoryCalls);
+            Assert.False(Application.MessageLoop);
+        });
+    }
+
+    [WinFormsFact]
+    public void Run_StartingHandlerFailureCleansUpAndPropagates()
+    {
+        RunOnStaThread(() =>
+        {
+            List<string> events = [];
+            InvalidOperationException expectedException = new("Starting handler failed.");
+            Form startupForm = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(startupForm)
+                .Build();
+            application.Lifetime.ApplicationStarting += (_, _) =>
+            {
+                events.Add("Starting");
+                throw expectedException;
+            };
+            application.Lifetime.ApplicationStopping += (_, _) => events.Add("Stopping");
+            application.Lifetime.ApplicationStopped += (_, _) => events.Add("Stopped");
+
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(application.Run);
+
+            Assert.Same(expectedException, exception);
+            Assert.True(startupForm.IsDisposed);
+            Assert.Equal(["Starting", "Stopping", "Stopped"], events);
+            Assert.False(Application.MessageLoop);
         });
     }
 
@@ -979,6 +1335,7 @@ public class WinFormsApplicationBuilderTests
                 .UseStartupForm(form)
                 .UseHost(host)
                 .Build();
+            application.Lifetime.ApplicationStarting += (_, _) => events.Add("ApplicationStarting");
             application.Lifetime.ApplicationStarted += (_, _) => events.Add("ApplicationStarted");
             application.Lifetime.ApplicationStopping += (_, _) => events.Add("ApplicationStopping");
             application.Lifetime.ApplicationStopped += (_, _) => events.Add("ApplicationStopped");
@@ -986,7 +1343,14 @@ public class WinFormsApplicationBuilderTests
             application.Run();
 
             Assert.Equal(
-                ["HostStarted", "ApplicationStarted", "ApplicationStopping", "HostStopping", "ApplicationStopped"],
+                [
+                    "ApplicationStarting",
+                    "HostStarted",
+                    "ApplicationStarted",
+                    "ApplicationStopping",
+                    "HostStopping",
+                    "ApplicationStopped"
+                ],
                 events);
             Assert.Equal(1, host.StopCount);
         });

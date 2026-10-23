@@ -50,12 +50,19 @@ arguments, and reload support. Providers appended to `Configuration` have
 higher precedence than the defaults.
 
 Options bind and validate through the standard Microsoft.Extensions.Options
-extensions. `ValidateOnStart()` runs when the host starts, before
-`Application.Run` enters the WinForms message loop; the original validation
-exception is propagated to the caller. A supplied, already-built host via
-`UseHost` is an alternative composition mode: host configuration and service
-registration cannot be combined with it, and the builder reports that
-conflict rather than silently ignoring either host.
+extensions. `ValidateOnStart()` runs when the host starts; for host-backed
+applications the WinForms message loop is pumping while asynchronous host
+startup completes, and the original validation exception is propagated to the
+caller after cleanup. A supplied, already-built host via `UseHost` is an
+alternative composition mode: host configuration and service registration
+cannot be combined with it, and the builder reports that conflict rather than
+silently ignoring either host.
+
+The application exposes `CommandLineArgs` as a read-only snapshot of raw
+arguments. `CreateBuilder(args)` and `CreateBuilder(HostApplicationBuilderSettings)`
+also pass those arguments to Generic Host command-line configuration. For an
+already-built host, use `UseHost(host, args)` to provide the application's
+argument snapshot; `UseHost(host)` exposes an empty argument collection.
 
 ```csharp
 WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder(args);
@@ -134,16 +141,26 @@ Provider-specific asynchronous flushing is not guaranteed by `ILogger` or
 
 ## Lifetime contract
 
-The application exposes one lifetime object with `ApplicationStarted`,
-`ApplicationStopping`, and `ApplicationStopped` events. Internal notification
-methods are one-shot and retain the required ordering; a stop after failed
-startup does not synthesize an `ApplicationStarted` notification. Event-handler
-exceptions propagate to the runtime coordinator, which must preserve cleanup
-and failure semantics when it is implemented.
+The application exposes one lifetime object with `ApplicationStarting`,
+`ApplicationStarted`, `ApplicationStopping`, and `ApplicationStopped` events.
+`ApplicationStarting` runs on the UI thread before startup UI activation and
+builder-owned host startup. Setting its `CancelEventArgs.Cancel` flag skips
+activation, host startup, and message-loop entry; the application still raises
+the stopping and stopped notifications during cleanup. Handler exceptions
+propagate after cleanup. The remaining notifications are one-shot and retain
+the required ordering; a stop after failed or canceled startup does not
+synthesize `ApplicationStarted`.
 
-When a host is configured, it starts before the message loop and is stopped
-when the loop exits. The application owns the host and disposes it after
-shutdown; disposing the application before `Run` also releases the host.
+When a host is configured, the message loop pumps while asynchronous host
+startup completes. `ApplicationStarted` is raised after the host starts and
+before the startup form is shown. The application owns the host and disposes
+it after shutdown; disposing the application before `Run` also releases the
+host.
+
+The builder does not automatically persist application settings on exit.
+Settings loading, saving, and migration remain explicit application actions;
+the builder's settings service does not implicitly reproduce
+`WindowsFormsApplicationBase.SaveMySettingsOnExit` or `My.Settings`.
 
 ## Hosted services and health diagnostics (#14960)
 
