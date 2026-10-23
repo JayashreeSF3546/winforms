@@ -3,9 +3,11 @@
 
 using System.Diagnostics;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows.Forms;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.WinForms;
 
@@ -20,6 +22,8 @@ internal static partial class Program
     private const int DefaultColdIterations = 5;
     private const int DefaultWarmIterations = 30;
     private const int DefaultResourceIterations = 100;
+    private const int DefaultActivationIterations = 5;
+    private const int MinimumSplashDisplayMilliseconds = 50;
     private const int WarmupIterations = 5;
 
     /// <summary>
@@ -38,6 +42,13 @@ internal static partial class Program
                 return 0;
             }
 
+            if (args.Length > 0
+                && (args[0] == "--activation-primary" || args[0] == "--activation-secondary"))
+            {
+                RunActivationWorker(args);
+                return 0;
+            }
+
             RunBenchmarks(args);
             return 0;
         }
@@ -53,12 +64,20 @@ internal static partial class Program
         int coldIterations = GetIterationCount(args, "--cold-iterations", DefaultColdIterations);
         int warmIterations = GetIterationCount(args, "--warm-iterations", DefaultWarmIterations);
         int resourceIterations = GetIterationCount(args, "--resource-iterations", DefaultResourceIterations);
+        int activationIterations = GetIterationCount(
+            args,
+            "--activation-iterations",
+            DefaultActivationIterations);
         Scenario[] scenarios = Enum.GetValues<Scenario>();
 
-        Console.WriteLine("WinForms Application Builder lifecycle benchmark");
+        Console.WriteLine("VB Application Framework and WinForms Application Builder benchmark");
+        Console.WriteLine($"Runtime: {RuntimeInformation.FrameworkDescription}");
+        Console.WriteLine($"Operating system: {RuntimeInformation.OSDescription}");
+        Console.WriteLine($"Process architecture: {RuntimeInformation.ProcessArchitecture}");
         Console.WriteLine($"Cold process launches per scenario: {coldIterations}");
         Console.WriteLine($"Warm iterations per scenario: {warmIterations}");
         Console.WriteLine($"Resource-stability cycles per scenario: {resourceIterations}");
+        Console.WriteLine($"Single-instance activation iterations per model: {activationIterations}");
         Console.WriteLine();
 
         foreach (Scenario scenario in scenarios)
@@ -86,6 +105,7 @@ internal static partial class Program
             Console.WriteLine();
         }
 
+        RunActivationBenchmarks(activationIterations);
         InfrastructureBenchmarks.Run(args);
 
         Console.WriteLine("These comparative measurements are diagnostic, not CI thresholds.");
@@ -103,7 +123,12 @@ internal static partial class Program
                 "Worker usage: --worker <scenario> <cold|warm|resources> <iteration-count>");
         }
 
-        ConfigureWinForms();
+        if (scenario is not (Scenario.VisualBasicFramework
+            or Scenario.VisualBasicFrameworkWithSplash
+            or Scenario.VisualBasicFrameworkWithNetworkListener))
+        {
+            ConfigureWinForms();
+        }
 
         WorkerPayload payload = mode switch
         {
@@ -173,59 +198,81 @@ internal static partial class Program
         long allocatedBytesBefore = GC.GetAllocatedBytesForCurrentThread();
         double shownMilliseconds = double.NaN;
         double closedMilliseconds = double.NaN;
-
-        Form form = new()
-        {
-            FormBorderStyle = FormBorderStyle.None,
-            Location = new Point(-32000, -32000),
-            Opacity = 0,
-            ShowInTaskbar = false,
-            Size = new Size(1, 1),
-            WindowState = FormWindowState.Minimized
-        };
+        Form? form = null;
 
         try
         {
-            form.Shown += (_, _) =>
+            Form CreateMainForm()
             {
-                shownMilliseconds = totalTimer.Elapsed.TotalMilliseconds;
-                form.BeginInvoke(form.Close);
-            };
-            form.FormClosed += (_, _) => closedMilliseconds = totalTimer.Elapsed.TotalMilliseconds;
+                Form startupForm = CreateBenchmarkForm();
+                form = startupForm;
+                startupForm.Shown += (_, _) =>
+                {
+                    shownMilliseconds = totalTimer.Elapsed.TotalMilliseconds;
+                    startupForm.BeginInvoke(startupForm.Close);
+                };
+                startupForm.FormClosed += (_, _) => closedMilliseconds = totalTimer.Elapsed.TotalMilliseconds;
 
-            switch (scenario)
+                return startupForm;
+            }
+
+            if (scenario is Scenario.VisualBasicFramework
+                or Scenario.VisualBasicFrameworkWithSplash
+                or Scenario.VisualBasicFrameworkWithNetworkListener)
             {
-                case Scenario.ApplicationRun:
-                    Application.Run(form);
-                    break;
-                case Scenario.Builder:
-                    using (WinFormsApplication application = WinFormsApplication.CreateBuilder()
-                        .UseStartupForm(form)
-                        .Build())
+                bool useSplashScreen = scenario == Scenario.VisualBasicFrameworkWithSplash;
+                BenchmarkVisualBasicApplication application = new(
+                    CreateMainForm,
+                    useSplashScreen ? CreateBenchmarkForm : null);
+                if (scenario == Scenario.VisualBasicFrameworkWithNetworkListener)
+                {
+                    application.ListenForNetworkAvailability();
+                }
+
+                application.Run([]);
+            }
+            else
+            {
+                Form startupForm = CreateMainForm();
+                Microsoft.Extensions.WinForms.WinFormsApplicationBuilder builder =
+                    WinFormsApplication.CreateBuilder();
+
+                if (scenario is Scenario.BuilderWithSplash)
+                {
+                    builder.UseSplashScreen(
+                        CreateBenchmarkForm,
+                        TimeSpan.FromMilliseconds(MinimumSplashDisplayMilliseconds));
+                }
+
+                if (scenario is Scenario.BuilderWithNetworkListener)
+                {
+                    builder.AddApplicationServices();
+                    builder.UseStartupForm(services =>
                     {
-                        application.Run();
-                    }
+                        services.GetRequiredService<IWinFormsNetworkAvailabilityService>()
+                            .NetworkAvailabilityChanged += static (_, _) => { };
+                        return startupForm;
+                    });
+                }
+                else
+                {
+                    builder.UseStartupForm(startupForm);
+                }
 
-                    break;
-                case Scenario.BuilderWithHost:
+                if (scenario is Scenario.BuilderWithHost)
+                {
                     HostApplicationBuilder hostBuilder = Host.CreateApplicationBuilder();
                     IHost host = hostBuilder.Build();
-                    using (WinFormsApplication application = WinFormsApplication.CreateBuilder()
-                        .UseStartupForm(form)
-                        .UseHost(host)
-                        .Build())
-                    {
-                        application.Run();
-                    }
+                    builder.UseHost(host);
+                }
 
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(scenario));
+                using WinFormsApplication application = builder.Build();
+                application.Run();
             }
         }
         finally
         {
-            form.Dispose();
+            form?.Dispose();
         }
 
         totalTimer.Stop();
@@ -243,6 +290,17 @@ internal static partial class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
     }
+
+    private static Form CreateBenchmarkForm()
+        => new()
+        {
+            FormBorderStyle = FormBorderStyle.None,
+            Location = new Point(-32000, -32000),
+            Opacity = 0,
+            ShowInTaskbar = false,
+            Size = new Size(1, 1),
+            WindowState = FormWindowState.Minimized
+        };
 
     private static ProcessSnapshot CaptureProcessSnapshot()
     {
@@ -400,8 +458,13 @@ internal static partial class Program
     private enum Scenario
     {
         ApplicationRun,
+        VisualBasicFramework,
+        VisualBasicFrameworkWithSplash,
+        VisualBasicFrameworkWithNetworkListener,
         Builder,
-        BuilderWithHost
+        BuilderWithHost,
+        BuilderWithSplash,
+        BuilderWithNetworkListener
     }
 
     /// <summary>
