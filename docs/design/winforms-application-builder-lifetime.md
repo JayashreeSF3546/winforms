@@ -466,5 +466,39 @@ Actual Generic Host regression tests use the `Microsoft.Extensions.Hosting` test
 The product still depends only on framework-provided hosting/DI abstractions, so that test dependency
 adds no WindowsDesktop transport requirement.
 
-Focused regression coverage accompanies this runtime. Full lifecycle CI expansion, production samples,
-and benchmarks remain with their assigned later issues; upstream API approval remains external.
+### Lifecycle regression coverage (dotnet/winforms#14944)
+
+The existing unit project covers startup selection, failed factories and `Load`, custom-context exit
+policy, startup and dispatch cancellation, lifecycle-subscriber failures, root quit, modal unwind,
+cross-thread stop, and synchronization-context ownership. Focused additions exercise:
+
+| Suite | Additional regression boundary |
+|---|---|
+| Runtime | Fresh applications alternating with legacy loops on one STA; hidden and disabled managed windows are disposed and their native handles destroyed; exact entry-context restoration. |
+| Runtime | Startup-subscriber failure racing cancellation plus context-disposal failure preserves both original exceptions, terminal notifications, and the shared stop failure. |
+| Runtime | A handled posted exception still reaches `Application.ThreadException` under the caller's selected exception policy. |
+| Real Generic Host | Accepted form close initiates host shutdown, while a vetoed close does not; mixed concurrent runner/host stop requests execute service shutdown once. |
+| Real Generic Host | A background-service failure using `StopHost` requests UI shutdown, with host stopped notification only after UI cleanup. The service task retains its original failure; Generic Host's existing background-exception policy is not replaced. |
+| UI integration | Public APIs run deferred contexts and existing forms; `await Task.Yield()` dispatches back to the owning STA; all lifecycle events retain thread affinity. Replacing a context's main form allows the old form to close without terminating the root loop. |
+
+Key startup, failure, shutdown-source, modal, resource-cleanup, exception-policy, real-host, and
+integration scenarios explicitly select both the light loop and component-manager loop using
+`AppContextSwitchScope`. This makes backend coverage part of ordinary test discovery rather than
+depending on a local runtimeconfig edit. Scopes restore the process-wide switch. Test execution is
+sequential through the repository's existing xUnit configuration; the new integration collection
+also explicitly prohibits parallel execution.
+
+Tasks and posted callbacks establish ordering; no sleeps, polling, or elapsed-time assertions drive
+the scenarios. Dedicated caller-owned threads have a 60-second failure watchdog so a shutdown
+regression reports failure instead of hanging the test runner indefinitely. This is not a startup or
+shutdown performance threshold. Small repeated ownership cycles check resource isolation, not the
+100-cycle measurements assigned to dotnet/winforms#14946.
+
+No separate CI pipeline is needed. The SDK-style unit and UI integration projects discover the
+tests automatically. `azure-pipelines-PR.yml` selects x64, x86, and arm64 builds;
+`eng/pipelines/build-PR.yml` supplies Debug/Release legs and runs unit plus integration tests on
+the public x64/x86 legs. Its existing conditions do not execute tests on arm64. These tests have
+neither `IgnoreForCI` nor `failing` exclusions.
+
+Remote CI execution and upstream API approval require external verification. Production samples
+and benchmarks remain assigned to dotnet/winforms#14945 and dotnet/winforms#14946.

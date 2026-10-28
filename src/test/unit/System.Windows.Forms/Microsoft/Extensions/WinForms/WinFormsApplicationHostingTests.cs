@@ -15,12 +15,20 @@ namespace System.Windows.Forms.Tests;
 public class WinFormsApplicationHostingTests
 {
     [Theory]
-    [InlineData(0, false)]
-    [InlineData(1, false)]
-    [InlineData(2, false)]
-    [InlineData(1, true)]
-    public void Run_RealHost_CoordinatesStopOnceAndPublishesStoppedAfterUiCleanup(int source, bool concurrentServices)
+    [InlineData(0, false, false)]
+    [InlineData(1, false, false)]
+    [InlineData(2, false, false)]
+    [InlineData(1, true, false)]
+    [InlineData(0, false, true)]
+    [InlineData(1, false, true)]
+    [InlineData(2, false, true)]
+    [InlineData(1, true, true)]
+    public void Run_RealHost_CoordinatesStopOnceAndPublishesStoppedAfterUiCleanup(
+        int source,
+        bool concurrentServices,
+        bool componentManager)
     {
+        using AppContextSwitchScope scope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
         RunOnSta(() =>
         {
             RecordingService service = new();
@@ -65,7 +73,9 @@ public class WinFormsApplicationHostingTests
                 else if (source == 1)
                 {
                     stop = Task.Run(() => Task.WhenAll(Enumerable.Range(0, 8)
-                        .Select(_ => host.StopAsync(CancellationToken.None))));
+                        .Select(index => index % 2 == 0
+                            ? host.StopAsync(CancellationToken.None)
+                            : application.StopAsync())));
                 }
                 else
                 {
@@ -83,6 +93,97 @@ public class WinFormsApplicationHostingTests
             winFormsStoppedAfterHost.Should().BeTrue();
             userCloseCanceled.Should().BeTrue();
             form.IsDisposed.Should().BeTrue();
+        });
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void Run_FormClose_StopsRealHostOnlyAfterCloseIsAccepted(bool cancelFirstClose, bool componentManager)
+    {
+        using AppContextSwitchScope scope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
+        RunOnSta(() =>
+        {
+            RecordingService service = new();
+            Form form = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(form)
+                .UseHost(new HostBuilder().ConfigureServices((_, services) => services.AddSingleton<IHostedService>(_ => service)))
+                .Build();
+            var lifetime = application.Host!.Services.GetRequiredService<IHostApplicationLifetime>();
+            bool cancelClose = cancelFirstClose;
+            bool stoppedAfterVeto = false;
+            bool hostStoppedAfterUi = false;
+            int stopping = 0;
+            int closing = 0;
+            application.Lifetime.ApplicationStopping += (_, _) => stopping++;
+            using CancellationTokenRegistration registration = lifetime.ApplicationStopped.Register(() =>
+                hostStoppedAfterUi = form.IsDisposed && application.UiCompletion.IsCompleted);
+            form.FormClosing += (_, e) =>
+            {
+                closing++;
+                e.Cancel = cancelClose;
+            };
+            form.Shown += (_, _) => form.BeginInvoke(() =>
+            {
+                form.Close();
+                if (cancelFirstClose)
+                {
+                    stoppedAfterVeto = lifetime.ApplicationStopping.IsCancellationRequested || stopping != 0;
+                    cancelClose = false;
+                    form.BeginInvoke(form.Close);
+                }
+            });
+
+            application.Run();
+
+            stoppedAfterVeto.Should().BeFalse();
+            closing.Should().Be(cancelFirstClose ? 2 : 1);
+            stopping.Should().Be(1);
+            hostStoppedAfterUi.Should().BeTrue();
+            service.StopCount.Should().Be(1);
+            service.DisposeCount.Should().Be(1);
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Run_BackgroundServiceFailure_RequestsStopAndWaitsForUiCleanup(bool componentManager)
+    {
+        using AppContextSwitchScope scope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
+        RunOnSta(() =>
+        {
+            InvalidOperationException expected = new("Background service failed.");
+            TaskCompletionSource releaseFailure = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            FailingBackgroundService service = new(releaseFailure.Task, expected);
+            Form form = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseStartupForm(form)
+                .UseHost(new HostBuilder().ConfigureServices((_, services) =>
+                {
+                    services.AddSingleton<IHostedService>(_ => service);
+                    services.Configure<HostOptions>(options =>
+                        options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.StopHost);
+                }))
+                .Build();
+            var lifetime = application.Host!.Services.GetRequiredService<IHostApplicationLifetime>();
+            bool hostStoppedAfterUi = false;
+            int stopping = 0;
+            using CancellationTokenRegistration registration = lifetime.ApplicationStopped.Register(() =>
+                hostStoppedAfterUi = form.IsDisposed && application.UiCompletion.IsCompleted);
+            application.Lifetime.ApplicationStopping += (_, _) => stopping++;
+            form.Shown += (_, _) => form.BeginInvoke(() => releaseFailure.SetResult());
+
+            application.Run();
+
+            service.ExecuteTask!.Exception!.InnerException.Should().BeSameAs(expected);
+            stopping.Should().Be(1);
+            hostStoppedAfterUi.Should().BeTrue();
+            service.StopCount.Should().Be(1);
+            service.DisposeCount.Should().Be(1);
         });
     }
 
@@ -295,8 +396,35 @@ public class WinFormsApplicationHostingTests
         };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        thread.Join();
+        thread.Join(TimeSpan.FromSeconds(60)).Should().BeTrue("the caller-owned STA must finish shutdown");
         failure?.Throw();
+    }
+
+    /// <summary>
+    ///  Fails only after dispatched UI work releases the background operation.
+    /// </summary>
+    private sealed class FailingBackgroundService(Task releaseFailure, Exception failure) : BackgroundService
+    {
+        internal int StopCount { get; private set; }
+        internal int DisposeCount { get; private set; }
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            await releaseFailure.WaitAsync(stoppingToken);
+            throw failure;
+        }
+
+        public override Task StopAsync(CancellationToken cancellationToken)
+        {
+            StopCount++;
+            return base.StopAsync(cancellationToken);
+        }
+
+        public override void Dispose()
+        {
+            DisposeCount++;
+            base.Dispose();
+        }
     }
 
     /// <summary>

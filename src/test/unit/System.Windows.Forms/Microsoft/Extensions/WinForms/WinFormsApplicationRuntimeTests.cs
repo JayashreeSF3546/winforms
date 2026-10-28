@@ -15,11 +15,15 @@ namespace System.Windows.Forms.Tests;
 public class WinFormsApplicationRuntimeTests
 {
     [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
-    public void Run_StartupSelection_RaisesOrderedEventsAndDisposesUi(int selection)
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    public void Run_StartupSelection_RaisesOrderedEventsAndDisposesUi(int selection, bool componentManager)
     {
+        using AppContextSwitchScope scope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
         RunOnThread(() =>
         {
             List<string> events = [];
@@ -78,10 +82,13 @@ public class WinFormsApplicationRuntimeTests
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    public void Run_StartupFailure_CleansUpAndPreservesLegacySequentialRuns(int failureKind)
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    public void Run_StartupFailure_CleansUpAndPreservesLegacySequentialRuns(int failureKind, bool componentManager)
     {
+        using AppContextSwitchScope scope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
         RunOnThread(() =>
         {
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
@@ -117,13 +124,19 @@ public class WinFormsApplicationRuntimeTests
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
-    public void Run_ShutdownSources_NotifyBeforeCleanupAndExitOnce(int source)
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(4, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    [InlineData(4, true)]
+    public void Run_ShutdownSources_NotifyBeforeCleanupAndExitOnce(int source, bool componentManager)
     {
+        using AppContextSwitchScope scope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
         RunOnThread(() =>
         {
             TrackingContext context = new();
@@ -467,9 +480,12 @@ public class WinFormsApplicationRuntimeTests
         });
     }
 
-    [Fact]
-    public void StopAsync_OpenModalDialog_UnwindsBothLoopsAndAllowsAnotherRun()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void StopAsync_OpenModalDialog_UnwindsBothLoopsAndAllowsAnotherRun(bool componentManager)
     {
+        using AppContextSwitchScope scope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
         RunOnThread(() =>
         {
             Form form = new();
@@ -488,6 +504,138 @@ public class WinFormsApplicationRuntimeTests
             modalReturned.Should().BeTrue();
             form.IsDisposed.Should().BeTrue();
             dialog.IsDisposed.Should().BeTrue();
+            RunLegacyForm();
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Run_FreshApplicationsOnSameSta_ReleaseHiddenAndDisabledWindows(bool componentManager)
+    {
+        using AppContextSwitchScope scope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
+        RunOnThread(() =>
+        {
+            for (int iteration = 0; iteration < 3; iteration++)
+            {
+                SynchronizationContext? previousContext = SynchronizationContext.Current;
+                Form? main = null;
+                Form? hidden = null;
+                Form? disabled = null;
+                List<HWND> handles = [];
+                int disposed = 0;
+                bool dispatched = false;
+                using WinFormsApplication application = WinFormsApplication.CreateBuilder().UseApplicationContext(() =>
+                {
+                    main = new Form();
+                    hidden = new Form();
+                    disabled = new Form { Enabled = false };
+                    foreach (Form form in new[] { main, hidden, disabled })
+                    {
+                        form.Disposed += (_, _) => disposed++;
+                        handles.Add((HWND)form.Handle);
+                    }
+
+                    disabled.Show();
+                    return new ApplicationContext(main);
+                }).Build();
+                application.Lifetime.ApplicationStarted += (_, _) =>
+                    SynchronizationContext.Current!.Post(_ =>
+                    {
+                        dispatched = true;
+                        application.StartupContext!.ExitThread();
+                    }, null);
+
+                application.Run();
+
+                dispatched.Should().BeTrue();
+                disposed.Should().Be(3);
+                main!.IsDisposed.Should().BeTrue();
+                hidden!.IsDisposed.Should().BeTrue();
+                disabled!.IsDisposed.Should().BeTrue();
+                handles.Should().OnlyContain(handle => !PInvoke.IsWindow(handle));
+                Application.MessageLoop.Should().BeFalse();
+                SynchronizationContext.Current.Should().BeSameAs(previousContext);
+                RunLegacyForm();
+            }
+        });
+    }
+
+    [Fact]
+    public void Run_StartupAndCleanupFailuresWithCancellation_PreservesFailuresAndTerminalEvents()
+    {
+        RunOnThread(() =>
+        {
+            using CancellationTokenSource cancellation = new();
+            InvalidOperationException startupFailure = new("Startup notification failed.");
+            ArgumentException cleanupFailure = new("Context cleanup failed.");
+            TrackingContext context = new(cleanupFailure);
+            List<string> events = [];
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseApplicationContext(() => context)
+                .Build();
+            application.Lifetime.ApplicationStarted += (_, _) =>
+            {
+                cancellation.Cancel();
+                throw startupFailure;
+            };
+            application.Lifetime.ApplicationStarted += (_, _) => events.Add("started");
+            application.Lifetime.ApplicationStopping += (_, _) => events.Add("stopping");
+            application.Lifetime.ApplicationStopped += (_, _) => events.Add("stopped");
+
+            AggregateException failure = Assert.Throws<AggregateException>(() => application.Run(cancellation.Token));
+
+            failure.InnerExceptions.Should().Equal(startupFailure, cleanupFailure);
+            context.DisposeCount.Should().Be(1);
+            events.Should().Equal("started", "stopping", "stopped");
+            Assert.Throws<AggregateException>(() => application.StopAsync(TestContext.Current.CancellationToken).GetAwaiter().GetResult())
+                .Should().BeSameAs(failure);
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Run_HandledDispatchFailure_PreservesThreadExceptionPolicy(bool componentManager)
+    {
+        using AppContextSwitchScope scope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
+        RunOnThread(() =>
+        {
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            InvalidOperationException expected = new("Posted work failed.");
+            Exception? observed = null;
+            bool dispatchedAfterFailure = false;
+            int threadExceptions = 0;
+            int stopped = 0;
+            Form form = new();
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder().UseStartupForm(form).Build();
+            ThreadExceptionEventHandler handler = (_, e) =>
+            {
+                observed = e.Exception;
+                threadExceptions++;
+                form.BeginInvoke(() =>
+                {
+                    dispatchedAfterFailure = Application.MessageLoop;
+                    _ = application.StopAsync();
+                });
+            };
+            Application.ThreadException += handler;
+            application.Lifetime.ApplicationStopped += (_, _) => stopped++;
+            form.Shown += (_, _) => form.BeginInvoke(() => throw expected);
+            try
+            {
+                application.Run();
+            }
+            finally
+            {
+                Application.ThreadException -= handler;
+            }
+
+            observed.Should().BeSameAs(expected);
+            dispatchedAfterFailure.Should().BeTrue();
+            threadExceptions.Should().Be(1);
+            stopped.Should().Be(1);
+            form.IsDisposed.Should().BeTrue();
             RunLegacyForm();
         });
     }
@@ -738,7 +886,7 @@ public class WinFormsApplicationRuntimeTests
         };
         thread.SetApartmentState(apartment);
         thread.Start();
-        thread.Join();
+        thread.Join(TimeSpan.FromSeconds(60)).Should().BeTrue("the caller-owned thread must finish shutdown");
         failure?.Throw();
     }
 
