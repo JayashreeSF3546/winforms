@@ -49,6 +49,42 @@ changed independently with `--infrastructure-iterations`:
 dotnet run --configuration Release --project docs\application-builder\benchmarks\WinFormsApplicationBuilder.Benchmarks.csproj -- --cold-iterations 10 --warm-iterations 100 --resource-iterations 500 --infrastructure-iterations 100
 ```
 
+## Generated-template build and deployment
+
+From the repository root in PowerShell, run the generated-project matrix:
+
+```powershell
+.\docs\application-builder\benchmarks\BenchmarkProjectTemplates.ps1 -DotNetPath .\.dotnet\dotnet.exe
+```
+
+The script installs the local templates into an isolated CLI home, generates
+all nine C#, VB, and Blazor Hybrid projects, and records restore and clean-build
+time. It then publishes the five executable templates as framework-dependent
+and self-contained `win-x64` applications, and publishes the four library
+templates. Output size is the sum of file lengths in the publish directory;
+it is not compressed installer or download size.
+
+The measured run and its limitations are recorded in
+[template-performance.md](template-performance.md). The lifecycle runner can
+omit the separate infrastructure suite with `--skip-infrastructure` when only
+UI startup and resource measurements are needed.
+
+NuGet packages use the existing shared package cache and are not cleared. The
+reported restore times are therefore warm-cache diagnostics. The builder
+templates compile against the reference assemblies produced by this checkout,
+with `Private=false`, matching the template validation setup. Their publish
+sizes represent app-local payload and do not include framework files supplied
+by a future installed runtime.
+
+The lifecycle harness reports startup, shutdown, working set, private bytes,
+managed live bytes, handles, threads, and managed assembly counts for a
+conventional `Application.Run` path and the two Application Builder paths.
+These are isolated representative startup paths, not timings of the full
+generated forms or of Blazor's first rendered frame. The current installed
+runtime does not contain the in-development Application Builder APIs, so the
+generated Builder templates are compile/publish measured rather than launched
+as part of this matrix.
+
 ## Measurements and interpretation
 
 - **Cold process launch-to-exit** is parent-measured and includes process and
@@ -61,12 +97,14 @@ dotnet run --configuration Release --project docs\application-builder\benchmarks
 - **UI-thread allocated bytes** uses
   `GC.GetAllocatedBytesForCurrentThread`. It deliberately does not claim to
   include allocations on Generic Host worker threads.
-- **Resource deltas** report changes in process handle count, thread count,
-  private bytes, and post-full-GC managed live bytes relative to the preceding
-  checkpoint, with four checkpoints during the default repeated-cycle run.
-  One-time runtime, JIT, WinForms, and host caches may account for bounded
-  initial growth; inspect whether counters continue increasing across later
-  checkpoints and repeat runs before labeling growth a leak.
+- **Resource snapshots** report absolute process handle count, thread count,
+  working set, private bytes, post-full-GC managed live bytes, and managed
+  assembly count, plus deltas from the preceding checkpoint. The default
+  repeated-cycle run has four checkpoints. Assembly counts are process-wide
+  counts of loaded managed assemblies at each snapshot. One-time runtime, JIT,
+  WinForms, and host caches may account for bounded initial growth; inspect
+  whether counters continue increasing across later checkpoints and repeat
+  runs before labeling growth a leak.
 - **Infrastructure operation timing** reports median and p95 elapsed time over
   the configured iterations, with five warmups. Allocation is process-wide
   allocated bytes divided by iteration count, so it includes measurement and

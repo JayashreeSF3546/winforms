@@ -80,6 +80,10 @@ jobs:
         /bl:$(BUILD.SOURCESDIRECTORY)\artifacts\log\$(_BuildConfig)\BuildSrc-${{ parameters.targetArchitecture }}.binlog
       displayName: Build
 
+    - powershell: .\eng\scripts\ValidateProjectTemplates.ps1 -DotNetPath "$(Build.SourcesDirectory)\.dotnet\dotnet.exe" -Configuration "$(_BuildConfig)"
+      displayName: Validate project templates
+      condition: and(succeeded(), eq('${{ parameters.targetArchitecture }}', 'x64'), eq(variables['_BuildConfig'], 'Debug'))
+
     # Run Unit Tests
     # Tests are run with /m:1 to work around https://github.com/tonerdo/coverlet/issues/364
     - script: eng\cibuild.cmd

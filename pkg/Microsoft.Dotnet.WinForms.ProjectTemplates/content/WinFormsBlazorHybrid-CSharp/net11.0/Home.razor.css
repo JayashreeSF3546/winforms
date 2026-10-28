@@ -1,0 +1,12 @@
+main {
+    margin: 2rem;
+    max-width: 48rem;
+}
+
+h1 {
+    color: #174a7e;
+}
+
+button {
+    padding: 0.5rem 0.75rem;
+}

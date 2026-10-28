@@ -9,6 +9,9 @@
 **Service infrastructure architecture:**
 [service boundaries and defaults](service-infrastructure-architecture.md)
 
+**Template strategy and matrix:**
+[template and sample decisions](template-strategy.md)
+
 **DI contract prototype:** [runtime factory contract](di-contract-prototype.md)
 
 **Parent proposal:** [#14082](https://github.com/dotnet/winforms/issues/14082)
