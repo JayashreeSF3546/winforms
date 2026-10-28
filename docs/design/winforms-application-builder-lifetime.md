@@ -2,7 +2,7 @@
 
 Status: architecture recommendation for
 [dotnet/winforms#14941](https://github.com/dotnet/winforms/issues/14941), pending API and architecture approval.
-This document does not introduce runtime behavior or approved public APIs.
+The contract prototype below is implemented for review; message-loop execution and API approval remain pending.
 
 Parent: [dotnet/winforms#14082](https://github.com/dotnet/winforms/issues/14082).
 Related design: [dotnet/winforms#11415](https://github.com/dotnet/winforms/issues/11415).
@@ -323,3 +323,45 @@ The actual adapter must separately prove that its host stopped token never prece
 on successful shutdown. Cancellation/failure paths must report incomplete teardown honestly instead of
 claiming the same success ordering. CI, runtime tests, samples, benchmarks, and API approval remain work
 for their owning issues; this research document supplies no execution evidence for unimplemented behavior.
+
+## Contract prototype (dotnet/winforms#14942)
+
+The prototype places public `WinFormsApplication`, `WinFormsApplicationBuilder`, and
+`WinFormsApplicationLifetime` types in `Microsoft.Extensions.WinForms` within `System.Windows.Forms`.
+`WinFormsApplicationOptions` remains an internal immutable snapshot, not a public options-pattern API.
+This placement was selected for the prototype; upstream API approval is still required before shipping.
+No new package dependency or framework transport assembly is introduced.
+
+```csharp
+ApplicationConfiguration.Initialize();
+var builder = WinFormsApplication.CreateBuilder();
+builder.UseStartupForm<MainForm>();
+using var application = builder.Build();
+```
+
+Alternatively, select a same-thread existing form with `UseStartupForm(form)` or defer context creation
+with `UseApplicationContext(() => new MyApplicationContext())`. Startup selection is exclusive and is
+validated when selected, not silently replaced by subsequent selections. Build validates again before
+transferring ownership and freezes the builder only after success. No factory runs during build or
+disposal of an unactivated application. Existing application configuration remains at the entry point;
+the prototype does not add a competing configuration API or execute configuration after handles exist.
+
+The internal startup activation seam constructs the selected context at most once without showing forms
+or starting a pump. Factory exceptions are not reflection-wrapped, and a failed activation cannot be
+retried on the same application. A factory must return a valid context whose UI belongs to the calling
+thread. Reentrant disposal during factory execution is rejected so returned resources cannot escape ownership.
+Invalid output rejected before activation is not adopted; its creator remains responsible for it.
+Known form-handle thread ownership is checked without creating a handle. WinForms does not retain a
+handleless control's creation thread, so same-thread construction remains a caller precondition; this
+prototype does not change all controls to track additional metadata.
+
+The lifetime service implements ordered, once-only transitions and defers reentrant transitions until
+the current notification's subscribers finish. Subscriber failures do not skip other subscribers;
+multiple failures are aggregated, and a single failure preserves its exception identity and stack.
+The prototype does not connect these internal transitions to message-loop or host events.
+
+`Run()` deliberately throws `NotSupportedException` without activating startup UI or raising events.
+This is an explicit prototype boundary, not a working application runner. STA validation, early
+synchronization-context installation, actual event milestones, cancellation, message-loop execution,
+and coordinated shutdown belong to dotnet/winforms#14943. Do not use this prototype as a runnable sample.
+Full lifecycle CI scenarios, production samples, and benchmarks remain with their assigned later issues.

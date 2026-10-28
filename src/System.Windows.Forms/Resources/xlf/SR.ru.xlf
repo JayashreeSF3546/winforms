@@ -11509,6 +11509,46 @@ Stack trace where the illegal operation occurred was:
         <target state="translated">Перед созданием в приложении первого объекта IWin32Window необходимо вызвать {0}.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_ActivationInProgress">
+        <source>The Windows Forms application cannot be disposed while its startup factory is executing.</source>
+        <target state="new">The Windows Forms application cannot be disposed while its startup factory is executing.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_AlreadyBuilt">
+        <source>This Windows Forms application builder has already been built.</source>
+        <target state="new">This Windows Forms application builder has already been built.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_MissingStartup">
+        <source>Select a startup form or application context before building the application.</source>
+        <target state="new">Select a startup form or application context before building the application.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_NullContext">
+        <source>The application context factory returned null.</source>
+        <target state="new">The application context factory returned null.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_RuntimeUnavailable">
+        <source>Message-loop execution is not available in this Windows Forms application contract prototype.</source>
+        <target state="new">Message-loop execution is not available in this Windows Forms application contract prototype.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_StartupAlreadyActivated">
+        <source>Startup activation has already been attempted for this Windows Forms application.</source>
+        <target state="new">Startup activation has already been attempted for this Windows Forms application.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_StartupAlreadySelected">
+        <source>A startup form or application context has already been selected.</source>
+        <target state="new">A startup form or application context has already been selected.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_WrongThread">
+        <source>This operation must be performed on the thread that owns the Windows Forms application and its startup UI.</source>
+        <target state="new">This operation must be performed on the thread that owns the Windows Forms application and its startup UI.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WindowSubclassHandlerWndProcIsNotExceptedOne">
         <source>The current window procedure is not the expected one.</source>
         <target state="translated">Текущая процедура окна отличается от ожидаемой.</target>

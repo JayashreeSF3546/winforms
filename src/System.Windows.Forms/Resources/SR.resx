@@ -117,6 +117,30 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
+  <data name="WinFormsApplication_ActivationInProgress" xml:space="preserve">
+    <value>The Windows Forms application cannot be disposed while its startup factory is executing.</value>
+  </data>
+  <data name="WinFormsApplication_AlreadyBuilt" xml:space="preserve">
+    <value>This Windows Forms application builder has already been built.</value>
+  </data>
+  <data name="WinFormsApplication_MissingStartup" xml:space="preserve">
+    <value>Select a startup form or application context before building the application.</value>
+  </data>
+  <data name="WinFormsApplication_NullContext" xml:space="preserve">
+    <value>The application context factory returned null.</value>
+  </data>
+  <data name="WinFormsApplication_RuntimeUnavailable" xml:space="preserve">
+    <value>Message-loop execution is not available in this Windows Forms application contract prototype.</value>
+  </data>
+  <data name="WinFormsApplication_StartupAlreadyActivated" xml:space="preserve">
+    <value>Startup activation has already been attempted for this Windows Forms application.</value>
+  </data>
+  <data name="WinFormsApplication_StartupAlreadySelected" xml:space="preserve">
+    <value>A startup form or application context has already been selected.</value>
+  </data>
+  <data name="WinFormsApplication_WrongThread" xml:space="preserve">
+    <value>This operation must be performed on the thread that owns the Windows Forms application and its startup UI.</value>
+  </data>
   <data name="AboutBoxDesc" xml:space="preserve">
     <value>Displays the 'About' box for this component</value>
   </data>
