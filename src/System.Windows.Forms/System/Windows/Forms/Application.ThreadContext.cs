@@ -4,6 +4,7 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Runtime.ExceptionServices;
+using Microsoft.Extensions.WinForms;
 using Microsoft.Office;
 using LocalAppContextSwitches = System.Windows.Forms.Primitives.LocalAppContextSwitches;
 
@@ -63,7 +64,7 @@ public sealed partial class Application
         private MessageLoopCallback? _messageLoopCallback;
 
         protected Form? CurrentForm { get; private set; }
-        protected bool PostedQuit { get; private set; }
+        internal bool PostedQuit { get; private set; }
 
         /// <summary>
         ///  Creates a new thread context object.
@@ -90,6 +91,8 @@ public sealed partial class Application
         }
 
         public ApplicationContext? ApplicationContext { get; private set; }
+
+        internal WinFormsApplication? ApplicationRunner { get; set; }
 
         public virtual void EnsureReadyForIdle() { }
 
@@ -372,6 +375,23 @@ public sealed partial class Application
         /// </summary>
         internal void DisposeThreadWindows()
         {
+            if (ApplicationRunner is { } runner)
+            {
+                runner.NotifyStopping();
+                ApplicationContext? context = ApplicationContext;
+                ApplicationContext = null;
+                context?.ThreadExit -= OnAppThreadExit;
+
+                runner.DisposeContext(context);
+                runner.CaptureFailure(() =>
+                {
+                    ThreadWindows windows = new(onlyWinForms: true, includeHidden: true);
+                    windows.Dispose(runner.RecordException);
+                });
+                runner.CaptureFailure(DisposeParkingWindow);
+                return;
+            }
+
             // We dispose the main window first, so it can perform any cleanup that it may need to do.
             try
             {
@@ -435,6 +455,7 @@ public sealed partial class Application
         {
             foreach ((_, var threadContext) in s_contextHash)
             {
+                threadContext.ApplicationRunner?.NotifyStopping();
                 if (threadContext.ApplicationContext is ApplicationContext applicationContext)
                 {
                     applicationContext.ExitThread();
@@ -573,7 +594,11 @@ public sealed partial class Application
             return _externalOleInit ? ApartmentState.MTA : ApartmentState.STA;
         }
 
-        private void OnAppThreadExit(object? sender, EventArgs e) => Dispose(postQuit: true);
+        private void OnAppThreadExit(object? sender, EventArgs e)
+        {
+            ApplicationRunner?.NotifyStopping();
+            Dispose(postQuit: true);
+        }
 
         /// <summary>
         ///  Called when an un-trapped exception occurs in a thread. This allows the programmer to trap these, and, if
@@ -684,6 +709,12 @@ public sealed partial class Application
 
         private void RunMessageLoopInner(msoloop reason, ApplicationContext? context)
         {
+            bool builderMainLoop = reason == msoloop.Main && ApplicationRunner is not null;
+            if (builderMainLoop && (_messageLoopCount != 0 || !ReferenceEquals(context, ApplicationRunner!.StartupContext)))
+            {
+                throw new InvalidOperationException(SR.CantNestMessageLoops);
+            }
+
             if (reason == msoloop.ModalForm && !SystemInformation.UserInteractive)
             {
                 throw new InvalidOperationException(SR.CantShowModalOnNonInteractive);
@@ -716,7 +747,10 @@ public sealed partial class Application
                 ApplicationContext = context;
                 ApplicationContext!.ThreadExit += OnAppThreadExit;
 
-                ApplicationContext.MainForm?.Visible = true;
+                if (!builderMainLoop)
+                {
+                    ApplicationContext.MainForm?.Visible = true;
+                }
             }
 
             Form? oldForm = CurrentForm;
@@ -783,6 +817,11 @@ public sealed partial class Application
                     WindowsFormsSynchronizationContext.InstallIfNeeded();
                 }
 
+                if (builderMainLoop)
+                {
+                    ApplicationContext!.MainForm?.Visible = true;
+                }
+
                 // Need to do this in a try/finally. Also good to do after we installed the synch context.
                 if (fullModal && CurrentForm is not null)
                 {
@@ -793,9 +832,21 @@ public sealed partial class Application
             }
             finally
             {
+                if (builderMainLoop)
+                {
+                    ApplicationRunner?.NotifyStopping();
+                }
+
                 if (fullModal)
                 {
-                    EndModalMessageLoop(context);
+                    if (ApplicationRunner is { } runner)
+                    {
+                        runner.CaptureFailure(() => EndModalMessageLoop(context));
+                    }
+                    else
+                    {
+                        EndModalMessageLoop(context);
+                    }
 
                     // Again, if the hwndOwner was valid and disabled above, re-enable it.
                     if (!hwndOwner.IsNull)
@@ -817,6 +868,11 @@ public sealed partial class Application
 
                 if (reason == msoloop.Main)
                 {
+                    if (builderMainLoop)
+                    {
+                        context!.ThreadExit -= OnAppThreadExit;
+                    }
+
                     Dispose(postQuit: true, disposing: true);
                 }
                 else if (_messageLoopCount == 0)

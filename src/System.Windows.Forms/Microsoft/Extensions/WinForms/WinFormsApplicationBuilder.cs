@@ -4,6 +4,7 @@
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Windows.Forms;
+using Microsoft.Extensions.Hosting;
 
 namespace Microsoft.Extensions.WinForms;
 
@@ -21,10 +22,40 @@ public sealed class WinFormsApplicationBuilder
     private readonly Thread _ownerThread = Thread.CurrentThread;
     private Form? _startupForm;
     private Func<ApplicationContext>? _contextFactory;
+    private IHostBuilder? _hostBuilder;
     private bool _built;
 
     internal WinFormsApplicationBuilder()
     {
+    }
+
+    /// <summary>
+    ///  Selects a Generic Host builder whose host is owned by this application.
+    /// </summary>
+    /// <param name="hostBuilder">An unbuilt Generic Host builder.</param>
+    /// <returns>This builder.</returns>
+    /// <remarks>
+    ///  <para>
+    ///   Build consumes the host builder and registers the UI shutdown barrier before building the host.
+    ///   Use Run to start the application and its host. Do not separately build or run the supplied builder.
+    ///   Hosted startup must not wait for UI dispatch. Shutdown waits for UI cleanup even after host timeout.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="hostBuilder"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  The builder cannot be configured, or a host builder has already been selected.
+    /// </exception>
+    public WinFormsApplicationBuilder UseHost(IHostBuilder hostBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(hostBuilder);
+        VerifyCanConfigure();
+        if (_hostBuilder is not null)
+        {
+            throw new InvalidOperationException(SR.WinFormsApplication_HostAlreadySelected);
+        }
+
+        _hostBuilder = hostBuilder;
+        return this;
     }
 
     /// <summary>
@@ -50,7 +81,7 @@ public sealed class WinFormsApplicationBuilder
     /// <returns>This builder.</returns>
     /// <remarks>
     ///  <para>
-    ///   Ownership transfers on successful <see cref="Build"/>. The caller must configure the application
+    ///   Ownership transfers on successful <see cref="Build()"/>. The caller must configure the application
     ///   before constructing this form. A handleless form's creation thread cannot be validated.
     ///  </para>
     /// </remarks>
@@ -103,6 +134,9 @@ public sealed class WinFormsApplicationBuilder
     ///  No startup UI is selected, the builder has been built, or the builder or startup form belongs to another thread.
     /// </exception>
     public WinFormsApplication Build()
+        => Build(host: null);
+
+    internal WinFormsApplication Build(IHost? host)
     {
         VerifyCanConfigure();
         if (_startupForm is null && _contextFactory is null)
@@ -116,10 +150,27 @@ public sealed class WinFormsApplicationBuilder
         }
 
         WinFormsApplicationOptions options = new(_ownerThread, _startupForm, _contextFactory);
-        WinFormsApplication application = new(options);
+        WinFormsApplication application = new(options, host);
+        if (_hostBuilder is not null)
+        {
+            // Generic Host build is single-use, including when its build operation fails.
+            _built = true;
+            WinFormsApplicationHost adapter = WinFormsApplicationHost.Build(_hostBuilder, application);
+            try
+            {
+                application.SetHost(adapter);
+            }
+            catch
+            {
+                adapter.DisposeHost();
+                throw;
+            }
+        }
+
         _built = true;
         _startupForm = null;
         _contextFactory = null;
+        _hostBuilder = null;
 
         return application;
     }

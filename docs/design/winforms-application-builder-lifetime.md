@@ -2,7 +2,8 @@
 
 Status: architecture recommendation for
 [dotnet/winforms#14941](https://github.com/dotnet/winforms/issues/14941), pending API and architecture approval.
-The contract prototype below is implemented for review; message-loop execution and API approval remain pending.
+The contract prototype, core runtime, and public Generic Host adapter below are implemented for
+review; upstream API approval remains pending.
 
 Parent: [dotnet/winforms#14082](https://github.com/dotnet/winforms/issues/14082).
 Related design: [dotnet/winforms#11415](https://github.com/dotnet/winforms/issues/11415).
@@ -20,7 +21,8 @@ Generic Host integration composes this runner with the real host rather than rei
 The core builder is therefore not initially an `IHostApplicationBuilder`, and the core application is not
 initially an `IHost`: those interfaces require services and other facilities outside this stream.
 This intentionally narrows the parent proposal; it must not be presented as complete Generic Host support.
-The integration protocol below is a requirement for an eventual adapter, not an adapter implemented here.
+The architecture sections describe the original recommendation. The runtime and public adapter
+sections at the end document the implementation, including the subsequently requested hosting integration.
 
 Do not change behavior for applications that call the existing `Application.Run`, `Application.Exit`,
 or `Application.ExitThread` APIs without the builder.
@@ -360,8 +362,109 @@ the current notification's subscribers finish. Subscriber failures do not skip o
 multiple failures are aggregated, and a single failure preserves its exception identity and stack.
 The prototype does not connect these internal transitions to message-loop or host events.
 
-`Run()` deliberately throws `NotSupportedException` without activating startup UI or raising events.
-This is an explicit prototype boundary, not a working application runner. STA validation, early
-synchronization-context installation, actual event milestones, cancellation, message-loop execution,
-and coordinated shutdown belong to dotnet/winforms#14943. Do not use this prototype as a runnable sample.
-Full lifecycle CI scenarios, production samples, and benchmarks remain with their assigned later issues.
+At the contract-prototype boundary, `Run()` deliberately threw `NotSupportedException` without
+activating startup UI or raising events. The runtime below replaces that placeholder.
+
+## Core runtime (dotnet/winforms#14943)
+
+`Run()` and `Run(CancellationToken)` now execute the selected application on the caller-owned STA.
+`StopAsync(CancellationToken)` is a cross-thread, irreversible stop request with an independently
+cancelable wait. It does not create a UI thread or move UI to a worker thread.
+
+```csharp
+ApplicationConfiguration.Initialize();
+using var application = WinFormsApplication.CreateBuilder()
+    .UseStartupForm<MainForm>()
+    .Build();
+application.Run();
+```
+
+The runner validates the owner thread, apartment, synchronization context, and absence of an active
+loop before accepting execution. It installs the existing WinForms context before deferred startup
+creation, enters the existing `Application.Run(ApplicationContext)`, and automatically releases owned
+startup resources on exit. An already-canceled run is rejected before ownership of execution is accepted.
+Cancellation after acceptance finishes cleanup before propagating `OperationCanceledException`.
+A cancellation token passed to `StopAsync` cancels only that caller's wait.
+Observe shutdown completion from a non-UI context: a continuation captured to the terminating UI
+dispatcher cannot be relied on after the message loop exits.
+An exception that escapes a native window callback can terminate the process under the selected
+exception policy; a managed runner cannot guarantee cleanup after that process-termination boundary.
+The component-manager backend also retains its existing COM callback exception handling: the runner
+cannot recover the original message-filter failure after that boundary has swallowed it or converted
+it into a diagnostic failure. Original escaping message-filter exception identity is covered on the
+managed light-loop backend, not promised across the COM boundary.
+
+Builder-scoped `ThreadContext` observation covers accepted application/context exit, raw quit, and
+exceptional loop unwind. Only builder-owned main-form visibility is moved inside the pump's cleanup
+boundary. Builder cleanup reports noncritical disposal failures and also disposes hidden or disabled
+managed thread windows. Existing runners without a registered builder retain their legacy paths.
+Normal canceled form closing does not begin stopping; committed runner shutdown first requests
+`Application.Exit`, then posts root quit even if closing is vetoed or a custom context ignores exit.
+
+The runner restores the exact entry synchronization context and does not dispose a caller-installed
+WinForms context. A context installed by the runner is uninstalled without disabling `AutoInstall`
+and is disposed after UI cleanup. Accepted execution always attempts stopping and stopped notifications,
+and preserves independently collected startup, dispatch, lifecycle, host, and cleanup errors.
+Synchronous disposal during activation or execution is rejected: request `StopAsync` without blocking
+the UI, or let the root context terminate. Disposing an unrun application releases transferred startup
+resources without simulating lifecycle events.
+
+### Public Generic Host adapter
+
+The hosting integration uses the real `IHost` and `IHostApplicationLifetime` contracts, not a
+parallel WinForms-specific host interface. The configured core framework reference already supplies
+`Microsoft.Extensions.Hosting.Abstractions` and its abstraction dependencies; no additional NuGet
+reference or WindowsDesktop transport assemblies are needed for this target.
+
+Select an unbuilt `IHostBuilder` with `UseHost(hostBuilder)`. Application `Build` consumes the host
+builder, registers an internal hosted UI-completion barrier, and decorates its singleton `IHost`
+factory. Both `application.Host` and `host.Services.GetRequiredService<IHost>()` expose the same
+coordinated adapter; the original host stays private. The host builder must preserve these
+registrations and the standard singleton host factory. Do not separately build the supplied builder,
+start the exposed host before `Run`, or use `Host.RunAsync` as a second driver.
+
+```csharp
+ApplicationConfiguration.Initialize();
+using var application = WinFormsApplication.CreateBuilder()
+    .UseHost(Host.CreateDefaultBuilder(args))
+    .UseStartupForm<MainForm>()
+    .Build();
+application.Run();
+```
+
+Only the selected `IHostBuilder` contract is supported here; a `HostApplicationBuilder` overload
+and general DI/form-activation APIs are not introduced. Host construction occurs during application
+build without starting hosted services or activating startup UI. Host startup finishes off the UI
+thread before startup UI creation. The real host's application lifetime is never replaced.
+Once host building begins, this builder is consumed even if host construction fails, because the
+underlying Generic Host builder cannot be retried. A failed build leaves a supplied form caller-owned.
+
+Direct `application.Host.StopAsync`, host service requests through DI-resolved `IHost`, runner
+`StopAsync`, and `IHostApplicationLifetime.StopApplication` all converge on the same host stop task.
+The adapter requests UI shutdown and signals the real host lifetime off the UI thread, waits for UI
+cleanup, then stops the underlying host. The registered hosted participant additionally prevents
+host stopped notification before UI completion. It awaits **UI completion**, never total run
+completion, to avoid a host/runner wait cycle. WinForms stopped follows host shutdown.
+Concurrent callers share the stop operation rather than executing hosted-service stop twice.
+No synchronous host callback waits for UI dispatch.
+
+A token passed to the exposed host's `StopAsync` cancels only that caller's wait. It does not cancel
+the shared shutdown operation. The hosted barrier deliberately ignores host shutdown cancellation:
+Generic Host continues toward its stopped notification after hosted-service cancellation or failure.
+Releasing the barrier on timeout would therefore break the ordering guarantee. A non-cooperative UI
+can delay shutdown indefinitely; neither timeout nor cancellation is permission to report completed
+UI cleanup. Host services may still observe the host's own shutdown timeout after UI cleanup.
+
+The application owns the host on successful build. It disposes the provider once after coordinated
+shutdown. Disposing an unrun application signals UI completion before stopping and disposing its
+host; it does not fabricate WinForms lifetime events. Host disposal follows the application's
+owner-thread and inactive-runtime rules. This contract does not make arbitrary provider disposal,
+process termination, a custom host that ignores its services, or a separately retained private host
+instance safe.
+
+Actual Generic Host regression tests use the `Microsoft.Extensions.Hosting` test-only package.
+The product still depends only on framework-provided hosting/DI abstractions, so that test dependency
+adds no WindowsDesktop transport requirement.
+
+Focused regression coverage accompanies this runtime. Full lifecycle CI expansion, production samples,
+and benchmarks remain with their assigned later issues; upstream API approval remains external.

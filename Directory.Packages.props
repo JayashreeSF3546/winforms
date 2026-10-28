@@ -30,6 +30,7 @@
     <PackageVersion Include="Microsoft.DotNet.GenFacades" Version="$(MicrosoftDotNetGenFacadesPackageVersion)" />
 
     <!-- Test related -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
     <PackageVersion Include="AwesomeAssertions" Version="$(AwesomeAssertionsVersion)" />
     <PackageVersion Include="Moq" Version="$(MoqPackageVersion)" />
     <PackageVersion Include="Microsoft.DotNet.RemoteExecutor" Version="$(MicrosoftDotNetRemoteExecutorVersion)" />

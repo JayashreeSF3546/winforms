@@ -17,11 +17,13 @@ public sealed partial class Application
         private HWND _focusedHwnd;
         internal ThreadWindows? _previousThreadWindows;
         private readonly bool _onlyWinForms = true;
+        private readonly bool _includeHidden;
 
-        internal ThreadWindows(bool onlyWinForms)
+        internal ThreadWindows(bool onlyWinForms, bool includeHidden = false)
         {
             _windows = new List<HWND>(16);
             _onlyWinForms = onlyWinForms;
+            _includeHidden = includeHidden;
             PInvokeCore.EnumCurrentThreadWindows(Callback);
         }
 
@@ -30,7 +32,7 @@ public sealed partial class Application
             // We only do visible and enabled windows. Also, we only do top level windows.
             // Finally, we only include windows that are DNA windows, since other MSO components
             // will be responsible for disabling their own windows.
-            if (PInvoke.IsWindowVisible(hwnd) && PInvoke.IsWindowEnabled(hwnd))
+            if (_includeHidden || (PInvoke.IsWindowVisible(hwnd) && PInvoke.IsWindowEnabled(hwnd)))
             {
                 if (!_onlyWinForms || Control.FromHandle(hwnd) is not null)
                 {
@@ -42,13 +44,27 @@ public sealed partial class Application
         }
 
         // Disposes all top-level Controls on this thread
-        internal void Dispose()
+        internal void Dispose(Action<Exception>? reportException = null)
         {
             foreach (HWND hwnd in _windows)
             {
                 if (PInvoke.IsWindow(hwnd))
                 {
-                    Control.FromHandle(hwnd)?.Dispose();
+                    if (reportException is null)
+                    {
+                        Control.FromHandle(hwnd)?.Dispose();
+                    }
+                    else
+                    {
+                        try
+                        {
+                            Control.FromHandle(hwnd)?.Dispose();
+                        }
+                        catch (Exception exception) when (!exception.IsCriticalException())
+                        {
+                            reportException(exception);
+                        }
+                    }
                 }
             }
         }

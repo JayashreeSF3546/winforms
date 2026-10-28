@@ -277,7 +277,7 @@ public class WinFormsApplicationBuilderTests
     }
 
     [Fact]
-    public void Run_Prototype_RejectsExecutionWithoutActivatingStartup()
+    public void Run_AfterDirectActivation_RejectsRepeatedActivation()
     {
         int calls = 0;
         using WinFormsApplication application = WinFormsApplication.CreateBuilder().UseApplicationContext(() =>
@@ -286,8 +286,9 @@ public class WinFormsApplicationBuilderTests
             return new ApplicationContext();
         }).Build();
 
-        Assert.Throws<NotSupportedException>(() => application.Run());
-        calls.Should().Be(0);
+        application.ActivateStartup();
+        Assert.Throws<InvalidOperationException>(() => application.Run(TestContext.Current.CancellationToken));
+        calls.Should().Be(1);
     }
 
     [Fact]
@@ -305,7 +306,7 @@ public class WinFormsApplicationBuilderTests
             exceptions.Add(Record.Exception(() => unbuilt.UseStartupForm<Form>()));
             exceptions.Add(Record.Exception(() => application.ActivateStartup()));
             exceptions.Add(Record.Exception(() => application.Dispose()));
-            exceptions.Add(Record.Exception(() => application.Run()));
+            exceptions.Add(Record.Exception(() => application.Run(TestContext.Current.CancellationToken)));
         });
 
         thread.Start();
