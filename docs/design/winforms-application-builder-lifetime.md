@@ -500,5 +500,19 @@ tests automatically. `azure-pipelines-PR.yml` selects x64, x86, and arm64 builds
 the public x64/x86 legs. Its existing conditions do not execute tests on arm64. These tests have
 neither `IgnoreForCI` nor `failing` exclusions.
 
-Remote CI execution and upstream API approval require external verification. Production samples
-and benchmarks remain assigned to dotnet/winforms#14945 and dotnet/winforms#14946.
+Remote CI execution and upstream API approval require external verification.
+
+### C# and Visual Basic samples (dotnet/winforms#14945)
+
+The runnable [lifetime samples](../../src/test/integration/WinFormsApplicationBuilder/README.md)
+demonstrate deferred default forms, a context that replaces its main form, real background service
+shutdown, run cancellation, and direct coordinated host stop despite an ordinary close veto.
+Both languages retain a synchronous caller-owned `STAThread` entry point and configure the
+application before creating controls. The VB sample deliberately does not enable its separate
+application-framework startup driver.
+
+The existing integration suite builds both executables and runs isolated smoke cases across all
+five scenarios, both message-loop backends, and light/dark settings. The sample guide documents
+manual Terminal Services, native ARM, visual, and slow-hardware acceptance checks separately;
+automated process completion must not be presented as evidence for those environments.
+Performance measurements remain assigned to dotnet/winforms#14946.
