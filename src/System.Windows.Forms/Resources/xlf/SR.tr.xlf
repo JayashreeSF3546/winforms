@@ -11519,6 +11519,11 @@ Geçersiz işlemin gerçekleştiği yığın izi:
         <target state="new">This Windows Forms application builder has already been built.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_DesignTimeServices">
+        <source>Runtime service activation cannot be used for design-time components.</source>
+        <target state="new">Runtime service activation cannot be used for design-time components.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_HostAlreadySelected">
         <source>A host builder has already been selected for this Windows Forms application.</source>
         <target state="new">A host builder has already been selected for this Windows Forms application.</target>
@@ -11534,9 +11539,19 @@ Geçersiz işlemin gerçekleştiği yığın izi:
         <target state="new">Select a startup form or application context before building the application.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_NullComponent">
+        <source>The runtime service activation factory returned null.</source>
+        <target state="new">The runtime service activation factory returned null.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_NullContext">
         <source>The application context factory returned null.</source>
         <target state="new">The application context factory returned null.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_ServiceActivationRequiresHost">
+        <source>The runtime service startup factory requires a host. Select a host builder with UseHost before building the application.</source>
+        <target state="new">The runtime service startup factory requires a host. Select a host builder with UseHost before building the application.</target>
         <note />
       </trans-unit>
       <trans-unit id="WinFormsApplication_StartupAlreadyActivated">

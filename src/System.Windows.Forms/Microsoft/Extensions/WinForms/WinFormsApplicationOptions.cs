@@ -13,12 +13,16 @@ internal sealed class WinFormsApplicationOptions
     internal WinFormsApplicationOptions(
         Thread ownerThread,
         Form? startupForm,
-        Func<ApplicationContext>? contextFactory)
+        Func<ApplicationContext>? contextFactory,
+        Func<IServiceProvider, Form>? serviceFormFactory)
     {
-        Debug.Assert((startupForm is null) != (contextFactory is null));
+        Debug.Assert((startupForm is not null ? 1 : 0)
+            + (contextFactory is not null ? 1 : 0)
+            + (serviceFormFactory is not null ? 1 : 0) == 1);
         OwnerThread = ownerThread;
         StartupForm = startupForm;
         ContextFactory = contextFactory;
+        ServiceFormFactory = serviceFormFactory;
     }
 
     internal Thread OwnerThread { get; }
@@ -26,6 +30,8 @@ internal sealed class WinFormsApplicationOptions
     internal Form? StartupForm { get; }
 
     internal Func<ApplicationContext>? ContextFactory { get; }
+
+    internal Func<IServiceProvider, Form>? ServiceFormFactory { get; }
 
     internal static void ValidateStartupForm(Form form)
     {

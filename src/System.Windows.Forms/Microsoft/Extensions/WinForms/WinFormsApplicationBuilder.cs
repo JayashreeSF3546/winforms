@@ -22,6 +22,7 @@ public sealed class WinFormsApplicationBuilder
     private readonly Thread _ownerThread = Thread.CurrentThread;
     private Form? _startupForm;
     private Func<ApplicationContext>? _contextFactory;
+    private Func<IServiceProvider, Form>? _serviceFormFactory;
     private IHostBuilder? _hostBuilder;
     private bool _built;
 
@@ -126,6 +127,18 @@ public sealed class WinFormsApplicationBuilder
     }
 
     /// <summary>
+    ///  Prototypes explicit host-backed startup activation without changing parameterless activation.
+    /// </summary>
+    internal WinFormsApplicationBuilder UseStartupFormFactory(Func<IServiceProvider, Form> formFactory)
+    {
+        ArgumentNullException.ThrowIfNull(formFactory);
+        VerifyCanSelectStartup();
+        _serviceFormFactory = formFactory;
+
+        return this;
+    }
+
+    /// <summary>
     ///  Builds an application without creating or showing startup UI.
     /// </summary>
     /// <returns>The application, which owns any supplied startup form.</returns>
@@ -139,9 +152,14 @@ public sealed class WinFormsApplicationBuilder
     internal WinFormsApplication Build(IHost? host)
     {
         VerifyCanConfigure();
-        if (_startupForm is null && _contextFactory is null)
+        if (_startupForm is null && _contextFactory is null && _serviceFormFactory is null)
         {
             throw new InvalidOperationException(SR.WinFormsApplication_MissingStartup);
+        }
+
+        if (_serviceFormFactory is not null && _hostBuilder is null && host is null)
+        {
+            throw new InvalidOperationException(SR.WinFormsApplication_ServiceActivationRequiresHost);
         }
 
         if (_startupForm is not null)
@@ -149,7 +167,7 @@ public sealed class WinFormsApplicationBuilder
             WinFormsApplicationOptions.ValidateStartupForm(_startupForm);
         }
 
-        WinFormsApplicationOptions options = new(_ownerThread, _startupForm, _contextFactory);
+        WinFormsApplicationOptions options = new(_ownerThread, _startupForm, _contextFactory, _serviceFormFactory);
         WinFormsApplication application = new(options, host);
         if (_hostBuilder is not null)
         {
@@ -170,6 +188,7 @@ public sealed class WinFormsApplicationBuilder
         _built = true;
         _startupForm = null;
         _contextFactory = null;
+        _serviceFormFactory = null;
         _hostBuilder = null;
 
         return application;
@@ -191,7 +210,7 @@ public sealed class WinFormsApplicationBuilder
     private void VerifyCanSelectStartup()
     {
         VerifyCanConfigure();
-        if (_startupForm is not null || _contextFactory is not null)
+        if (_startupForm is not null || _contextFactory is not null || _serviceFormFactory is not null)
         {
             throw new InvalidOperationException(SR.WinFormsApplication_StartupAlreadySelected);
         }

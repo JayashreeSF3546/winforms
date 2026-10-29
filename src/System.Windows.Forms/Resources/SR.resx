@@ -138,6 +138,15 @@
   <data name="WinFormsApplication_NullContext" xml:space="preserve">
     <value>The application context factory returned null.</value>
   </data>
+  <data name="WinFormsApplication_NullComponent" xml:space="preserve">
+    <value>The runtime service activation factory returned null.</value>
+  </data>
+  <data name="WinFormsApplication_DesignTimeServices" xml:space="preserve">
+    <value>Runtime service activation cannot be used for design-time components.</value>
+  </data>
+  <data name="WinFormsApplication_ServiceActivationRequiresHost" xml:space="preserve">
+    <value>The runtime service startup factory requires a host. Select a host builder with UseHost before building the application.</value>
+  </data>
   <data name="WinFormsApplication_SynchronizationContextUnavailable" xml:space="preserve">
     <value>The Windows Forms application requires automatic synchronization-context installation and either a default context or a usable WindowsFormsSynchronizationContext owned by the current thread.</value>
   </data>

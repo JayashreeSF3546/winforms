@@ -302,6 +302,12 @@ public sealed class WinFormsApplication : IDisposable
                 WinFormsApplicationOptions.ValidateStartupForm(form);
                 _context = new ApplicationContext(form);
             }
+            else if (options.ServiceFormFactory is { } factory)
+            {
+                IServiceProvider services = _host?.Services
+                    ?? throw new InvalidOperationException(SR.WinFormsApplication_ServiceActivationRequiresHost);
+                _context = new ApplicationContext(WinFormsServiceActivation.Create(services, factory));
+            }
             else
             {
                 ApplicationContext context = options.ContextFactory!()

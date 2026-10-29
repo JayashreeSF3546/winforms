@@ -2,6 +2,7 @@
 
 Status: research and architecture recommendation for
 [dotnet/winforms#14948](https://github.com/dotnet/winforms/issues/14948).
+An internal contract prototype for dotnet/winforms#14949 is described below.
 This document does not approve or implement a public DI contract.
 
 Parent story: [dotnet/winforms#14947](https://github.com/dotnet/winforms/issues/14947).
@@ -286,13 +287,121 @@ The unresolved resource growth and hosted retention recorded by
 findings. This document neither fixes them nor treats their presence as proof of a DI leak.
 Likewise, it does not close the host/lifetime stream's pending API, CI, or environment acceptance.
 
+## Internal contract prototype (dotnet/winforms#14949)
+
+The prototype implements the factory/callback alternative without adding public API or selecting
+`IServiceProviderAssignable`. It is available to the runtime and friend test assemblies, not to
+application code. It does not change `Form`, `UserControl`, `Component`, or Designer generation.
+
+### Implemented boundary
+
+- Internal `WinFormsApplicationBuilder.UseStartupFormFactory(Func<IServiceProvider, Form>)` selects
+  an explicitly host-backed startup path. Build requires a host selection but does not invoke the
+  factory. The factory runs on the caller-owned STA after host startup and WinForms synchronization
+  context installation. Disposing an unrun application does not invoke it.
+- Internal `WinFormsServiceActivation.Create` accepts a borrowed provider, an explicit constructor
+  factory, and an optional assignment callback. Constructor choice belongs to the factory; it
+  never retries the parameterless constructor after failed required-service resolution.
+- `Create` rejects null results and validates an existing control handle's thread ownership,
+  control disposal, and design-time state before accepting the returned object. A handleless
+  control/nonvisual component's construction thread cannot be established from the component
+  model; creating fresh instances on the activation STA is a caller obligation, not inferred
+  cross-thread safety. If its assignment callback subsequently fails, it
+  attempts disposal of that owned UI result. Independent assignment/disposal failures are both
+  surfaced. A constructor/factory that throws before returning an object still owns its partial
+  allocations; the helper cannot recover an object it never received.
+- Internal `Assign` initializes an existing component through an explicit callback. Ownership
+  stays with the caller/parent container, including when assignment fails. The callback receives
+  the provider at the composition boundary; the target receives typed dependencies, not a provider.
+  A parent factory can assign its existing `InitializeComponent` children without recreating them.
+- Design-time activation is rejected using the current license usage mode before invoking a
+  factory, and using target/ancestor designer sites before invoking an assignment callback.
+  These guards supplement the explicit runtime path; they are not a universal design-mode detector.
+- Required versus optional resolution is explicit in the callback. Typed receivers enforce their
+  own single-assignment/readiness rules, including a separate assigned flag when null is a valid
+  optional value. `IComponent` has no universal disposed/readiness contract: the helper can check
+  `Control.IsDisposed`, but nonvisual receivers must enforce their own disposed-state checks.
+- Existing generic/instance/context selections remain service-free. No existing public overload
+  changes meaning, no service provider is put on a control/site, and no global instance table,
+  property scanning, automatic graph traversal, or new service container is introduced.
+
+### Why not the other contract shapes?
+
+| Candidate | Prototype conclusion |
+|---|---|
+| Factory plus explicit typed assignment | Selected internally: construction, optionality, failure cleanup, and ownership are visible at the composition root. Designer-created child objects are preserved. |
+| Provider-assignment interface | Adds a public implementation obligation without solving ownership/readiness; storing it on a control also exposes general service lookup. The prototype needs no such interface. Reconsider only with a demonstrated scenario that cannot use a typed callback. |
+| Universal constructor/property injection | Rejected: the former changes design-time creation requirements; the latter needs reflection, conventions, or generated member discovery. The prototype deliberately makes neither change. |
+| Generated hookup | Not required for explicit assignment. Source generation and OOP contract changes remain subject to Designer-team agreement in dotnet/winforms#14951. |
+
+### Disposal and async boundary
+
+The helper owns only a successfully accepted factory result until it returns that result to the
+caller. It does not dispose borrowed services, create/dispose scopes, or attach a scope-disposal
+handler to `Disposed`. After successful activation, existing runner/control/container ownership
+disposes UI; the supplying host/provider still owns its dependencies. Therefore dependencies remain
+available to most-derived UI cleanup, including code after `base.Dispose`, until provider disposal.
+
+This resolves the prototype's service-assignment ownership boundary, not the general form-scope
+problem. The tests exercise that ordering for startup UI; a future per-form scope must find a safe
+boundary for direct `Dispose` and inherited overrides before adopting the same guarantee.
+
+Async-only dependencies can be borrowed like other dependencies: this prototype performs no service
+disposal and makes no synchronous scope-disposal promise. A caller-owned provider retains its
+normal disposal obligations. UI scopes, async service-cleanup coordination, modal/modeless tracking,
+navigation, and parent-child cancellation remain dotnet/winforms#14950 work. No async public API is
+approved by this step.
+
+### Validation and limitations
+
+Focused runtime checks cover deferred activation, real host startup, STA/synchronization context,
+required/optional dependencies, existing child/control/component assignment, service ownership,
+factory/assignment failures, independent cleanup errors, and invalid activation targets.
+Both message-loop backends are exercised for the hosted success/failure paths.
+
+Local Designer checks use the real `DesignSurface`, toolbox, site rename/delete, undo/redo,
+reload, and component serialization infrastructure. They verify service-free nested/inherited
+control construction, rejected runtime assignment to designer-owned instances, and omission of
+runtime-only service properties while ordinary layout state round-trips. These checks live in the
+runtime unit-test assembly, which already has internal runtime access, and use public Designer
+infrastructure; no new friend-assembly grant is required.
+
+Local validation (Debug, x64):
+
+```powershell
+.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal
+```
+
+Result: passed, zero warnings and zero errors.
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.Tests\Debug\net11.0-windows7.0\System.Windows.Forms.Tests.exe `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationDesignerTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationBuilderTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationLifetimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationRuntimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationHostingTests' `
+  --no-progress --report-trx
+```
+
+Result: 129 passed, zero failed, zero skipped. This includes the new runtime and local Designer
+checks alongside the existing builder, lifetime, runtime, and hosting regression tests.
+Targeted product/test `dotnet format whitespace --no-restore --verify-no-changes` checks also passed.
+
+These are not actual Visual Studio OOP tests or generated C#/VB round-trip certification.
+Designer-team agreement, drag/drop interaction in Visual Studio, and real C#/VB save/load,
+rename/delete/reload/undo/redo remain dotnet/winforms#14951 acceptance work. Comprehensive scope
+tests, samples, and leak testing remain with their assigned later issues. Remote CI must be
+verified separately; local build/test results do not imply CI success.
+
 ## Research completion
 
 This issue supplies a source-backed comparison, the recommended activation model, application/
 form/dialog/control/component/context ownership rules, disposal and failure constraints, designer
 operation requirements, inheritance rules, and explicit prototype/OOP approval gates.
 
-Only documentation is changed. No public API, package reference, generated artifact, runtime
-behavior, designer behavior, sample, or test is added or modified. No build/test/CI execution is
-required to validate a behavior change in this research-only step, and none is claimed.
-The next implementation is dotnet/winforms#14949; it must not be started automatically.
+The original dotnet/winforms#14948 change was documentation-only and claimed no build/test/CI
+execution. The subsequent internal prototype above belongs exclusively to dotnet/winforms#14949.
+It does not implement scope ownership or Designer integration from later child issues.
