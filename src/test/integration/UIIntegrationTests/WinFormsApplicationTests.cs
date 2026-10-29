@@ -31,7 +31,7 @@ public class WinFormsApplicationTests
             bool factoryUsedWinFormsContext = false;
             Form? form = null;
             Task? continuation = null;
-            WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder();
+            var builder = WinFormsApplication.CreateBuilder();
             if (useContext)
             {
                 builder.UseApplicationContext(() =>

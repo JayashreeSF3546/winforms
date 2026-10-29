@@ -3,7 +3,6 @@
 
 using System.Reflection;
 using System.Windows.Forms.IntegrationTests.Common;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace System.Windows.Forms.UITests;
@@ -31,10 +30,10 @@ public class WinFormsApplicationSampleTests(ITestOutputHelper output)
         }
 
         using BackgroundService worker = CreateBackgroundWorker(language, host, ready.Task);
-        Task execution = ExecuteBackgroundWorker(worker, cancellation.Token);
+        Task execution = ExecuteBackgroundWorkerAsync(worker, cancellation.Token);
         Assert.False(execution.IsCompleted);
 
-        cancellation.Cancel();
+        await cancellation.CancelAsync();
         await execution.WaitAsync(TestContext.Current.CancellationToken);
 
         Assert.True(execution.IsCompletedSuccessfully);
@@ -50,11 +49,29 @@ public class WinFormsApplicationSampleTests(ITestOutputHelper output)
         using CancellationTokenSource cancellation = new();
         InvalidOperationException expected = new("UI readiness failed.");
         using BackgroundService worker = CreateBackgroundWorker(language, host, Task.FromException(expected));
-        cancellation.Cancel();
+        await cancellation.CancelAsync();
 
-        Task execution = ExecuteBackgroundWorker(worker, cancellation.Token);
+        Task execution = ExecuteBackgroundWorkerAsync(worker, cancellation.Token);
 
         Exception actual = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await execution.WaitAsync(TestContext.Current.CancellationToken));
+        Assert.Same(expected, actual);
+    }
+
+    [Theory]
+    [InlineData("CSharp")]
+    [InlineData("VisualBasic")]
+    public async Task BackgroundWorker_UnrelatedCancellationDuringShutdown_IsNotSwallowed(string language)
+    {
+        using IHost host = new HostBuilder().Build();
+        using CancellationTokenSource cancellation = new();
+        OperationCanceledException expected = new(new CancellationToken(canceled: true));
+        using BackgroundService worker = CreateBackgroundWorker(language, host, Task.FromException(expected));
+        await cancellation.CancelAsync();
+
+        Task execution = ExecuteBackgroundWorkerAsync(worker, cancellation.Token);
+
+        Exception actual = await Assert.ThrowsAsync<OperationCanceledException>(
             async () => await execution.WaitAsync(TestContext.Current.CancellationToken));
         Assert.Same(expected, actual);
     }
@@ -73,7 +90,7 @@ public class WinFormsApplicationSampleTests(ITestOutputHelper output)
             culture: null)!;
     }
 
-    private static Task ExecuteBackgroundWorker(BackgroundService worker, CancellationToken stoppingToken)
+    private static Task ExecuteBackgroundWorkerAsync(BackgroundService worker, CancellationToken stoppingToken)
     {
         MethodInfo execute = worker.GetType().GetMethod("ExecuteAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
