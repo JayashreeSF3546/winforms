@@ -515,4 +515,17 @@ The existing integration suite builds both executables and runs isolated smoke c
 five scenarios, both message-loop backends, and light/dark settings. The sample guide documents
 manual Terminal Services, native ARM, visual, and slow-hardware acceptance checks separately;
 automated process completion must not be presented as evidence for those environments.
-Performance measurements remain assigned to dotnet/winforms#14946.
+
+### Lifetime measurements (dotnet/winforms#14946)
+
+The [measurement harness](../../src/test/integration/WinFormsApplicationLifetimePerformance/README.md)
+compares conventional `Application.Run(form)`, builder-only ownership, and a real hosted builder in
+isolated processes on both loop backends. It separates process-launch-to-first-dispatch, first-use
+UI startup, warm startup, and shutdown through disposal; records process-wide allocations; and
+samples post-collection managed/native memory, threads, kernel handles, GDI/USER counts, and weak
+ownership references. A normal comparison performs 100 measured cycles after first-use/warmup.
+
+Existing integration CI discovers short correctness checks for the harness. It does not impose
+shared-machine timing gates or claim remote/ARM/Terminal Services measurements. Resource trends
+and one-time cache growth must be interpreted against the matching warmed legacy baseline;
+shipping overhead budgets require representative workload evidence and owner approval.
