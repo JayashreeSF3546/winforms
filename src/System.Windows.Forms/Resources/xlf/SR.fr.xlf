@@ -11569,6 +11569,26 @@ Cette opération non conforme s'est produite sur la trace de la pile :
         <target state="new">The Windows Forms application requires automatic synchronization-context installation and either a default context or a usable WindowsFormsSynchronizationContext owned by the current thread.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_UiActivationState">
+        <source>Scoped activation requires a fresh, hidden, top-level form and cannot reenter an active modal invocation.</source>
+        <target state="new">Scoped activation requires a fresh, hidden, top-level form and cannot reenter an active modal invocation.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_UiAlreadyOwned">
+        <source>The form already belongs to a UI service scope. Factories must create a fresh form.</source>
+        <target state="new">The form already belongs to a UI service scope. Factories must create a fresh form.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_UiStopping">
+        <source>New UI activation is not permitted after stopping begins.</source>
+        <target state="new">New UI activation is not permitted after stopping begins.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_UiWrongOwner">
+        <source>The UI lifetime or control belongs to another owner.</source>
+        <target state="new">The UI lifetime or control belongs to another owner.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_UnsupportedHostBuilder">
         <source>The host builder must preserve the registered Windows Forms host adapter and provide one singleton IHost factory.</source>
         <target state="new">The host builder must preserve the registered Windows Forms host adapter and provide one singleton IHost factory.</target>

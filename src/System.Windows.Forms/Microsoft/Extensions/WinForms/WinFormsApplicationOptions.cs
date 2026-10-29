@@ -14,15 +14,18 @@ internal sealed class WinFormsApplicationOptions
         Thread ownerThread,
         Form? startupForm,
         Func<ApplicationContext>? contextFactory,
-        Func<IServiceProvider, Form>? serviceFormFactory)
+        Func<IServiceProvider, Form>? serviceFormFactory,
+        Func<IServiceProvider, WinFormsUiScope, ApplicationContext>? scopedContextFactory)
     {
         Debug.Assert((startupForm is not null ? 1 : 0)
             + (contextFactory is not null ? 1 : 0)
-            + (serviceFormFactory is not null ? 1 : 0) == 1);
+            + (serviceFormFactory is not null ? 1 : 0)
+            + (scopedContextFactory is not null ? 1 : 0) == 1);
         OwnerThread = ownerThread;
         StartupForm = startupForm;
         ContextFactory = contextFactory;
         ServiceFormFactory = serviceFormFactory;
+        ScopedContextFactory = scopedContextFactory;
     }
 
     internal Thread OwnerThread { get; }
@@ -32,6 +35,8 @@ internal sealed class WinFormsApplicationOptions
     internal Func<ApplicationContext>? ContextFactory { get; }
 
     internal Func<IServiceProvider, Form>? ServiceFormFactory { get; }
+
+    internal Func<IServiceProvider, WinFormsUiScope, ApplicationContext>? ScopedContextFactory { get; }
 
     internal static void ValidateStartupForm(Form form)
     {

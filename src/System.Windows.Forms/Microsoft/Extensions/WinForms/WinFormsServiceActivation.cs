@@ -73,7 +73,7 @@ internal static class WinFormsServiceActivation
         VerifyComponent(component);
     }
 
-    private static void VerifyRuntime()
+    internal static void VerifyRuntime()
     {
         if (LicenseManager.UsageMode == LicenseUsageMode.Designtime)
         {

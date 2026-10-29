@@ -141,6 +141,18 @@
   <data name="WinFormsApplication_NullComponent" xml:space="preserve">
     <value>The runtime service activation factory returned null.</value>
   </data>
+  <data name="WinFormsApplication_UiAlreadyOwned" xml:space="preserve">
+    <value>The form already belongs to a UI service scope. Factories must create a fresh form.</value>
+  </data>
+  <data name="WinFormsApplication_UiWrongOwner" xml:space="preserve">
+    <value>The UI lifetime or control belongs to another owner.</value>
+  </data>
+  <data name="WinFormsApplication_UiStopping" xml:space="preserve">
+    <value>New UI activation is not permitted after stopping begins.</value>
+  </data>
+  <data name="WinFormsApplication_UiActivationState" xml:space="preserve">
+    <value>Scoped activation requires a fresh, hidden, top-level form and cannot reenter an active modal invocation.</value>
+  </data>
   <data name="WinFormsApplication_DesignTimeServices" xml:space="preserve">
     <value>Runtime service activation cannot be used for design-time components.</value>
   </data>

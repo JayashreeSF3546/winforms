@@ -3,6 +3,7 @@
 Status: research and architecture recommendation for
 [dotnet/winforms#14948](https://github.com/dotnet/winforms/issues/14948).
 An internal contract prototype for dotnet/winforms#14949 is described below.
+The subsequent dotnet/winforms#14950 section records explicit scope-aware activation.
 This document does not approve or implement a public DI contract.
 
 Parent story: [dotnet/winforms#14947](https://github.com/dotnet/winforms/issues/14947).
@@ -396,6 +397,145 @@ rename/delete/reload/undo/redo remain dotnet/winforms#14951 acceptance work. Com
 tests, samples, and leak testing remain with their assigned later issues. Remote CI must be
 verified separately; local build/test results do not imply CI success.
 
+## Scope-aware activation (dotnet/winforms#14950)
+
+This step extends the internal prototype, not the public API surface. New internal builder
+selections `UseScopedStartupForm` and `UseScopedApplicationContext` explicitly opt into synchronous
+UI scope ownership. They require a host and remain deferred through Build. Existing startup,
+context, and unscoped service factories keep their previous behavior, including the unscoped
+prototype's post-base-disposal service availability.
+
+### Owners and activation
+
+`WinFormsUiScope` borrows the host provider and owns one application service scope plus explicit
+form lifetime records. A context factory receives the application-scope provider and coordinator
+only at the composition boundary. Typed navigation callbacks can capture the coordinator without
+putting a general service provider on controls. Context replacement of `MainForm` neither merges
+nor loses independently tracked form scopes, including unshown or hidden forms.
+An initial non-null `MainForm` must come from this coordinator's `CreateForm`; an invalid foreign
+context/form is rejected without taking its ownership. Its factory retains cleanup responsibility.
+
+`CreateForm` creates a fresh DI scope and invokes the explicit constructor factory. Its
+`WinFormsFormScope` owns the returned form and that scope. An optional owner record defines logical
+nesting, independently of the flat DI container. Factories must return fresh, hidden, top-level,
+caller-STA-owned forms, never container-owned UI or a previously registered form. A handleless
+form's construction thread still cannot be inferred. No service-free constructor fallback occurs.
+
+The lifetime's `Assign` callback borrows the form provider for already-created UserControls and
+components. It rejects controls attached to another form or previously assigned by another lifetime.
+A control's sparse property store holds only an opaque ownership token, not a provider or lifetime
+record; this also prevents explicit reassignment after unmanaged reparenting without retaining
+disposed scopes. Construction and container/parent
+ownership of those objects remain explicit, as in the previous prototype; typed receivers enforce
+readiness and once-only assignment. No additional child-control or component scope is created.
+Unmanaged reparenting, native owner changes, and raw `new`/`Show`/`ShowDialog` calls do not establish
+or migrate coordinator ownership. Cross-form borrowing requires an explicitly passed typed
+collaborator; it must not be inferred from parent containers.
+
+### Selected disposal boundary
+
+The selected scoped-form contract is **base-last disposal**: every derived form override must finish
+service-dependent cleanup before calling `base.Dispose(disposing)`, and must reach that base call.
+The internal, per-instance `Form.RuntimeDispose` hook runs only for opted-in forms and wraps the
+existing Form disposal body. The hook uses the existing sparse property store, not an extra
+instance field on every legacy form. It does not subscribe to `FormClosed`, `HandleDestroyed`, or `Disposed`.
+The original disposal body is unchanged for all other forms.
+
+This choice supports ordinary modeless `Close` and direct `Form.Dispose`, including unshown forms.
+A canceled close, hide, or handle recreation does not dispose a scope. The hook disposes tracked
+descendants, attempts normal form/control/component teardown, and then disposes services on the
+owning STA. Derived parent cleanup before the hook can precede child teardown; dependencies remain
+alive during that cleanup. Child service scopes complete before the parent service scope.
+The hook is detached and ownership records are removed when their lifetime completes.
+
+This is not a guarantee for arbitrary code after a derived form's base call. A base Form method
+cannot observe completion of an arbitrary most-derived override. Deferring to a posted callback
+would depend on dispatcher lifetime and could run early under reentrant message pumping; using
+only an external wrapper would not cover normal window-close/direct-dispose paths. These
+alternatives were rejected for this synchronous opt-in stage. The convention must be revisited
+before approving public scoped-activation APIs; existing unscoped forms are not opted in silently.
+
+If a derived override throws before reaching base disposal, coordinator-driven cleanup still
+attempts descendants and scope cleanup, and reports the UI error. It cannot repair arbitrary
+partial user cleanup or promise that the UI object became fully disposed. Likewise, a container
+disposer can stop that container's internal cleanup; independent form scopes are still attempted.
+
+### Modal nesting and shutdown
+
+`WinFormsFormScope.ShowDialog` owns one invocation and always attempts form/scope cleanup after
+the invocation returns or fails. A new invocation requires a new lifetime. Reentering an already
+active modal invocation is rejected without tearing it down.
+
+If an owner is disposed programmatically while a nested modal call is active, descendant UI is
+disposed to unwind the modal loop, but its service scope stays live until the call returns.
+Disposed ancestor scopes are retained until those descendant invocations unwind, then released
+child-first. Thus a dialog's logical scope cannot outlive its owner scope, even when native owner
+UI has already gone away. No blocking wait or timer is introduced into disposal.
+
+Application stopping rejects new activation. After the runner has unwound its loops and disposed
+the context, coordinator cleanup also covers hidden/unshown and independent forms. Application
+scope cleanup precedes the existing UI-completion signal and host disposal. The host still owns
+root services; the coordinator never disposes the root provider.
+
+### Synchronous service-cleanup boundary
+
+Owned scopes support synchronous `IDisposable` dependencies. Async-only disposable services are
+unsupported in these scopes: the container's synchronous-disposal exception is surfaced. There
+is no blocking `DisposeAsync`, hidden thread-pool disposal of UI-affine services, or silent skip.
+The container may mark a scope disposed before throwing and cannot be repaired by retrying it;
+the application must correct the unsupported registration. Borrowing async-only dependencies
+from an externally owned provider in the unscoped prototype remains a separate supported scenario.
+
+A future asynchronous lifetime contract must specify dispatcher affinity and parent/child
+completion before it can replace this boundary. This step does not introduce that public contract.
+
+### Validation and remaining work
+
+Focused checks accompany this implementation: distinct scoped identities and borrowed children,
+direct/unshown disposal, descendant cleanup, close veto/hide/handle recreation, modal return and
+owner-triggered unwind, context navigation, cancellation, stopping guards, scope/factory/show/
+disposal failures, and explicit async-only rejection. Hosted modal/navigation/cancellation paths
+exercise both message-loop backends.
+
+Local validation (Debug, x64):
+
+```powershell
+.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal
+```
+
+Result: passed with zero warnings and zero errors.
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.Tests\Debug\net11.0-windows7.0\System.Windows.Forms.Tests.exe `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsUiScopeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationDesignerTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationBuilderTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationLifetimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationRuntimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationHostingTests' `
+  --no-progress --report-trx
+```
+
+Result: 150 passed, zero failed, zero skipped (21 new scope cases and 129 existing regression cases).
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.Tests\Debug\net11.0-windows7.0\System.Windows.Forms.Tests.exe `
+  --filter-class 'System.Windows.Forms.Tests.FormTests' `
+  --filter-method '*Dispose*' --filter-method '*Close*' --no-progress --report-trx
+```
+
+Result: both matching existing Form regression cases passed, zero failed or skipped.
+Targeted product/test `dotnet format whitespace --no-restore --verify-no-changes` and
+`git diff --check` also passed. No full-suite, architecture-matrix, leak, or Visual Studio
+validation is claimed by these targeted runs.
+
+Remote CI, actual OOP Designer agreement/integration (dotnet/winforms#14951), broader scope tests
+(dotnet/winforms#14952), C#/VB samples (dotnet/winforms#14953), and dedicated leak runs
+(dotnet/winforms#14954) remain separate acceptance work. No success for these is implied here.
+
 ## Research completion
 
 This issue supplies a source-backed comparison, the recommended activation model, application/
@@ -404,4 +544,5 @@ operation requirements, inheritance rules, and explicit prototype/OOP approval g
 
 The original dotnet/winforms#14948 change was documentation-only and claimed no build/test/CI
 execution. The subsequent internal prototype above belongs exclusively to dotnet/winforms#14949.
-It does not implement scope ownership or Designer integration from later child issues.
+The separate dotnet/winforms#14950 section records the subsequent scope implementation.
+Designer integration remains with its owning child issue.
