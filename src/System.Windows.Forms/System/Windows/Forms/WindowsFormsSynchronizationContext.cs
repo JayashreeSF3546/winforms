@@ -40,6 +40,9 @@ public sealed class WindowsFormsSynchronizationContext : SynchronizationContext,
             "Marshaling control should have created its handle in its ctor.");
     }
 
+    internal bool IsUsableOnCurrentThread
+        => DestinationThread == Thread.CurrentThread && _controlToSendTo is { IsDisposed: false, IsHandleCreated: true };
+
     // Directly holding onto the Thread can prevent ThreadStatics from finalizing.
     private Thread? DestinationThread
     {
