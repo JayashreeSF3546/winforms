@@ -24,8 +24,8 @@
     <ProjectReference Include="..\..\..\System.Windows.Forms\System.Windows.Forms.csproj" />
     <ProjectReference Include="..\..\util\System.Windows.Forms\System.Windows.Forms.TestUtilities.csproj" />
     <ProjectReference Include="..\System.Windows.Forms.IntegrationTests.Common\System.Windows.Forms.IntegrationTests.Common.csproj" />
-    <ProjectReference Include="..\WinFormsApplicationBuilder\CSharp\WinFormsApplicationBuilder.CSharp.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\WinFormsApplicationBuilder\VisualBasic\WinFormsApplicationBuilder.VisualBasic.vbproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\WinFormsApplicationBuilder\CSharp\WinFormsApplicationBuilder.CSharp.csproj" />
+    <ProjectReference Include="..\WinFormsApplicationBuilder\VisualBasic\WinFormsApplicationBuilder.VisualBasic.vbproj" />
   </ItemGroup>
 
   <ItemGroup>

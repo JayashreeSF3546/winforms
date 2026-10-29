@@ -1,7 +1,10 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Reflection;
 using System.Windows.Forms.IntegrationTests.Common;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace System.Windows.Forms.UITests;
 
@@ -12,6 +15,72 @@ namespace System.Windows.Forms.UITests;
 [CollectionDefinition(nameof(WinFormsApplicationSampleTests), DisableParallelization = true)]
 public class WinFormsApplicationSampleTests(ITestOutputHelper output)
 {
+    [Theory]
+    [InlineData("CSharp", false)]
+    [InlineData("CSharp", true)]
+    [InlineData("VisualBasic", false)]
+    [InlineData("VisualBasic", true)]
+    public async Task BackgroundWorker_ShutdownCancellation_CompletesNormally(string language, bool uiReady)
+    {
+        using IHost host = new HostBuilder().Build();
+        using CancellationTokenSource cancellation = new();
+        TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (uiReady)
+        {
+            ready.SetResult();
+        }
+
+        using BackgroundService worker = CreateBackgroundWorker(language, host, ready.Task);
+        Task execution = ExecuteBackgroundWorker(worker, cancellation.Token);
+        Assert.False(execution.IsCompleted);
+
+        cancellation.Cancel();
+        await execution.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(execution.IsCompletedSuccessfully);
+        Assert.False(host.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.IsCancellationRequested);
+    }
+
+    [Theory]
+    [InlineData("CSharp")]
+    [InlineData("VisualBasic")]
+    public async Task BackgroundWorker_UnrelatedFailureDuringShutdown_IsNotSwallowed(string language)
+    {
+        using IHost host = new HostBuilder().Build();
+        using CancellationTokenSource cancellation = new();
+        InvalidOperationException expected = new("UI readiness failed.");
+        using BackgroundService worker = CreateBackgroundWorker(language, host, Task.FromException(expected));
+        cancellation.Cancel();
+
+        Task execution = ExecuteBackgroundWorker(worker, cancellation.Token);
+
+        Exception actual = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await execution.WaitAsync(TestContext.Current.CancellationToken));
+        Assert.Same(expected, actual);
+    }
+
+    private static BackgroundService CreateBackgroundWorker(string language, IHost host, Task uiReady)
+    {
+        Assembly assembly = Assembly.Load($"WinFormsApplicationBuilder.{language}");
+        Type type = assembly.GetType($"WinFormsApplicationBuilder.{language}.SampleWorker", throwOnError: true)!;
+
+        // Keep the sample's worker internal while testing the actual implementation in both languages.
+        return (BackgroundService)Activator.CreateInstance(
+            type,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null,
+            args: [host.Services.GetRequiredService<IHostApplicationLifetime>(), uiReady, false],
+            culture: null)!;
+    }
+
+    private static Task ExecuteBackgroundWorker(BackgroundService worker, CancellationToken stoppingToken)
+    {
+        MethodInfo execute = worker.GetType().GetMethod("ExecuteAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        // Invoke directly so the test cancels only after the method has reached its first incomplete await.
+        return (Task)execute.Invoke(worker, [stoppingToken])!;
+    }
+
     public static TheoryData<string, string, bool, bool> Scenarios
     {
         get

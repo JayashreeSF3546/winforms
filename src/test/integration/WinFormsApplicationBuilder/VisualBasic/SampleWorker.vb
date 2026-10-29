@@ -23,13 +23,19 @@ Friend NotInheritable Class SampleWorker
 
     Protected Overrides Async Function ExecuteAsync(stoppingToken As CancellationToken) As Task
         Debug.WriteLine("Background service started")
-        Await _uiReady.WaitAsync(stoppingToken).ConfigureAwait(False)
-        If Not _smoke Then
-            For update As Integer = 1 To 5
-                Await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(False)
-                Debug.WriteLine($"Background update: {update}")
-            Next
-        End If
+        Try
+            Await _uiReady.WaitAsync(stoppingToken).ConfigureAwait(False)
+            If Not _smoke Then
+                For update As Integer = 1 To 5
+                    Await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(False)
+                    Debug.WriteLine($"Background update: {update}")
+                Next
+            End If
+        Catch exception As OperationCanceledException When _
+            stoppingToken.IsCancellationRequested AndAlso exception.CancellationToken = stoppingToken
+            Debug.WriteLine("Background work canceled during shutdown")
+            Return
+        End Try
 
         Debug.WriteLine("Background requesting shutdown")
         _lifetime.StopApplication()

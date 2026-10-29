@@ -14,14 +14,23 @@ internal sealed class SampleWorker(IHostApplicationLifetime lifetime, Task uiRea
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         Debug.WriteLine("Background service started");
-        await uiReady.WaitAsync(stoppingToken).ConfigureAwait(false);
-        if (!smoke)
+        try
         {
-            for (int update = 1; update <= 5; update++)
+            await uiReady.WaitAsync(stoppingToken).ConfigureAwait(false);
+            if (!smoke)
             {
-                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
-                Debug.WriteLine($"Background update: {update}");
+                for (int update = 1; update <= 5; update++)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
+                    Debug.WriteLine($"Background update: {update}");
+                }
             }
+        }
+        catch (OperationCanceledException exception) when (
+            stoppingToken.IsCancellationRequested && exception.CancellationToken == stoppingToken)
+        {
+            Debug.WriteLine("Background work canceled during shutdown");
+            return;
         }
 
         Debug.WriteLine("Background requesting shutdown");

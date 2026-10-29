@@ -63,6 +63,13 @@ returns. A canceled `StopAsync` token would cancel only the caller's wait, not u
 The cancellation sample instead cancels the **run** token to demonstrate application cancellation.
 Unexpected exceptions are not caught or converted into successful exit.
 
+Closing the background window early cancels its readiness wait or current delay. Both workers
+handle cancellation from their own shutdown token as normal completion and report
+`Background work canceled during shutdown` through debug output. Other failures still propagate.
+Visual Studio can still pause where `TaskCanceledException` is first thrown if **Break when thrown**
+is enabled for that exception. Continue execution to reach the cancellation handler; that debugger
+pause alone does not mean the exception is unhandled.
+
 ## Automated coverage
 
 ```powershell
