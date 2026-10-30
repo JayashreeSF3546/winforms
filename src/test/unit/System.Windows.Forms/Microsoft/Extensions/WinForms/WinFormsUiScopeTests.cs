@@ -550,6 +550,317 @@ public class WinFormsUiScopeTests
         });
     }
 
+    [WinFormsTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AssignFailure_PreservesBorrowerAndOwningScope(bool control)
+    {
+        List<string> log = [];
+        using ServiceProvider provider = CreateProvider(log);
+        using WinFormsUiScope application = new(provider);
+        WinFormsFormScope lifetime = CreateForm(application, "owner");
+        var form = (ScopedForm)lifetime.Form;
+        IComponent target = control ? form.Child : form.Worker;
+        int disposed = 0;
+        target.Disposed += (_, _) => disposed++;
+        InvalidOperationException expected = new("Assignment failed.");
+
+        Assert.Same(expected, Assert.Throws<InvalidOperationException>(() =>
+            lifetime.Assign(target, (_, services) =>
+            {
+                Assert.Same(form.Dependency, services.GetRequiredService<Dependency>());
+                throw expected;
+            })));
+
+        Assert.Equal(0, disposed);
+        Assert.False(form.IsDisposed);
+        Assert.Equal(0, form.Dependency.DisposeCount);
+        lifetime.Assign(target, (_, services) => Assert.Same(form.Dependency, services.GetRequiredService<Dependency>()));
+        lifetime.Dispose();
+        Assert.Equal(1, disposed);
+        Assert.Equal(1, form.Dependency.DisposeCount);
+    }
+
+    [WinFormsTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BorrowerDisposal_DoesNotReleaseSharedFormServices(bool control)
+    {
+        List<string> log = [];
+        using ServiceProvider provider = CreateProvider(log);
+        using WinFormsUiScope application = new(provider);
+        WinFormsFormScope lifetime = CreateForm(application, "owner");
+        var form = (ScopedForm)lifetime.Form;
+        BorrowingControl nested = new();
+        form.Child.Controls.Add(nested);
+        lifetime.Assign(nested, static (target, services) => target.Dependency = services.GetRequiredService<Dependency>());
+        lifetime.Assign(form.Worker, static (target, services) => target.Dependency = services.GetRequiredService<Dependency>());
+        Assert.Same(form.Dependency, nested.Dependency);
+        Assert.Same(form.Dependency, form.Worker.Dependency);
+
+        if (control)
+        {
+            form.Child.Dispose();
+            Assert.True(nested.IsDisposed);
+            Assert.True(nested.AliveDuringDispose);
+        }
+        else
+        {
+            form.Worker.Dispose();
+            Assert.True(form.Worker.AliveDuringDispose);
+        }
+
+        Assert.False(form.IsDisposed);
+        Assert.Equal(0, form.Dependency.DisposeCount);
+        lifetime.Assign(form, (_, services) => Assert.Same(form.Dependency, services.GetRequiredService<Dependency>()));
+        lifetime.Dispose();
+        Assert.Equal(1, form.Dependency.DisposeCount);
+    }
+
+    [WinFormsFact]
+    public void NestedDisposalFailures_ReleaseOtherScopesAndReportEveryFailureOnce()
+    {
+        List<string> log = [];
+        using ServiceProvider provider = CreateProvider(log);
+        using WinFormsUiScope application = new(provider);
+        Dependency? applicationDependency = null;
+        using ApplicationContext context = application.CreateContext((services, _) =>
+        {
+            applicationDependency = services.GetRequiredService<Dependency>();
+            applicationDependency.Name = "application";
+
+            return new ApplicationContext();
+        });
+        WinFormsFormScope parent = CreateForm(application, "parent");
+        WinFormsFormScope child = CreateForm(application, "child", parent);
+        WinFormsFormScope grandchild = CreateForm(application, "grandchild", child);
+        WinFormsFormScope sibling = CreateForm(application, "sibling", parent);
+        var parentForm = (ScopedForm)parent.Form;
+        var childForm = (ScopedForm)child.Form;
+        InvalidOperationException childFailure = new("Child service cleanup failed.");
+        InvalidOperationException parentFailure = new("Parent service cleanup failed.");
+        InvalidOperationException applicationFailure = new("Application service cleanup failed.");
+        childForm.Dependency.DisposeFailure = childFailure;
+        parentForm.Dependency.DisposeFailure = parentFailure;
+        applicationDependency!.DisposeFailure = applicationFailure;
+
+        AggregateException failures = Assert.Throws<AggregateException>(application.Dispose).Flatten();
+
+        Assert.Equal(3, failures.InnerExceptions.Count);
+        Assert.Contains(childFailure, failures.InnerExceptions);
+        Assert.Contains(parentFailure, failures.InnerExceptions);
+        Assert.Contains(applicationFailure, failures.InnerExceptions);
+        foreach (WinFormsFormScope lifetime in new[] { parent, child, grandchild, sibling })
+        {
+            Assert.True(lifetime.Form.IsDisposed);
+            Assert.Null(lifetime.Form.RuntimeDispose);
+            Assert.Equal(1, ((ScopedForm)lifetime.Form).Dependency.DisposeCount);
+        }
+
+        Assert.Equal(1, applicationDependency.DisposeCount);
+        Assert.True(log.IndexOf("grandchild service") < log.IndexOf("child service"));
+        Assert.True(log.IndexOf("child service") < log.IndexOf("parent service"));
+        Assert.True(log.IndexOf("sibling service") < log.IndexOf("parent service"));
+        Assert.True(log.IndexOf("parent service") < log.IndexOf("application service"));
+        Assert.False(provider.GetRequiredService<RootDependency>().Disposed);
+        application.Dispose();
+        Assert.Equal(1, childForm.Dependency.DisposeCount);
+        Assert.Equal(1, parentForm.Dependency.DisposeCount);
+        Assert.Equal(1, applicationDependency.DisposeCount);
+    }
+
+    [WinFormsFact]
+    public void DisposeDuringFactory_RetainsApplicationServicesUntilUnacceptedUiIsCleaned()
+    {
+        List<string> log = [];
+        using ServiceProvider provider = CreateProvider(log);
+        using WinFormsUiScope application = new(provider);
+        Dependency? applicationDependency = null;
+        using ApplicationContext context = application.CreateContext((services, _) =>
+        {
+            applicationDependency = services.GetRequiredService<Dependency>();
+            applicationDependency.Name = "application";
+
+            return new ApplicationContext();
+        });
+        ScopedForm? abandoned = null;
+
+        Assert.Throws<ObjectDisposedException>(() => application.CreateForm(services =>
+        {
+            application.Dispose();
+            Assert.Equal(0, applicationDependency!.DisposeCount);
+            abandoned = new ScopedForm(services.GetRequiredService<Dependency>(), "abandoned");
+
+            return abandoned;
+        }));
+
+        Assert.NotNull(abandoned);
+        Assert.True(abandoned.IsDisposed);
+        Assert.Equal(1, abandoned.Dependency.DisposeCount);
+        Assert.Equal(1, applicationDependency!.DisposeCount);
+        Assert.Equal(["abandoned UI", "abandoned service", "application service"], log);
+    }
+
+    [WinFormsTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InvalidFormActivation_CleansReturnedUiAndLeavesCoordinatorUsable(bool visible)
+    {
+        List<string> log = [];
+        using ServiceProvider provider = CreateProvider(log);
+        using WinFormsUiScope application = new(provider);
+        ScopedForm? invalid = null;
+
+        Assert.Throws<InvalidOperationException>(() => application.CreateForm(services =>
+        {
+            invalid = new ScopedForm(services.GetRequiredService<Dependency>(), "invalid");
+            if (visible)
+            {
+                invalid.Show();
+            }
+            else
+            {
+                invalid.TopLevel = false;
+            }
+
+            return invalid;
+        }));
+
+        Assert.NotNull(invalid);
+        Assert.True(invalid.IsDisposed);
+        Assert.Equal(1, invalid.Dependency.DisposeCount);
+        using WinFormsFormScope valid = CreateForm(application, "valid");
+        Assert.False(valid.Form.IsDisposed);
+        Assert.Equal(0, ((ScopedForm)valid.Form).Dependency.DisposeCount);
+    }
+
+    [WinFormsFact]
+    public void InheritedFormDisposal_KeepsServicesAliveThroughDerivedAndBaseCleanup()
+    {
+        List<string> log = [];
+        using ServiceProvider provider = CreateProvider(log);
+        using WinFormsUiScope application = new(provider);
+        WinFormsFormScope lifetime = application.CreateForm(services =>
+            new DerivedScopedForm(services.GetRequiredService<Dependency>()));
+        var form = (DerivedScopedForm)lifetime.Form;
+        lifetime.Assign(form.Child, static (target, services) => target.Dependency = services.GetRequiredService<Dependency>());
+        lifetime.Assign(form.Worker, static (target, services) => target.Dependency = services.GetRequiredService<Dependency>());
+
+        form.Dispose();
+
+        Assert.True(form.AliveDuringDerivedDispose);
+        Assert.True(form.Child.AliveDuringDispose);
+        Assert.True(form.Worker.AliveDuringDispose);
+        Assert.Equal(1, form.Dependency.DisposeCount);
+        Assert.Equal(["inherited UI", "inherited service"], log);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Run_ConstructorFailureReleasesScopeBeforeHostWithoutServiceFreeFallback(bool componentManager)
+    {
+        using AppContextSwitchScope switchScope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
+        RunOnSta(() =>
+        {
+            List<string> log = [];
+            Dependency? dependency = null;
+            InvalidOperationException expected = new("Form constructor failed.");
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseScopedStartupForm(services =>
+                {
+                    dependency = services.GetRequiredService<Dependency>();
+                    dependency.Name = "startup";
+
+                    return new ConstructorFailureForm(dependency, expected);
+                })
+                .UseHost(new HostBuilder().ConfigureServices((_, services) =>
+                {
+                    services.AddSingleton(new DisposalLog(log));
+                    services.AddSingleton<RootDependency>();
+                    services.AddScoped<Dependency>();
+                }))
+                .Build();
+
+            Assert.Same(expected, Assert.Throws<InvalidOperationException>(() => application.Run(TestContext.Current.CancellationToken)));
+            Assert.NotNull(dependency);
+            Assert.Equal(1, dependency.DisposeCount);
+            Assert.True(application.UiCompletion.IsCompletedSuccessfully);
+            Assert.Equal(["startup service", "host"], log);
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Run_ModalDescendantCleanupFailure_PreservesOwnerAndAllowsFurtherActivation(bool componentManager)
+    {
+        using AppContextSwitchScope switchScope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
+        RunOnSta(() =>
+        {
+            List<string> log = [];
+            Exception? callbackFailure = null;
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseScopedApplicationContext((_, scopes) =>
+                {
+                    WinFormsFormScope owner = CreateForm(scopes, "owner");
+                    var main = (ScopedForm)owner.Form;
+                    main.Shown += (_, _) => main.BeginInvoke(() =>
+                    {
+                        try
+                        {
+                            WinFormsFormScope modal = CreateForm(scopes, "modal", owner);
+                            WinFormsFormScope child = CreateForm(scopes, "child", modal);
+                            var dialog = (ScopedForm)modal.Form;
+                            var childForm = (ScopedForm)child.Form;
+                            InvalidOperationException expected = new("Modal descendant cleanup failed.");
+                            childForm.Dependency.DisposeFailure = expected;
+                            dialog.Shown += (_, _) => dialog.BeginInvoke(() => dialog.DialogResult = DialogResult.OK);
+
+                            Assert.Same(expected, Assert.Throws<InvalidOperationException>(() => modal.ShowDialog()));
+                            Assert.True(dialog.IsDisposed);
+                            Assert.True(childForm.IsDisposed);
+                            Assert.Equal(1, dialog.Dependency.DisposeCount);
+                            Assert.Equal(1, childForm.Dependency.DisposeCount);
+                            Assert.False(main.IsDisposed);
+                            Assert.True(main.Enabled);
+                            Assert.Equal(0, main.Dependency.DisposeCount);
+                            using WinFormsFormScope next = CreateForm(scopes, "next", owner);
+                            next.Assign(next.Form, (_, services) =>
+                                Assert.NotSame(main.Dependency, services.GetRequiredService<Dependency>()));
+                        }
+                        catch (Exception exception)
+                        {
+                            callbackFailure = exception;
+                        }
+                        finally
+                        {
+                            main.Close();
+                        }
+                    });
+
+                    return new ApplicationContext(main);
+                })
+                .UseHost(new HostBuilder().ConfigureServices((_, services) =>
+                {
+                    services.AddSingleton(new DisposalLog(log));
+                    services.AddSingleton<RootDependency>();
+                    services.AddScoped<Dependency>();
+                }))
+                .Build();
+
+            application.Run(TestContext.Current.CancellationToken);
+            if (callbackFailure is not null)
+            {
+                ExceptionDispatchInfo.Throw(callbackFailure);
+            }
+
+            Assert.True(log.IndexOf("child service") < log.IndexOf("modal service"));
+            Assert.True(log.IndexOf("modal service") < log.IndexOf("owner service"));
+            Assert.Equal("host", log[^1]);
+        });
+    }
+
     private static ServiceProvider CreateProvider(List<string> log)
         => new ServiceCollection()
             .AddSingleton(new DisposalLog(log))
@@ -639,7 +950,7 @@ public class WinFormsUiScopeTests
     /// <summary>
     ///  Performs derived cleanup before base disposal and owns its service-free child graph.
     /// </summary>
-    private sealed class ScopedForm : Form
+    private class ScopedForm : Form
     {
         private readonly Container _components = new();
 
@@ -668,6 +979,40 @@ public class WinFormsUiScopeTests
             }
 
             base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>
+    ///  Exercises service-dependent cleanup across an opt-in form's inheritance chain.
+    /// </summary>
+    private sealed class DerivedScopedForm(Dependency dependency) : ScopedForm(dependency, "inherited")
+    {
+        internal bool AliveDuringDerivedDispose { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !IsDisposed)
+            {
+                AliveDuringDerivedDispose = Dependency.DisposeCount == 0;
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>
+    ///  Offers service-free construction but fails inside the explicitly selected typed constructor.
+    /// </summary>
+    private sealed class ConstructorFailureForm : Form
+    {
+        public ConstructorFailureForm()
+        {
+        }
+
+        internal ConstructorFailureForm(Dependency dependency, Exception failure)
+        {
+            Assert.Equal(0, dependency.DisposeCount);
+            throw failure;
         }
     }
 

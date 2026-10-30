@@ -655,6 +655,85 @@ Remote CI results and those actual OOP outcomes must be attached separately. Loc
 provide team approval or CI evidence. dotnet/winforms#14951 stays open until these gates are met;
 do not automatically advance to dotnet/winforms#14952.
 
+## DI and scope regression coverage (dotnet/winforms#14952)
+
+This step extends tests for the committed internal prototype at `75eada5c9`; it does not approve
+the public contract or close the preceding Designer/OOP acceptance gates. Work proceeds on the
+user's explicit request for the next child issue, with those dependencies still recorded.
+No activation semantics, product API, samples, or leak infrastructure are added here.
+
+### Coverage and ownership
+
+The existing activation and Designer cases are reused rather than duplicated. Focused additions
+to `WinFormsUiScopeTests` cover the remaining runtime ownership and failure interactions:
+
+| Requirement | Coverage |
+|---|---|
+| Assignment and optional services | Existing activation tests cover explicit typed construction, required-service failure, optional null assignment, and receiver-enforced single assignment. New scope-assignment failure cases cover both UserControls and components, preserving the borrowed object, its form, and its usable scope after a callback throws. |
+| UserControl/component ownership | Existing direct-form disposal cases verify shared service identity and service availability during child cleanup. New cases dispose a nested UserControl subtree or a nonvisual component independently and verify that neither releases the form's shared services. |
+| Form activation and constructor failures | Existing factory/scope creation failures remain covered. New hosted cases throw from an actual typed Form constructor despite an available service-free constructor, preserve the original error, and release the scope before the host. Visible/non-top-level factory results are rejected and cleaned without poisoning subsequent activation. |
+| Modeless/modal/nested lifetimes | Existing real-loop cases cover modeless navigation, modal results, nested dialogs, owner disposal during nested modal execution, cancellation, and close veto. New modal descendant-cleanup failures must surface to the caller, restore the owner, and allow another child activation. |
+| Nested cleanup errors | New application/parent/child cleanup failures are all reported while siblings and grandchildren are still released, descendants precede ancestors, the host remains borrowed, and repeated disposal does not retry failed scopes. |
+| Reentrant activation | Disposing the coordinator inside a form factory must retain application services until the in-flight form is rejected and its UI/service cleanup completes. |
+| Inherited runtime forms | New derived/base cleanup checks verify the scoped base-last contract through the inheritance chain and the base-owned UserControl/component graph. Cleanup after `base.Dispose` remains unsupported for scoped form overrides. |
+| Design time and backward compatibility | The 11 existing local Designer cases cover constructor-time rejection, ordinary/inherited construction, C#/VB CodeDOM generation, serialization, rename/delete, undo/redo, and reload without a builder. Existing unscoped builder, runtime, lifetime, and hosting cases remain in the combined regression selection. |
+
+Repository-owned runtime integration tests use a real Generic Host, a dedicated caller STA,
+actual WinForms message loops, and both message-loop backends. They remain in the existing unit
+test assembly so the normal CI unit-test job executes them; a new integration-test application
+or test-only public API would duplicate infrastructure without improving this boundary.
+
+UI callbacks capture failures and close their owner in `finally` before rethrowing on the test
+thread. Service identity, disposal traces, and event-driven completion determine outcomes; no
+sleeps, allocation budgets, benchmark assertions, or external services are introduced.
+The existing STA join deadline is a hang guard, not a timing acceptance criterion.
+
+The public PR pipeline (`azure-pipelines-PR.yml` and `eng\pipelines\build-PR.yml`) defines x64/x86
+Debug/Release unit-test jobs. These cases are ordinary SDK-included test sources with no
+`IgnoreForCI`/`failing` exclusion. The existing arm64 leg does not execute these tests.
+No pipeline change is needed for discovery; passing remote runs must still be recorded separately.
+
+Closed-source Designer validation belongs to the Designer team: actual OOP server/proxy/Roslyn
+round trips, pointer-driven drag/drop, and supported Visual Studio/SDK/architecture combinations.
+The local Designer tests do not replace that ownership or provide approval/CI evidence.
+Public-contract and OOP gates remain as described under dotnet/winforms#14951.
+
+### Local validation (Debug, x64)
+
+```powershell
+.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal
+```
+
+Result: passed with zero warnings and zero errors.
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.Tests\Debug\net11.0-windows7.0\System.Windows.Forms.Tests.exe `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsUiScopeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationDesignerTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationBuilderTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationLifetimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationRuntimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationHostingTests' `
+  --no-progress --report-trx
+```
+
+Result: 169 passed, zero failed, zero skipped. This includes 34 scope cases (13 new),
+all 11 existing local Designer cases, and the activation/builder/lifetime/runtime/hosting
+regressions. Both message-loop backends pass the new hosted constructor and modal failure cases.
+
+```powershell
+.\.dotnet\dotnet.exe format whitespace src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj --no-restore --verify-no-changes --include src\test\unit\System.Windows.Forms\Microsoft\Extensions\WinForms\WinFormsUiScopeTests.cs --verbosity quiet
+git diff --check
+```
+
+Result: both passed. No full-suite, x86, Release, arm64, or Visual Studio OOP execution is claimed.
+Remote CI was not run or verified: these changes are local and GitHub CLI authentication is
+unavailable. The repository-owned tests are locally validated, but CI evidence and the recorded
+Designer-owned acceptance gates remain outstanding; local results alone do not close this issue.
+Samples and dedicated leak validation remain dotnet/winforms#14953 and dotnet/winforms#14954 work.
+
 ## Research completion
 
 This issue supplies a source-backed comparison, the recommended activation model, application/
