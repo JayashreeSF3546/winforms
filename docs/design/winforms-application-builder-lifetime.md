@@ -24,6 +24,9 @@ This intentionally narrows the parent proposal; it must not be presented as comp
 The architecture sections describe the original recommendation. The runtime and public adapter
 sections at the end document the implementation, including the subsequently requested hosting integration.
 
+The [service infrastructure boundaries](winforms-application-builder-services.md) for
+dotnet/winforms#14956 build on that adapter without replacing its startup or UI-completion ordering.
+
 Do not change behavior for applications that call the existing `Application.Run`, `Application.Exit`,
 or `Application.ExitThread` APIs without the builder.
 
