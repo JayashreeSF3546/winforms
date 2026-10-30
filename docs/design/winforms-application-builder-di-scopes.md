@@ -536,6 +536,125 @@ Remote CI, actual OOP Designer agreement/integration (dotnet/winforms#14951), br
 (dotnet/winforms#14952), C#/VB samples (dotnet/winforms#14953), and dedicated leak runs
 (dotnet/winforms#14954) remain separate acceptance work. No success for these is implied here.
 
+## Designer integration boundary (dotnet/winforms#14951)
+
+Status: local integration checks and a proposed Designer agreement, **not completed OOP
+integration or approval of a public DI contract**. The baseline is `eb49b41d7`. Both activation
+contracts and scope APIs are still internal; this step must not invent a public marker, assignment
+interface, generated call, or private Visual Studio extension point to work around that gate.
+
+### Recognition and generated-code decision
+
+The selected explicit-factory contract needs no DI-specific Designer recognition. The Designer
+recognizes the existing designable type, service-free constructor, ordinary layout properties,
+sites, and inheritance metadata. Runtime factories and typed assignment callbacks belong to
+user-owned composition code outside `InitializeComponent`. Required runtime dependencies still
+fail on the explicit runtime path; service-free construction is an intentional design-time path,
+not a missing-service fallback.
+
+Keep the existing generated-code behavior in both languages:
+
+- Generate ordinary parameterless construction and layout initialization.
+- Do not generate host construction, service resolution, provider assignment, scope creation,
+  runtime readiness flags, or cleanup-hook assignments.
+- Leave inherited layout construction to the base form/control. Do not duplicate inherited
+  objects or rewrite their inaccessible initialization.
+- Persist layout changes and normal component identity/name references. Runtime service
+  properties must remain non-browsable and serialization-hidden; internal sparse-store ownership
+  tokens and the Form cleanup hook are not designable properties.
+- Use normal rename/remove, serialization, undo/redo, and reload services. Do not introduce a
+  parallel name-keyed runtime registry or change generated code for non-builder applications.
+
+No product serializer or code generator is changed for a contract that deliberately needs no new
+generated code. Regression checks use the runtime test assembly's existing internal access and
+the public local Designer infrastructure; no new friend-assembly grant or dependency is added.
+
+### Local integration checks
+
+The extended `WinFormsServiceActivationDesignerTests` exercise:
+
+| Boundary | Local evidence |
+|---|---|
+| Constructor-time scope isolation | A real design-host-created component attempts both runtime activation and UI coordinator creation before normal siting; the license guard must reject both before provider access. |
+| Local generated document load/save | `CodeDomDesignerLoader` loads an in-memory document, toolbox creation adds a designable control, and flush uses the actual type/component serializers and C# or VB code generator. Generated construction uses zero constructor arguments and contains no runtime activation code. |
+| Rename, removal, undo/redo, reload | A committed rename transaction preserves instance identity through undo/redo; saved names and layout survive loader-scheduled reload; the Designer Delete command and undo/redo reconstruct service-free instances, and removal is reflected in the next generated document. |
+| Inherited forms/controls | A real protected base-form control remains inherited, service-free, and parented to the recreated root. The base and control both offer explicit typed runtime constructors without requiring them in the Designer. |
+| Runtime state exclusion | Serializing actual scoped runtime Form/UserControl instances omits cleanup hooks, assigned services, and opaque child-ownership tokens. A deserialized child can be explicitly assigned to a fresh scope without inheriting the old identity. |
+| Non-builder behavior | The local Designer document and toolbox/undo/reload operations run with no application builder, host, or registered runtime services. Existing builder/runtime regressions remain separate checks. |
+
+The local loader's `Parse` method supplies an existing CodeDOM tree. It does **not** parse emitted
+C#/VB text, compile it, run Visual Studio, simulate pointer-driven drag/drop, or exercise the OOP
+Roslyn/proxy pipeline. C#/VB code generation plus a CodeDOM reload must not be reported as a
+Visual Studio source round trip.
+
+### Local validation (Debug, x64)
+
+```powershell
+.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal
+```
+
+Result: passed with zero warnings and zero errors.
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.Tests\Debug\net11.0-windows7.0\System.Windows.Forms.Tests.exe `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsUiScopeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationDesignerTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationBuilderTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationLifetimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationRuntimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationHostingTests' `
+  --no-progress --report-trx
+```
+
+Result: 156 passed, zero failed, zero skipped. This includes all 11 local Designer cases,
+six of which are new theory cases, alongside the scope, activation, builder, lifetime,
+runtime, and hosting regression checks. Loader reload is driven by an explicitly raised
+idle event after scheduling, without sleeps or timing-based assertions.
+
+```powershell
+.\.dotnet\dotnet.exe format whitespace src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj --no-restore --verify-no-changes --include src\test\unit\System.Windows.Forms\Microsoft\Extensions\WinForms\WinFormsServiceActivationDesignerTests.cs --verbosity quiet
+git diff --check
+```
+
+Result: both passed. These targeted results do not imply a full-suite, architecture-matrix,
+Visual Studio OOP, or remote CI pass.
+
+### Designer-team agreement and external acceptance
+
+The following decisions need an explicit recorded Designer-team agreement before this issue can
+be closed or a public activation contract approved:
+
+1. Confirm that explicit composition remains outside generated code and needs no new Designer
+   marker, server service, or client/server payload. If a new hook is required, agree its public
+   contract and server-side placement before implementing it.
+2. Confirm service-free construction throughout designable inheritance chains and the exclusion
+   of runtime services/ownership from property browsing, serialization, and undo stores.
+3. Review the scoped-form base-last disposal requirement separately from the Designer's ordinary
+   generated Dispose pattern. Do not imply support for arbitrary derived cleanup after base.
+4. Select supported SDK, Visual Studio, language, and target-architecture combinations and the
+   Designer-owned harness/approved API through which actual scoped activation can be exercised.
+   The current internal prototypes cannot be called by an ordinary application.
+
+For each agreed C#/VB environment, record the versions, architecture, commands, results, and
+before/after source diff for this manual OOP acceptance sequence:
+
+1. Open a service-free and a DI-enabled inherited Form/UserControl in the actual OOP Designer.
+   Verify required runtime services are absent without causing construction/provider access.
+2. Drag/drop a nested control and nonvisual component. Modify ordinary layout, save, close, and
+   reopen. Inspect generated source/resources for service/provider/scope/readiness leakage.
+3. Rename, remove, undo, redo, and reload the added objects. Verify generated identifiers, event
+   hookups, parent relationships, and private/protected inherited layout remain correct.
+4. Run through the agreed runtime activation harness. Verify typed assignment happens once after
+   layout construction, required-service failures surface, and design-only state is not replayed.
+5. Repeat with an application that uses no builder/DI and confirm ordinary Designer/runtime
+   workflows remain unchanged.
+
+Remote CI results and those actual OOP outcomes must be attached separately. Local tests do not
+provide team approval or CI evidence. dotnet/winforms#14951 stays open until these gates are met;
+do not automatically advance to dotnet/winforms#14952.
+
 ## Research completion
 
 This issue supplies a source-backed comparison, the recommended activation model, application/
