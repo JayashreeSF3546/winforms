@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>$(NetCurrent)</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace></RootNamespace>
+    <StartupObject>ApplicationBuilderScopes.VisualBasic.Program</StartupObject>
+    <MyType>Empty</MyType>
+    <OptionStrict>On</OptionStrict>
+    <OptionExplicit>On</OptionExplicit>
+    <OptionInfer>On</OptionInfer>
+    <LangVersion>latest</LangVersion>
+    <IsTestUtilityProject>true</IsTestUtilityProject>
+    <IsPackable>false</IsPackable>
+    <EnableXlfLocalization>false</EnableXlfLocalization>
+    <UpdateXlfOnBuild>false</UpdateXlfOnBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <ProjectReference Include="..\..\..\..\System.Windows.Forms\System.Windows.Forms.csproj" />
+  </ItemGroup>
+</Project>

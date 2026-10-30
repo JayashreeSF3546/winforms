@@ -11,6 +11,8 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo($"System.Windows.Forms.Interop.Tests, PublicKey={PublicKeys.MicrosoftShared}")]
 [assembly: InternalsVisibleTo($"System.Windows.Forms.UI.IntegrationTests, PublicKey={PublicKeys.MicrosoftShared}")]
 [assembly: InternalsVisibleTo($"ScratchProjectWithInternals, PublicKey={PublicKeys.Ecma}")]
+[assembly: InternalsVisibleTo($"ApplicationBuilderScopes.CSharp, PublicKey={PublicKeys.MicrosoftShared}")]
+[assembly: InternalsVisibleTo($"ApplicationBuilderScopes.VisualBasic, PublicKey={PublicKeys.MicrosoftShared}")]
 [assembly: InternalsVisibleTo($"ComDisabled.Tests, PublicKey={PublicKeys.MicrosoftShared}")]
 
 // This is needed in order to Moq internal interfaces for testing

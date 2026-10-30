@@ -734,6 +734,82 @@ unavailable. The repository-owned tests are locally validated, but CI evidence a
 Designer-owned acceptance gates remain outstanding; local results alone do not close this issue.
 Samples and dedicated leak validation remain dotnet/winforms#14953 and dotnet/winforms#14954 work.
 
+## Repository-only DI/scopes samples (dotnet/winforms#14953)
+
+The user explicitly selected repository-only C#/VB samples with sample-specific friend access
+while the scoped APIs remain internal. The samples live in
+`src\test\integration\ApplicationBuilderScopes`; their README contains build/run instructions,
+interactive scenarios, and the external acceptance checklist. Both projects are registered in
+the solution and referenced by the existing UI integration-test project.
+
+The only product-source change is two strong-name-qualified `InternalsVisibleTo` grants for
+`ApplicationBuilderScopes.CSharp` and `ApplicationBuilderScopes.VisualBasic`. These grants expose
+internals to those repository assemblies, not just scoped activation members; they are an explicit
+prototype trade-off, not public API approval or an external consumption mechanism. Public API
+promotion, reflection-based access, spoofing an existing friend identity, and copying the scope
+coordinator were rejected. Once an approved public contract exists, migrate the samples and
+remove these grants.
+
+Both samples use the actual hosted application/coordinator. Explicit factories constructor-inject
+Forms, and typed callbacks assign the same scoped dependency to their ordinary Designer-created
+UserControls and container-owned components. The composition boundary owns navigation and logical
+parent relationships; controls never store a provider or create scopes. Independent modeless/modal
+windows, page replacement, cancellation, and UI-before-service/exactly-once disposal are observable
+through console diagnostics. Parameterless constructors and layout remain service-free. The
+existing base-last and synchronous-disposal boundaries still apply.
+
+The sample's `--classic`, `--light`, and `--dark` switches select initialization/color behavior;
+`--component-manager` selects the alternative message loop. Event-driven `--smoke` execution
+closes a modeless window, completes a modal dialog, navigates, and then closes or cancels the
+application. Each run checks all five created scoped sessions. This is not leak-trend evidence.
+No logging/configuration infrastructure, templates, public APIs, or leak harness is introduced.
+
+### Local validation (Debug, x64)
+
+```powershell
+.\build.cmd -projects src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj -verbosity minimal
+```
+
+Result: passed with zero warnings and zero errors, including both language samples.
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.UI.IntegrationTests\Debug\net11.0-windows7.0\System.Windows.Forms.UI.IntegrationTests.exe `
+  --filter-class 'System.Windows.Forms.UITests.WinFormsApplicationScopeSampleTests' `
+  --no-progress --report-trx
+```
+
+Result: 26 passed, zero failed, zero skipped. The 24 isolated-process cases cover both languages,
+three color selections, both message-loop backends, and normal/canceled completion. They verify
+typed assignment, navigation, modal/modeless completion, exactly-once service cleanup, and that
+UserControl/component/Form teardown precedes the corresponding service disposal.
+
+The other two cases load the actual sample Forms in a local `DesignSurface` without runtime
+services, create their UserControl/component types through `IDesignerHost`, and reconstruct those
+added objects through the actual CodeDOM serializers. Referenced-type resolution and in-memory
+ResX metadata are supplied explicitly. Serialization errors remain failures; no production
+serializer is changed and no legacy binary serialization is enabled. These checks do not save
+the root source document, parse/compile generated C#/VB text, or run Visual Studio OOP.
+
+```powershell
+.\.dotnet\dotnet.exe format whitespace src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj --no-restore --verify-no-changes --include-generated --include src\test\integration\ApplicationBuilderScopes src\test\integration\UIIntegrationTests\WinFormsApplicationScopeSampleTests.cs src\System.Windows.Forms\Properties\AssemblyInfo.cs --verbosity quiet
+git diff --check
+```
+
+Result: both passed. The test class is included in existing public x64/x86 integration-test jobs;
+the existing arm64 CI leg does not execute it. Remote CI has not been run or verified.
+
+### Remaining acceptance
+
+dotnet/winforms#14953 remains open pending actual Designer-team C#/VB OOP source round trips,
+interactive Classic/light/Dark appearance and DPI checks, native Windows ARM, Terminal Services
+including reconnect, representative slow-hardware execution, and remote CI evidence. Record
+versions, commands, results, and source diffs using the sample README checklist. The preceding
+public-contract/Designer agreement and CI gates remain open as well.
+
+Local prototype sample implementation is complete; external acceptance is not. Dedicated leak
+validation belongs to dotnet/winforms#14954 and is not started automatically.
+
 ## Research completion
 
 This issue supplies a source-backed comparison, the recommended activation model, application/
