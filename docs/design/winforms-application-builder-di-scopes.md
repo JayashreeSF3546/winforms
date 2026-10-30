@@ -1,0 +1,967 @@
+# WinForms Application Builder: designer-safe DI and UI scopes
+
+Status: research and architecture recommendation for
+[dotnet/winforms#14948](https://github.com/dotnet/winforms/issues/14948).
+An internal contract prototype for dotnet/winforms#14949 is described below.
+The subsequent dotnet/winforms#14950 section records explicit scope-aware activation.
+This document does not approve or implement a public DI contract.
+
+Parent story: [dotnet/winforms#14947](https://github.com/dotnet/winforms/issues/14947).
+Proposal: [dotnet/winforms#14082](https://github.com/dotnet/winforms/issues/14082).
+Dependency: the [host/lifetime implementation](winforms-application-builder-lifetime.md)
+from [dotnet/winforms#14940](https://github.com/dotnet/winforms/issues/14940).
+
+## Scope and recommendation
+
+Use explicit runtime activation factories as the composition boundary. Factories supply typed
+dependencies through constructors, or explicitly initialize designer-created instances after their
+constructors and `InitializeComponent` have completed. Controls and components receive the services
+they use, not a stored `IServiceProvider`. Runtime assignment is opt-in; existing components and
+applications do not acquire a DI requirement.
+
+Retain service-free construction for designable types, existing generated code, `ISite` services,
+and designer transactions. Do not initialize a host, build an application service provider, or
+resolve runtime services in the Designer. Do not introduce global, static, thread-local, or ambient
+service lookup. Injecting a provider into every control would still encourage a service locator,
+even if that provider were scoped.
+
+Represent UI lifetime nesting explicitly, independently of the DI container. Modeless forms own
+distinct scopes; modal invocations own distinct scopes bounded by their owners. UserControls and
+components borrow their form's scope. An application-level owner tracks every active UI lifetime,
+not just `ApplicationContext.MainForm`.
+
+This is the recommended direction for the next prototype, not a declaration that all lifecycle
+seams are solved. The most-derived disposal boundary, async-only service disposal, and actual
+out-of-process Designer behavior are explicit prototype gates below.
+
+## Research baseline and evidence
+
+The local source was inspected at `70d2aacd8`, which includes the host/lifetime stream.
+The checkout centrally selects `Microsoft.Extensions.Hosting` 10.0.10 in
+[Directory.Packages.props](../../Directory.Packages.props).
+The external DI implementation references below are pinned to the corresponding runtime tag.
+
+| ID | Inspected source | Finding |
+|---|---|---|
+| R1 | [WinFormsApplicationBuilder.cs](../../src/System.Windows.Forms/Microsoft/Extensions/WinForms/WinFormsApplicationBuilder.cs), lines 69-74, 93-102, 119-125, 137-181 | Generic startup currently requires `new()`; instance ownership transfers on successful build; the context factory is deferred. Build does not activate UI. Constructor DI must not silently change these existing paths. |
+| R2 | [WinFormsApplication.cs](../../src/System.Windows.Forms/Microsoft/Extensions/WinForms/WinFormsApplication.cs), lines 155-180, 203-235, 286-323 | Host startup precedes UI activation; the UI synchronization context is installed before activation. UI cleanup completes before the host barrier is released. Scope cleanup must join that boundary, not run from a later host-stopped callback. |
+| R3 | [ToolboxItem.cs](../../src/System.Windows.Forms.Design/src/System/Drawing/Design/ToolboxItem.cs), lines 255-305 | Toolbox creation delegates to the designer host and calls `InitializeNewComponent`; initialization failure destroys newly created components. Runtime registration must not participate in this transaction. |
+| R4 | [DesignerHost.cs](../../src/System.Windows.Forms.Design/src/System/ComponentModel/Design/DesignerHost.cs), lines 921-1019 | The design surface constructs the component before the host performs normal siting. Creation uses a design-time license context. Delete removes and disposes within the designer transaction. `DesignMode` cannot be assumed available at the start of every constructor. |
+| R5 | [DesignSurface.cs](../../src/System.Windows.Forms.Design/src/System/ComponentModel/Design/DesignSurface.cs), lines 271-297 | The implementation first tries a public parameterless constructor, then an `IContainer` constructor for components, then reflection fallback. A nearby summary has a different ordering; the implementation is the evidence. There is no general constructor-service resolution contract here. |
+| R6 | [DesignerSerializationManager.cs](../../src/System.Windows.Forms.Design/src/System/ComponentModel/Design/Serialization/DesignerSerializationManager.cs), lines 219-370 | Deserialization can recycle named instances, delegate component creation to `IDesignerHost`, or invoke `TypeDescriptor`. Creation is not a single universal reflection hook that can safely be replaced by DI. |
+| R7 | [CodeDomSerializerBase.cs](../../src/System.Windows.Forms.Design/src/System/ComponentModel/Design/Serialization/CodeDomSerializerBase.cs), lines 1873-1930, 2142-2151 | Creation can use an existing expression, `InstanceDescriptor`, resources, or a public parameterless constructor. Hidden serialization metadata is checked separately from property browsing. Do not assume a service property is safe merely because it is not browsable. |
+| R8 | [DesignerHost.Site.cs](../../src/System.Windows.Forms.Design/src/System/ComponentModel/Design/DesignerHost.Site.cs), lines 197, 220-256; [CodeDomDesignerLoader.cs](../../src/System.Windows.Forms.Design/src/System/ComponentModel/Design/Serialization/CodeDomDesignerLoader.cs), lines 786-869 | Designer sites expose design mode; renaming raises change notifications and updates generated declarations. Loading and saving deserialize/serialize through the designer pipeline. Scope identity must not depend on a generated field name. |
+| R9 | [BasicDesignerLoader.cs](../../src/System.Windows.Forms.Design/src/System/ComponentModel/Design/Serialization/BasicDesignerLoader.cs), lines 720-773; [DesignerHost.cs](../../src/System.Windows.Forms.Design/src/System/ComponentModel/Design/DesignerHost.cs), lines 685-775 | Reload can flush, unload, and reload the document; host unload disposes components and designers. Any runtime-assignment state must stay out of these recreated graphs and serialization sessions. |
+| R10 | [UndoEngine.UndoUnit.AddRemoveUndoEvent.cs](../../src/System.Windows.Forms.Design/src/System/ComponentModel/Design/UndoEngine.UndoUnit.AddRemoveUndoEvent.cs), lines 26-35, 70-99; [UndoEngine.UndoUnit.RenameUndoEvent.cs](../../src/System.Windows.Forms.Design/src/System/ComponentModel/Design/UndoEngine.UndoUnit.RenameUndoEvent.cs), lines 27-36 | Undo/redo serializes and recreates components, destroys them through the host, or changes the site name. Neither an object instance nor its name is a durable runtime ownership record across designer operations. |
+| R11 | [InheritanceService.cs](../../src/System.Windows.Forms.Design/src/System/ComponentModel/Design/InheritanceService.cs), lines 51-210; [ComponentCodeDomSerializer.cs](../../src/System.Windows.Forms.Design/src/System/ComponentModel/Design/Serialization/ComponentCodeDomSerializer.cs), lines 116-137 | Inherited components are discovered from initialized base fields and have inherited/read-only metadata. The serializer avoids changing privately inherited components. Derived hookup must not reconstruct or reassign inaccessible base-owned objects. |
+| R12 | [Form.cs](../../src/System.Windows.Forms/System/Windows/Forms/Form.cs), lines 3244-3261, 3515-3578, 5727-5884, 6737-6891 | Modeless closing, owned-form disposal, and modal execution are different paths. Modal execution hides the dialog and destroys its handle but does not generally dispose the form. A canceled close is not the end of a scope. |
+| R13 | [Control.cs](../../src/System.Windows.Forms/System/Windows/Forms/Control.cs), lines 2613-2625, 4994-5094; [UserControl.cs](../../src/System.Windows.Forms/System/Windows/Forms/UserControl.cs), lines 29-35 | Ancestor design-mode detection requires a site/parent; it is not a constructor-time runtime switch. Control disposal disposes children before calling the component base. It cannot prove that an arbitrary most-derived `Dispose` override has finished. |
+| R14 | [ApplicationContext.cs](../../src/System.Windows.Forms/System/Windows/Forms/ApplicationContext.cs), lines 50-61, 93-111, 143-151 | Replacing `MainForm` changes handle-destruction subscriptions, not a DI ownership tree. Context disposal disposes its current main form; custom contexts may manage more UI. Handle recreation must not terminate a form scope. |
+
+These are source findings, not new runtime or Designer execution results.
+Existing `DesignerSerializationManagerTests`, `DesignerHostTests`, `InheritanceServiceTests`,
+and `ControlCodeDomSerializerTests` provide useful extension points. They do not establish that
+a new assignment contract works, or that Visual Studio's out-of-process Designer supports it.
+
+### External constraints
+
+- [.NET DI guidelines](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/guidelines):
+  the built-in container does not provide automatic property injection or hierarchical child
+  containers. Do not resolve disposable scoped/transient dependencies from the root provider or
+  dispose injected container-owned dependencies individually.
+- [ServiceProviderEngineScope, v10.0.10](https://github.com/dotnet/runtime/blob/v10.0.10/src/libraries/Microsoft.Extensions.DependencyInjection/src/ServiceLookup/ServiceProviderEngineScope.cs):
+  `CreateScope` delegates to the root provider. Each scope has its own scoped-instance cache.
+  Synchronous disposal rejects async-only disposables, and a throwing service disposer interrupts
+  that scope's disposal loop. A coordinator cannot promise to repair the container's internal
+  cleanup by calling `Dispose` again.
+- [ActivatorUtilities, v10.0.10](https://github.com/dotnet/runtime/blob/v10.0.10/src/libraries/Microsoft.Extensions.DependencyInjection.Abstractions/src/ActivatorUtilities.cs):
+  runtime activation can reuse constructor selection and factory infrastructure, but multiple
+  constructors and service availability affect selection. A design-time parameterless constructor
+  must not become a silent fallback when a required runtime service is missing.
+- [Out-of-process Designer architecture](https://devblogs.microsoft.com/dotnet/custom-controls-for-winforms-out-of-process-designer/):
+  actual controls execute in `DesignToolsServer`; Visual Studio uses proxies. The application's
+  live service provider and scopes cannot be treated as cross-process Designer objects.
+- [Local OOP serialization documentation](../designer/modernization-of-code-behind-in-OOP-designer/modernization-of-code-behind-in-oop-designer.md):
+  the Visual Studio pipeline uses Roslyn for source processing. Local CodeDOM/DesignSurface tests
+  are necessary evidence, not a replacement for Designer-team review and real C#/VB round trips.
+
+## Alternatives evaluated
+
+| Approach | Benefits | Limitations and decision |
+|---|---|---|
+| Marker interface alone | Small opt-in surface; avoids changing existing types. | Does not specify assignment, readiness, lifetime, or cleanup. Insufficient as the bridge. |
+| `IServiceProviderAssignable` | Can attach services after parameterless construction and serve existing generated children. | A stored provider encourages service lookup throughout UI code; it does not define scope ownership or revoke captured services safely. Do not select as the default. If prototyped for comparison, keep lookup inside composition code and evaluate whether the interface is necessary at all. |
+| Automatic property injection | Can reach instances created by `InitializeComponent` without new constructors. | Built-in DI does not do this. Reflection scanning, setter ordering, required/optional rules, inherited properties, and serialized state introduce complexity. Reject implicit scanning and convention-based injection. |
+| Explicit typed property/method assignment | Preserves design-time construction; dependencies remain visible and testable; no general-purpose provider on controls. | Requires an explicit composition step and readiness validation before use. Recommend typed assignment callbacks/methods; properties, when needed, must be nonserialized and have clear single-assignment rules. |
+| Constructor injection everywhere | Strong dependency requirements and immutable fields. | Designer/toolbox creation and generated child constructors do not supply runtime services. Support in runtime factories, not as the only creation model for designable types. |
+| Explicit activation factories | Centralize service resolution, thread checks, ownership, errors, and assignment to an already-created graph. | Require lifecycle integration and an explicit path for nested controls/components. Recommend as the primary runtime boundary. A typed factory must not simply expose arbitrary service resolution to UI code. |
+| Generated Designer hookup | Could discover nested members and emit strongly typed assignment. | Requires C#/VB parsing/generation, inheritance rules, rename/delete/undo/reload support, and OOP team agreement. Not the prerequisite for the first runtime prototype; investigate only in the owning designer issue. Never hand-edit generated `InitializeComponent`. |
+| Replace `TypeDescriptor`, `ISite`, or all activation globally | Appears to intercept many creation paths. | Conflates designer services with application services and affects non-builder applications. Reject process-wide providers, site replacement, and hidden ambient activation hooks. |
+
+Factories plus typed assignment provide the best initial balance: ordinary design-time construction,
+no mandatory provider lookup in UI code, explicit failure/ownership paths, and no new serialization
+or reflection traversal on every control creation. This is a qualitative assessment; no DI
+performance improvement or regression budget is claimed without prototype measurements.
+
+## Service activation decisions
+
+1. **Explicit opt-in.** Preserve existing `UseStartupForm<TForm>()`, supplied-instance, and custom
+   context behavior. A future scoped-factory path must be distinct; merely selecting `UseHost`
+   must not reinterpret every `new Form()` or every control in a legacy application.
+2. **Runtime constructors.** A factory can resolve required typed dependencies and construct a form,
+   UserControl, component, or context. Designable types retain a service-free construction path
+   through their inheritance chain. Constructor-only runtime types are possible but are not
+   promised toolbox/design-surface support.
+3. **Designer-created graphs.** `InitializeComponent` remains responsible for creating its existing
+   objects. A factory explicitly initializes opted-in children and components after that method
+   returns, without replacing them, changing `Site`, or scanning all writable properties.
+4. **Readiness.** Finish assignment and validation before the factory publishes the graph or the
+   coordinator shows it. Constructors, property getters used by the Designer, and `EndInit` must
+   not require runtime assignment that has not happened yet. Defer service-dependent work until
+   runtime readiness; do not invoke overridable assignment callbacks from base constructors.
+5. **Required services.** An explicitly selected runtime path fails with the original activation
+   error if a required dependency is absent. Do not retry parameterless creation, install a no-op
+   service, or use a global/root fallback. Explicit constructor selection must avoid
+   `ActivatorUtilities` selecting the design-only constructor because a service is unavailable.
+6. **Optional services.** Optionality is declared in the typed factory/assignment contract, with
+   an intentional null/default branch. Nullable annotations alone do not request optional DI.
+   Missing optional services are different from required-service resolution failures.
+7. **Assignment identity.** Initialization is once per instance/declaring inheritance layer.
+   Conflicting reassignment, activation after disposal, and cross-owner reuse fail explicitly.
+   Renaming a component does not reassign it. Existing instances keep their current caller-owned
+   resources unless an explicit new contract transfers ownership.
+8. **Service-free operation.** Design-time creation and non-builder applications remain ordinary
+   service-free paths. Missing runtime services must never be inferred to mean "design mode."
+   Design-time preview data, if offered, is separately configured and must not construct the host.
+
+No public interface name, provider-taking overload, member-discovery attribute, or generated-code
+format is committed by these decisions. The prototype must compare the minimum factory/callback
+surface with an assignment interface before proposing API entries.
+
+## Scope ownership model
+
+| Resource | Owner and service scope | End condition |
+|---|---|---|
+| Root provider / singletons | Existing host owns its provider and container-created singletons. UI infrastructure borrows it only at composition boundaries. No second provider is built. Caller-supplied service instances retain their documented external ownership. | Host disposal, after UI and UI-owned scopes finish. |
+| Application UI scope | The built application's lifetime coordinator owns an optional, explicit scope for its DI-enabled context/application collaborators. No scope is needed for service-free applications. This is distinct from the host root. | After tracked UI lifetimes and their scopes are cleaned up, before host disposal and the UI-completion barrier is released. |
+| Custom `ApplicationContext` | Runtime factory creates the context on the owning STA using application-scope dependencies. Context/UI ownership remains with the existing runner. The context does not create another root provider. | Existing context teardown plus application-scope cleanup. Switching `MainForm` does not implicitly discard or merge other form scopes. |
+| Modeless form, including startup form | One explicit form-lifetime record owns one form service scope and the factory-created form. Independent top-level forms have distinct scopes. Explicitly owned child windows are tracked as lifetime children. | Actual form disposal or committed owner/application cleanup; not a vetoed close, `Hide`, or handle recreation. |
+| Modal dialog | One invocation record owns a fresh dialog and distinct scope. Its logical parent is the explicit owner lifetime; unowned dialogs belong to the application lifetime. | On return or failure of the modal invocation: dispose the dialog, then its scope, in `finally`. Do not wait for `FormClosed` to dispose the scope. |
+| UserControl / nested controls | Borrow the containing form's scope through explicit typed assignment. Parent control collection/factory owns the UI object; it does not own the borrowed provider/services. No automatic independent scope. | UI disposal releases its own resources/subscriptions; the containing form later disposes the shared scope. |
+| Nonvisual component | Borrow the explicitly identified form/context scope. Generated `components` containers or an explicit caller own the component itself, never a new service root. A runtime factory for an unattached component requires an explicit lifetime owner. | Component disposal releases its resources/subscriptions, not the shared services. |
+
+### Logical nesting is not container nesting
+
+Creating a scope from another scope with Microsoft DI creates an independent scope, not a child
+container inheriting the parent's scoped instances. "Nested modal scope" means a **UI lifetime
+relationship** here. Two dialogs resolve different scoped instances, even when they share an owner.
+The coordinator must explicitly track descendants and terminate them before their owner.
+
+If a dialog needs its owner's current unit of work, pass that specific typed collaborator as a
+borrowed dependency and retain the owner for the invocation. Do not implement provider chaining,
+copy registrations, or imply that modal services automatically share all parent-scoped state.
+The borrowing dialog must not dispose that owner-owned collaborator.
+
+Reparenting a control does not magically rebind its dependencies. Moving an assigned control to
+another active form scope must fail or use an explicit detach/recreate protocol agreed in the
+prototype; do not silently retain a disposed old scope or dispose the new owner's services.
+Unregistered `new`/`Show`/`ShowDialog` calls retain existing WinForms behavior; only explicit scoped
+activation obtains these ownership guarantees.
+
+## Disposal, modal behavior, and failures
+
+The target cleanup sequence is:
+
+1. Commit stopping and reject new child activation.
+2. Unwind modal work; close/dispose descendant UI on its owning STA.
+3. Dispose controls, components, and their runtime subscriptions while their dependencies are live.
+4. Dispose each completed child scope, then the owning form scope.
+5. Dispose remaining application UI/context resources and the application scope.
+6. Signal UI cleanup completion to the existing host barrier; complete host shutdown/disposal.
+
+This is required integration work for the scope implementation, not behavior added by this
+research. R2's current cleanup has no scope owner yet. Scope completion must precede its
+`_uiStopped` signal; subscribing only to `ApplicationStopped` would be too late.
+
+Important boundaries:
+
+- A canceled `FormClosing` keeps the scope alive. `FormClosed` precedes all disposal work and
+  is not a general scope-cleanup boundary. `HandleDestroyed` also occurs during recreation.
+- `ShowDialog` generally returns a hidden form whose native handle is destroyed, not a disposed
+  object (R12). A scoped modal wrapper must dispose both dialog and scope after return or failure.
+  Reusing that completed dialog with old scoped dependencies is not supported by this model;
+  another invocation creates another dialog.
+- Do not register a factory-created form/UserControl/component as an ordinary container-owned
+  disposable as well as a WinForms-owned object. Factories own the UI result; the scope owns
+  resolved dependencies. Existing explicitly registered container-owned UI requires a separately
+  specified ownership path or rejection, not accidental double disposal.
+- A `Disposed` event callback is not proof that all code in a most-derived override has returned.
+  The prototype must compare an explicit activation/ownership wrapper with the lifecycle hook
+  needed for ordinary close and direct `Dispose`. If an opt-in base-last disposal convention is
+  necessary, document and test it; do not claim arbitrary inherited overrides are already safe.
+- Detach lifetime handlers and runtime event subscriptions and release per-instance records.
+  Use the instance/ownership record, not `Name`, as identity. Do not keep a static registry.
+- On constructor failure, the constructor remains responsible for resources allocated before it
+  throws. The coordinator disposes its successfully created scope. On later assignment/show
+  failure, it also attempts cleanup of every successfully returned UI object it owns.
+- Preserve the activation error and surface independent cleanup errors using the existing
+  lifetime error-aggregation pattern. Continue attempts for independent child lifetimes/scopes.
+  Do not claim every service was disposed if a container-owned disposer throws; the selected
+  container can stop its own disposal loop. Fault tests must expose that limitation.
+
+### Async-only dependencies are a prototype gate
+
+`IServiceScope.Dispose` is not a valid general cleanup path for async-only services. Blocking on
+an arbitrary `DisposeAsync` from a UI event can deadlock; moving all disposal to `Task.Run` would
+also violate thread affinity for controls or UI-affine synchronous dependencies.
+
+The next prototype must explicitly choose and validate either a documented synchronous-only scope
+contract that rejects unsupported dependencies, or an asynchronous service-cleanup boundary that
+the application/owner tracks before signaling UI completion. It must not silently skip async
+disposal, swallow the container's exception, or release an owner before child cleanup completes.
+UI objects stay STA-owned; any supported async-only service must not depend on a dispatcher that
+has already terminated. No async scope API or unsupported-service detection mechanism is approved
+by this research.
+
+## Designer and inheritance contract
+
+| Operation | Required behavior for the proposed opt-in model |
+|---|---|
+| Creation / toolbox drag-drop | Use normal service-free Designer construction, siting, and `InitializeNewComponent`. No application host or runtime scope is constructed. Existing `IContainer` constructors keep their semantics. |
+| Runtime creation | Enter the explicit factory on the owner STA, create/select the proper scope, construct the UI graph, assign typed dependencies, validate readiness, then publish/show it. |
+| Save / serialization | Do not serialize providers, scopes, runtime services, readiness state, registrations, or ownership records into code/resources. Prefer methods/private state; any exposed service property must have both appropriate browsing and `DesignerSerializationVisibility.Hidden` metadata. |
+| Load / deserialization | Existing CodeDOM/TypeDescriptor/DesignerHost paths continue; service-free instances are sufficient. Runtime-only assignment is not replayed from saved data. |
+| Rename | Existing site/change-service and code-generation operations remain authoritative. No runtime scope creation, service reassignment, or name-keyed lifetime record. |
+| Delete | Existing designer removal/disposal/transaction behavior remains. A design-time instance owns no runtime service scope to tear down. |
+| Reload / unload | Dispose/recreate normal design-time graphs; do not preserve application providers, runtime-assignment flags, or old object references between sessions. |
+| Undo / redo | Normal serialization/restoration and removal remain sufficient; restored instances do not cause service resolution or require provider state from the removed object. |
+| Base/derived forms and controls | Every designable base must support service-free creation. Base and derived `InitializeComponent` retain their existing construction order and ownership; private/read-only inherited members are not rewritten. Runtime assignment occurs after construction, once per participating layer. |
+
+An inherited form whose base requires constructor services cannot be made designable merely by
+adding a parameterless constructor to the derived form. A constructor-DI runtime overload can
+delegate layout initialization to a service-free constructor, but required dependencies must be
+validated on the explicit runtime path. Do not call a virtual injection method from a constructor,
+initialize the same base twice, or resolve services inside designer-visible property getters.
+
+Design-time absence is intentional, not evidence that a required runtime dependency is optional.
+`Site.DesignMode`, ancestor site checks, and license usage describe parts of the Designer context;
+none replaces the explicit separation of service-free construction and runtime composition.
+
+### Out-of-process agreement still required
+
+The local evidence does not establish a supported extension point inside Visual Studio's private
+Designer server/code-generation pipeline. Before choosing generated hookup or changing designer
+contracts, the Designer team must agree:
+
+- where and when opt-in metadata is inspected in the server, including inherited/nested objects;
+- how design-only construction remains independent of application service registration;
+- whether assignment requires generated code at all, and how C#/VB ownership/round trips work;
+- which runtime-only state is hidden from the property browser, serialization, and undo stores;
+- how drag/drop, rename, delete, reload, undo/redo, and inheritance are exercised in real OOP tests;
+- supported SDK/Visual Studio/target-architecture combinations and actionable design-time errors.
+
+No application provider, service instance, or scope is serialized through client/server proxies.
+No Designer-team agreement, successful Visual Studio exercise, or new Designer compatibility
+guarantee is claimed here.
+
+## Prototype checks and child-issue boundaries
+
+The following are acceptance inputs for later issues, not tests or features added in this issue.
+Each child remains independently implemented and reviewed.
+
+| Owning issue | Required follow-up |
+|---|---|
+| [dotnet/winforms#14949](https://github.com/dotnet/winforms/issues/14949) | Compare a minimal explicit factory/typed callback against a provider-assignment prototype. Prove service-free design construction, constructor selection without missing-service fallback, assignment timing, base/derived behavior, and the most-derived disposal seam. Decide/document async-only support before finalizing APIs. |
+| [dotnet/winforms#14950](https://github.com/dotnet/winforms/issues/14950) | Implement the application/form/modal ownership records, parent-bounded cleanup, borrowed child participation, thread checks, and the pre-UI-completion cleanup seam. Prove dialog/form/scope ownership has no competing disposers. |
+| [dotnet/winforms#14951](https://github.com/dotnet/winforms/issues/14951) | Agree OOP contracts with the Designer team and validate actual C#/VB drag/drop, save/load, rename, delete, reload, undo/redo, inherited forms/controls, and non-builder compatibility. Add generation only if the validated approach requires it. |
+| [dotnet/winforms#14952](https://github.com/dotnet/winforms/issues/14952) | Add deterministic activation/readiness/missing-service tests; same-form shared dependencies versus distinct form/dialog scopes; child-before-owner disposal; close veto/hide/handle recreation; context main-form replacement; direct/unshown/repeated disposal; constructor/assignment/show/scope/disposal failures; and actual designer serialization exclusions. Tests accompanying earlier functional changes still belong with those changes. |
+| [dotnet/winforms#14953](https://github.com/dotnet/winforms/issues/14953) | Add C#/VB examples of runtime constructor injection, explicit typed assignment to designer children/components, modeless/modal lifetimes, context navigation, cancellation, and disposal observation. Explain owner-state borrowing versus independent modal scoped instances. |
+| [dotnet/winforms#14954](https://github.com/dotnet/winforms/issues/14954) | Execute thousands of create/show/close/dispose cycles; track scope/service disposal, weak references, memory, USER/GDI/native handles, event subscriptions, and owner registries on both loop backends. Distinguish legacy baselines from DI-attributable growth. |
+
+Compatibility coverage must include an application with no builder/DI and an existing builder
+application with no scoped-activation opt-in. Parameterless constructors are still legitimate
+runtime constructors there; the missing-service failure rule applies to the explicitly selected
+DI path, not to all WinForms objects.
+
+The unresolved resource growth and hosted retention recorded by
+[dotnet/winforms#14946](https://github.com/dotnet/winforms/issues/14946) remain separate baseline
+findings. This document neither fixes them nor treats their presence as proof of a DI leak.
+Likewise, it does not close the host/lifetime stream's pending API, CI, or environment acceptance.
+
+## Internal contract prototype (dotnet/winforms#14949)
+
+The prototype implements the factory/callback alternative without adding public API or selecting
+`IServiceProviderAssignable`. It is available to the runtime and friend test assemblies, not to
+application code. It does not change `Form`, `UserControl`, `Component`, or Designer generation.
+
+### Implemented boundary
+
+- Internal `WinFormsApplicationBuilder.UseStartupFormFactory(Func<IServiceProvider, Form>)` selects
+  an explicitly host-backed startup path. Build requires a host selection but does not invoke the
+  factory. The factory runs on the caller-owned STA after host startup and WinForms synchronization
+  context installation. Disposing an unrun application does not invoke it.
+- Internal `WinFormsServiceActivation.Create` accepts a borrowed provider, an explicit constructor
+  factory, and an optional assignment callback. Constructor choice belongs to the factory; it
+  never retries the parameterless constructor after failed required-service resolution.
+- `Create` rejects null results and validates an existing control handle's thread ownership,
+  control disposal, and design-time state before accepting the returned object. A handleless
+  control/nonvisual component's construction thread cannot be established from the component
+  model; creating fresh instances on the activation STA is a caller obligation, not inferred
+  cross-thread safety. If its assignment callback subsequently fails, it
+  attempts disposal of that owned UI result. Independent assignment/disposal failures are both
+  surfaced. A constructor/factory that throws before returning an object still owns its partial
+  allocations; the helper cannot recover an object it never received.
+- Internal `Assign` initializes an existing component through an explicit callback. Ownership
+  stays with the caller/parent container, including when assignment fails. The callback receives
+  the provider at the composition boundary; the target receives typed dependencies, not a provider.
+  A parent factory can assign its existing `InitializeComponent` children without recreating them.
+- Design-time activation is rejected using the current license usage mode before invoking a
+  factory, and using target/ancestor designer sites before invoking an assignment callback.
+  These guards supplement the explicit runtime path; they are not a universal design-mode detector.
+- Required versus optional resolution is explicit in the callback. Typed receivers enforce their
+  own single-assignment/readiness rules, including a separate assigned flag when null is a valid
+  optional value. `IComponent` has no universal disposed/readiness contract: the helper can check
+  `Control.IsDisposed`, but nonvisual receivers must enforce their own disposed-state checks.
+- Existing generic/instance/context selections remain service-free. No existing public overload
+  changes meaning, no service provider is put on a control/site, and no global instance table,
+  property scanning, automatic graph traversal, or new service container is introduced.
+
+### Why not the other contract shapes?
+
+| Candidate | Prototype conclusion |
+|---|---|
+| Factory plus explicit typed assignment | Selected internally: construction, optionality, failure cleanup, and ownership are visible at the composition root. Designer-created child objects are preserved. |
+| Provider-assignment interface | Adds a public implementation obligation without solving ownership/readiness; storing it on a control also exposes general service lookup. The prototype needs no such interface. Reconsider only with a demonstrated scenario that cannot use a typed callback. |
+| Universal constructor/property injection | Rejected: the former changes design-time creation requirements; the latter needs reflection, conventions, or generated member discovery. The prototype deliberately makes neither change. |
+| Generated hookup | Not required for explicit assignment. Source generation and OOP contract changes remain subject to Designer-team agreement in dotnet/winforms#14951. |
+
+### Disposal and async boundary
+
+The helper owns only a successfully accepted factory result until it returns that result to the
+caller. It does not dispose borrowed services, create/dispose scopes, or attach a scope-disposal
+handler to `Disposed`. After successful activation, existing runner/control/container ownership
+disposes UI; the supplying host/provider still owns its dependencies. Therefore dependencies remain
+available to most-derived UI cleanup, including code after `base.Dispose`, until provider disposal.
+
+This resolves the prototype's service-assignment ownership boundary, not the general form-scope
+problem. The tests exercise that ordering for startup UI; a future per-form scope must find a safe
+boundary for direct `Dispose` and inherited overrides before adopting the same guarantee.
+
+Async-only dependencies can be borrowed like other dependencies: this prototype performs no service
+disposal and makes no synchronous scope-disposal promise. A caller-owned provider retains its
+normal disposal obligations. UI scopes, async service-cleanup coordination, modal/modeless tracking,
+navigation, and parent-child cancellation remain dotnet/winforms#14950 work. No async public API is
+approved by this step.
+
+### Validation and limitations
+
+Focused runtime checks cover deferred activation, real host startup, STA/synchronization context,
+required/optional dependencies, existing child/control/component assignment, service ownership,
+factory/assignment failures, independent cleanup errors, and invalid activation targets.
+Both message-loop backends are exercised for the hosted success/failure paths.
+
+Local Designer checks use the real `DesignSurface`, toolbox, site rename/delete, undo/redo,
+reload, and component serialization infrastructure. They verify service-free nested/inherited
+control construction, rejected runtime assignment to designer-owned instances, and omission of
+runtime-only service properties while ordinary layout state round-trips. These checks live in the
+runtime unit-test assembly, which already has internal runtime access, and use public Designer
+infrastructure; no new friend-assembly grant is required.
+
+Local validation (Debug, x64):
+
+```powershell
+.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal
+```
+
+Result: passed, zero warnings and zero errors.
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.Tests\Debug\net11.0-windows7.0\System.Windows.Forms.Tests.exe `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationDesignerTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationBuilderTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationLifetimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationRuntimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationHostingTests' `
+  --no-progress --report-trx
+```
+
+Result: 129 passed, zero failed, zero skipped. This includes the new runtime and local Designer
+checks alongside the existing builder, lifetime, runtime, and hosting regression tests.
+Targeted product/test `dotnet format whitespace --no-restore --verify-no-changes` checks also passed.
+
+These are not actual Visual Studio OOP tests or generated C#/VB round-trip certification.
+Designer-team agreement, drag/drop interaction in Visual Studio, and real C#/VB save/load,
+rename/delete/reload/undo/redo remain dotnet/winforms#14951 acceptance work. Comprehensive scope
+tests, samples, and leak testing remain with their assigned later issues. Remote CI must be
+verified separately; local build/test results do not imply CI success.
+
+## Scope-aware activation (dotnet/winforms#14950)
+
+This step extends the internal prototype, not the public API surface. New internal builder
+selections `UseScopedStartupForm` and `UseScopedApplicationContext` explicitly opt into synchronous
+UI scope ownership. They require a host and remain deferred through Build. Existing startup,
+context, and unscoped service factories keep their previous behavior, including the unscoped
+prototype's post-base-disposal service availability.
+
+### Owners and activation
+
+`WinFormsUiScope` borrows the host provider and owns one application service scope plus explicit
+form lifetime records. A context factory receives the application-scope provider and coordinator
+only at the composition boundary. Typed navigation callbacks can capture the coordinator without
+putting a general service provider on controls. Context replacement of `MainForm` neither merges
+nor loses independently tracked form scopes, including unshown or hidden forms.
+An initial non-null `MainForm` must come from this coordinator's `CreateForm`; an invalid foreign
+context/form is rejected without taking its ownership. Its factory retains cleanup responsibility.
+
+`CreateForm` creates a fresh DI scope and invokes the explicit constructor factory. Its
+`WinFormsFormScope` owns the returned form and that scope. An optional owner record defines logical
+nesting, independently of the flat DI container. Factories must return fresh, hidden, top-level,
+caller-STA-owned forms, never container-owned UI or a previously registered form. A handleless
+form's construction thread still cannot be inferred. No service-free constructor fallback occurs.
+
+The lifetime's `Assign` callback borrows the form provider for already-created UserControls and
+components. It rejects controls attached to another form or previously assigned by another lifetime.
+A control's sparse property store holds only an opaque ownership token, not a provider or lifetime
+record; this also prevents explicit reassignment after unmanaged reparenting without retaining
+disposed scopes. Construction and container/parent
+ownership of those objects remain explicit, as in the previous prototype; typed receivers enforce
+readiness and once-only assignment. No additional child-control or component scope is created.
+Unmanaged reparenting, native owner changes, and raw `new`/`Show`/`ShowDialog` calls do not establish
+or migrate coordinator ownership. Cross-form borrowing requires an explicitly passed typed
+collaborator; it must not be inferred from parent containers.
+
+### Selected disposal boundary
+
+The selected scoped-form contract is **base-last disposal**: every derived form override must finish
+service-dependent cleanup before calling `base.Dispose(disposing)`, and must reach that base call.
+The internal, per-instance `Form.RuntimeDispose` hook runs only for opted-in forms and wraps the
+existing Form disposal body. The hook uses the existing sparse property store, not an extra
+instance field on every legacy form. It does not subscribe to `FormClosed`, `HandleDestroyed`, or `Disposed`.
+The original disposal body is unchanged for all other forms.
+
+This choice supports ordinary modeless `Close` and direct `Form.Dispose`, including unshown forms.
+A canceled close, hide, or handle recreation does not dispose a scope. The hook disposes tracked
+descendants, attempts normal form/control/component teardown, and then disposes services on the
+owning STA. Derived parent cleanup before the hook can precede child teardown; dependencies remain
+alive during that cleanup. Child service scopes complete before the parent service scope.
+The hook is detached and ownership records are removed when their lifetime completes.
+
+This is not a guarantee for arbitrary code after a derived form's base call. A base Form method
+cannot observe completion of an arbitrary most-derived override. Deferring to a posted callback
+would depend on dispatcher lifetime and could run early under reentrant message pumping; using
+only an external wrapper would not cover normal window-close/direct-dispose paths. These
+alternatives were rejected for this synchronous opt-in stage. The convention must be revisited
+before approving public scoped-activation APIs; existing unscoped forms are not opted in silently.
+
+If a derived override throws before reaching base disposal, coordinator-driven cleanup still
+attempts descendants and scope cleanup, and reports the UI error. It cannot repair arbitrary
+partial user cleanup or promise that the UI object became fully disposed. Likewise, a container
+disposer can stop that container's internal cleanup; independent form scopes are still attempted.
+
+### Modal nesting and shutdown
+
+`WinFormsFormScope.ShowDialog` owns one invocation and always attempts form/scope cleanup after
+the invocation returns or fails. A new invocation requires a new lifetime. Reentering an already
+active modal invocation is rejected without tearing it down.
+
+If an owner is disposed programmatically while a nested modal call is active, descendant UI is
+disposed to unwind the modal loop, but its service scope stays live until the call returns.
+Disposed ancestor scopes are retained until those descendant invocations unwind, then released
+child-first. Thus a dialog's logical scope cannot outlive its owner scope, even when native owner
+UI has already gone away. No blocking wait or timer is introduced into disposal.
+
+Application stopping rejects new activation. After the runner has unwound its loops and disposed
+the context, coordinator cleanup also covers hidden/unshown and independent forms. Application
+scope cleanup precedes the existing UI-completion signal and host disposal. The host still owns
+root services; the coordinator never disposes the root provider.
+
+### Synchronous service-cleanup boundary
+
+Owned scopes support synchronous `IDisposable` dependencies. Async-only disposable services are
+unsupported in these scopes: the container's synchronous-disposal exception is surfaced. There
+is no blocking `DisposeAsync`, hidden thread-pool disposal of UI-affine services, or silent skip.
+The container may mark a scope disposed before throwing and cannot be repaired by retrying it;
+the application must correct the unsupported registration. Borrowing async-only dependencies
+from an externally owned provider in the unscoped prototype remains a separate supported scenario.
+
+A future asynchronous lifetime contract must specify dispatcher affinity and parent/child
+completion before it can replace this boundary. This step does not introduce that public contract.
+
+### Validation and remaining work
+
+Focused checks accompany this implementation: distinct scoped identities and borrowed children,
+direct/unshown disposal, descendant cleanup, close veto/hide/handle recreation, modal return and
+owner-triggered unwind, context navigation, cancellation, stopping guards, scope/factory/show/
+disposal failures, and explicit async-only rejection. Hosted modal/navigation/cancellation paths
+exercise both message-loop backends.
+
+Local validation (Debug, x64):
+
+```powershell
+.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal
+```
+
+Result: passed with zero warnings and zero errors.
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.Tests\Debug\net11.0-windows7.0\System.Windows.Forms.Tests.exe `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsUiScopeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationDesignerTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationBuilderTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationLifetimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationRuntimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationHostingTests' `
+  --no-progress --report-trx
+```
+
+Result: 150 passed, zero failed, zero skipped (21 new scope cases and 129 existing regression cases).
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.Tests\Debug\net11.0-windows7.0\System.Windows.Forms.Tests.exe `
+  --filter-class 'System.Windows.Forms.Tests.FormTests' `
+  --filter-method '*Dispose*' --filter-method '*Close*' --no-progress --report-trx
+```
+
+Result: both matching existing Form regression cases passed, zero failed or skipped.
+Targeted product/test `dotnet format whitespace --no-restore --verify-no-changes` and
+`git diff --check` also passed. No full-suite, architecture-matrix, leak, or Visual Studio
+validation is claimed by these targeted runs.
+
+Remote CI, actual OOP Designer agreement/integration (dotnet/winforms#14951), broader scope tests
+(dotnet/winforms#14952), C#/VB samples (dotnet/winforms#14953), and dedicated leak runs
+(dotnet/winforms#14954) remain separate acceptance work. No success for these is implied here.
+
+## Designer integration boundary (dotnet/winforms#14951)
+
+Status: local integration checks and a proposed Designer agreement, **not completed OOP
+integration or approval of a public DI contract**. The baseline is `eb49b41d7`. Both activation
+contracts and scope APIs are still internal; this step must not invent a public marker, assignment
+interface, generated call, or private Visual Studio extension point to work around that gate.
+
+### Recognition and generated-code decision
+
+The selected explicit-factory contract needs no DI-specific Designer recognition. The Designer
+recognizes the existing designable type, service-free constructor, ordinary layout properties,
+sites, and inheritance metadata. Runtime factories and typed assignment callbacks belong to
+user-owned composition code outside `InitializeComponent`. Required runtime dependencies still
+fail on the explicit runtime path; service-free construction is an intentional design-time path,
+not a missing-service fallback.
+
+Keep the existing generated-code behavior in both languages:
+
+- Generate ordinary parameterless construction and layout initialization.
+- Do not generate host construction, service resolution, provider assignment, scope creation,
+  runtime readiness flags, or cleanup-hook assignments.
+- Leave inherited layout construction to the base form/control. Do not duplicate inherited
+  objects or rewrite their inaccessible initialization.
+- Persist layout changes and normal component identity/name references. Runtime service
+  properties must remain non-browsable and serialization-hidden; internal sparse-store ownership
+  tokens and the Form cleanup hook are not designable properties.
+- Use normal rename/remove, serialization, undo/redo, and reload services. Do not introduce a
+  parallel name-keyed runtime registry or change generated code for non-builder applications.
+
+No product serializer or code generator is changed for a contract that deliberately needs no new
+generated code. Regression checks use the runtime test assembly's existing internal access and
+the public local Designer infrastructure; no new friend-assembly grant or dependency is added.
+
+### Local integration checks
+
+The extended `WinFormsServiceActivationDesignerTests` exercise:
+
+| Boundary | Local evidence |
+|---|---|
+| Constructor-time scope isolation | A real design-host-created component attempts both runtime activation and UI coordinator creation before normal siting; the license guard must reject both before provider access. |
+| Local generated document load/save | `CodeDomDesignerLoader` loads an in-memory document, toolbox creation adds a designable control, and flush uses the actual type/component serializers and C# or VB code generator. Generated construction uses zero constructor arguments and contains no runtime activation code. |
+| Rename, removal, undo/redo, reload | A committed rename transaction preserves instance identity through undo/redo; saved names and layout survive loader-scheduled reload; the Designer Delete command and undo/redo reconstruct service-free instances, and removal is reflected in the next generated document. |
+| Inherited forms/controls | A real protected base-form control remains inherited, service-free, and parented to the recreated root. The base and control both offer explicit typed runtime constructors without requiring them in the Designer. |
+| Runtime state exclusion | Serializing actual scoped runtime Form/UserControl instances omits cleanup hooks, assigned services, and opaque child-ownership tokens. A deserialized child can be explicitly assigned to a fresh scope without inheriting the old identity. |
+| Non-builder behavior | The local Designer document and toolbox/undo/reload operations run with no application builder, host, or registered runtime services. Existing builder/runtime regressions remain separate checks. |
+
+The local loader's `Parse` method supplies an existing CodeDOM tree. It does **not** parse emitted
+C#/VB text, compile it, run Visual Studio, simulate pointer-driven drag/drop, or exercise the OOP
+Roslyn/proxy pipeline. C#/VB code generation plus a CodeDOM reload must not be reported as a
+Visual Studio source round trip.
+
+### Local validation (Debug, x64)
+
+```powershell
+.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal
+```
+
+Result: passed with zero warnings and zero errors.
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.Tests\Debug\net11.0-windows7.0\System.Windows.Forms.Tests.exe `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsUiScopeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationDesignerTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationBuilderTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationLifetimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationRuntimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationHostingTests' `
+  --no-progress --report-trx
+```
+
+Result: 156 passed, zero failed, zero skipped. This includes all 11 local Designer cases,
+six of which are new theory cases, alongside the scope, activation, builder, lifetime,
+runtime, and hosting regression checks. Loader reload is driven by an explicitly raised
+idle event after scheduling, without sleeps or timing-based assertions.
+
+```powershell
+.\.dotnet\dotnet.exe format whitespace src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj --no-restore --verify-no-changes --include src\test\unit\System.Windows.Forms\Microsoft\Extensions\WinForms\WinFormsServiceActivationDesignerTests.cs --verbosity quiet
+git diff --check
+```
+
+Result: both passed. These targeted results do not imply a full-suite, architecture-matrix,
+Visual Studio OOP, or remote CI pass.
+
+### Designer-team agreement and external acceptance
+
+The following decisions need an explicit recorded Designer-team agreement before this issue can
+be closed or a public activation contract approved:
+
+1. Confirm that explicit composition remains outside generated code and needs no new Designer
+   marker, server service, or client/server payload. If a new hook is required, agree its public
+   contract and server-side placement before implementing it.
+2. Confirm service-free construction throughout designable inheritance chains and the exclusion
+   of runtime services/ownership from property browsing, serialization, and undo stores.
+3. Review the scoped-form base-last disposal requirement separately from the Designer's ordinary
+   generated Dispose pattern. Do not imply support for arbitrary derived cleanup after base.
+4. Select supported SDK, Visual Studio, language, and target-architecture combinations and the
+   Designer-owned harness/approved API through which actual scoped activation can be exercised.
+   The current internal prototypes cannot be called by an ordinary application.
+
+For each agreed C#/VB environment, record the versions, architecture, commands, results, and
+before/after source diff for this manual OOP acceptance sequence:
+
+1. Open a service-free and a DI-enabled inherited Form/UserControl in the actual OOP Designer.
+   Verify required runtime services are absent without causing construction/provider access.
+2. Drag/drop a nested control and nonvisual component. Modify ordinary layout, save, close, and
+   reopen. Inspect generated source/resources for service/provider/scope/readiness leakage.
+3. Rename, remove, undo, redo, and reload the added objects. Verify generated identifiers, event
+   hookups, parent relationships, and private/protected inherited layout remain correct.
+4. Run through the agreed runtime activation harness. Verify typed assignment happens once after
+   layout construction, required-service failures surface, and design-only state is not replayed.
+5. Repeat with an application that uses no builder/DI and confirm ordinary Designer/runtime
+   workflows remain unchanged.
+
+Remote CI results and those actual OOP outcomes must be attached separately. Local tests do not
+provide team approval or CI evidence. dotnet/winforms#14951 stays open until these gates are met;
+do not automatically advance to dotnet/winforms#14952.
+
+## DI and scope regression coverage (dotnet/winforms#14952)
+
+This step extends tests for the committed internal prototype at `75eada5c9`; it does not approve
+the public contract or close the preceding Designer/OOP acceptance gates. Work proceeds on the
+user's explicit request for the next child issue, with those dependencies still recorded.
+No activation semantics, product API, samples, or leak infrastructure are added here.
+
+### Coverage and ownership
+
+The existing activation and Designer cases are reused rather than duplicated. Focused additions
+to `WinFormsUiScopeTests` cover the remaining runtime ownership and failure interactions:
+
+| Requirement | Coverage |
+|---|---|
+| Assignment and optional services | Existing activation tests cover explicit typed construction, required-service failure, optional null assignment, and receiver-enforced single assignment. New scope-assignment failure cases cover both UserControls and components, preserving the borrowed object, its form, and its usable scope after a callback throws. |
+| UserControl/component ownership | Existing direct-form disposal cases verify shared service identity and service availability during child cleanup. New cases dispose a nested UserControl subtree or a nonvisual component independently and verify that neither releases the form's shared services. |
+| Form activation and constructor failures | Existing factory/scope creation failures remain covered. New hosted cases throw from an actual typed Form constructor despite an available service-free constructor, preserve the original error, and release the scope before the host. Visible/non-top-level factory results are rejected and cleaned without poisoning subsequent activation. |
+| Modeless/modal/nested lifetimes | Existing real-loop cases cover modeless navigation, modal results, nested dialogs, owner disposal during nested modal execution, cancellation, and close veto. New modal descendant-cleanup failures must surface to the caller, restore the owner, and allow another child activation. |
+| Nested cleanup errors | New application/parent/child cleanup failures are all reported while siblings and grandchildren are still released, descendants precede ancestors, the host remains borrowed, and repeated disposal does not retry failed scopes. |
+| Reentrant activation | Disposing the coordinator inside a form factory must retain application services until the in-flight form is rejected and its UI/service cleanup completes. |
+| Inherited runtime forms | New derived/base cleanup checks verify the scoped base-last contract through the inheritance chain and the base-owned UserControl/component graph. Cleanup after `base.Dispose` remains unsupported for scoped form overrides. |
+| Design time and backward compatibility | The 11 existing local Designer cases cover constructor-time rejection, ordinary/inherited construction, C#/VB CodeDOM generation, serialization, rename/delete, undo/redo, and reload without a builder. Existing unscoped builder, runtime, lifetime, and hosting cases remain in the combined regression selection. |
+
+Repository-owned runtime integration tests use a real Generic Host, a dedicated caller STA,
+actual WinForms message loops, and both message-loop backends. They remain in the existing unit
+test assembly so the normal CI unit-test job executes them; a new integration-test application
+or test-only public API would duplicate infrastructure without improving this boundary.
+
+UI callbacks capture failures and close their owner in `finally` before rethrowing on the test
+thread. Service identity, disposal traces, and event-driven completion determine outcomes; no
+sleeps, allocation budgets, benchmark assertions, or external services are introduced.
+The existing STA join deadline is a hang guard, not a timing acceptance criterion.
+
+The public PR pipeline (`azure-pipelines-PR.yml` and `eng\pipelines\build-PR.yml`) defines x64/x86
+Debug/Release unit-test jobs. These cases are ordinary SDK-included test sources with no
+`IgnoreForCI`/`failing` exclusion. The existing arm64 leg does not execute these tests.
+No pipeline change is needed for discovery; passing remote runs must still be recorded separately.
+
+Closed-source Designer validation belongs to the Designer team: actual OOP server/proxy/Roslyn
+round trips, pointer-driven drag/drop, and supported Visual Studio/SDK/architecture combinations.
+The local Designer tests do not replace that ownership or provide approval/CI evidence.
+Public-contract and OOP gates remain as described under dotnet/winforms#14951.
+
+### Local validation (Debug, x64)
+
+```powershell
+.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal
+```
+
+Result: passed with zero warnings and zero errors.
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.Tests\Debug\net11.0-windows7.0\System.Windows.Forms.Tests.exe `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsUiScopeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsServiceActivationDesignerTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationBuilderTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationLifetimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationRuntimeTests' `
+  --filter-class 'System.Windows.Forms.Tests.WinFormsApplicationHostingTests' `
+  --no-progress --report-trx
+```
+
+Result: 169 passed, zero failed, zero skipped. This includes 34 scope cases (13 new),
+all 11 existing local Designer cases, and the activation/builder/lifetime/runtime/hosting
+regressions. Both message-loop backends pass the new hosted constructor and modal failure cases.
+
+```powershell
+.\.dotnet\dotnet.exe format whitespace src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj --no-restore --verify-no-changes --include src\test\unit\System.Windows.Forms\Microsoft\Extensions\WinForms\WinFormsUiScopeTests.cs --verbosity quiet
+git diff --check
+```
+
+Result: both passed. No full-suite, x86, Release, arm64, or Visual Studio OOP execution is claimed.
+Remote CI was not run or verified: these changes are local and GitHub CLI authentication is
+unavailable. The repository-owned tests are locally validated, but CI evidence and the recorded
+Designer-owned acceptance gates remain outstanding; local results alone do not close this issue.
+Samples and dedicated leak validation remain dotnet/winforms#14953 and dotnet/winforms#14954 work.
+
+## Repository-only DI/scopes samples (dotnet/winforms#14953)
+
+The user explicitly selected repository-only C#/VB samples with sample-specific friend access
+while the scoped APIs remain internal. The samples live in
+`src\test\integration\ApplicationBuilderScopes`; their README contains build/run instructions,
+interactive scenarios, and the external acceptance checklist. Both projects are registered in
+the solution and referenced by the existing UI integration-test project.
+
+The only product-source change is two strong-name-qualified `InternalsVisibleTo` grants for
+`ApplicationBuilderScopes.CSharp` and `ApplicationBuilderScopes.VisualBasic`. These grants expose
+internals to those repository assemblies, not just scoped activation members; they are an explicit
+prototype trade-off, not public API approval or an external consumption mechanism. Public API
+promotion, reflection-based access, spoofing an existing friend identity, and copying the scope
+coordinator were rejected. Once an approved public contract exists, migrate the samples and
+remove these grants.
+
+Both samples use the actual hosted application/coordinator. Explicit factories constructor-inject
+Forms, and typed callbacks assign the same scoped dependency to their ordinary Designer-created
+UserControls and container-owned components. The composition boundary owns navigation and logical
+parent relationships; controls never store a provider or create scopes. Independent modeless/modal
+windows, page replacement, cancellation, and UI-before-service/exactly-once disposal are observable
+through console diagnostics. Parameterless constructors and layout remain service-free. The
+existing base-last and synchronous-disposal boundaries still apply.
+
+The sample's `--classic`, `--light`, and `--dark` switches select initialization/color behavior;
+`--component-manager` selects the alternative message loop. Event-driven `--smoke` execution
+closes a modeless window, completes a modal dialog, navigates, and then closes or cancels the
+application. Each run checks all five created scoped sessions. This is not leak-trend evidence.
+No logging/configuration infrastructure, templates, public APIs, or leak harness is introduced.
+
+### Local validation (Debug, x64)
+
+```powershell
+.\build.cmd -projects src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj -verbosity minimal
+```
+
+Result: passed with zero warnings and zero errors, including both language samples.
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.UI.IntegrationTests\Debug\net11.0-windows7.0\System.Windows.Forms.UI.IntegrationTests.exe `
+  --filter-class 'System.Windows.Forms.UITests.WinFormsApplicationScopeSampleTests' `
+  --no-progress --report-trx
+```
+
+Result: 26 passed, zero failed, zero skipped. The 24 isolated-process cases cover both languages,
+three color selections, both message-loop backends, and normal/canceled completion. They verify
+typed assignment, navigation, modal/modeless completion, exactly-once service cleanup, and that
+UserControl/component/Form teardown precedes the corresponding service disposal.
+
+The other two cases load the actual sample Forms in a local `DesignSurface` without runtime
+services, create their UserControl/component types through `IDesignerHost`, and reconstruct those
+added objects through the actual CodeDOM serializers. Referenced-type resolution and in-memory
+ResX metadata are supplied explicitly. Serialization errors remain failures; no production
+serializer is changed and no legacy binary serialization is enabled. These checks do not save
+the root source document, parse/compile generated C#/VB text, or run Visual Studio OOP.
+
+```powershell
+.\.dotnet\dotnet.exe format whitespace src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj --no-restore --verify-no-changes --include-generated --include src\test\integration\ApplicationBuilderScopes src\test\integration\UIIntegrationTests\WinFormsApplicationScopeSampleTests.cs src\System.Windows.Forms\Properties\AssemblyInfo.cs --verbosity quiet
+git diff --check
+```
+
+Result: both passed. The test class is included in existing public x64/x86 integration-test jobs;
+the existing arm64 CI leg does not execute it. Remote CI has not been run or verified.
+
+### Remaining acceptance
+
+dotnet/winforms#14953 remains open pending actual Designer-team C#/VB OOP source round trips,
+interactive Classic/light/Dark appearance and DPI checks, native Windows ARM, Terminal Services
+including reconnect, representative slow-hardware execution, and remote CI evidence. Record
+versions, commands, results, and source diffs using the sample README checklist. The preceding
+public-contract/Designer agreement and CI gates remain open as well.
+
+Local prototype sample implementation is complete; external acceptance is not. Dedicated leak
+validation belongs to dotnet/winforms#14954 and is not started automatically.
+
+## Scoped UI retention probe (dotnet/winforms#14954)
+
+The committed sample baseline is `1e2662994`. The user's explicit request advances to the final
+DI/scopes child issue while prior Designer, manual/environment, and CI gates remain open.
+This step adds a dedicated `--stress` mode to the existing C# prototype executable, four short
+integration cases, and `MeasureScopes.ps1`. It does not change runtime scope semantics, approve a
+public API, or add another friend grant. The existing sample README documents commands and
+measurement boundaries.
+
+### Workload and comparison
+
+Each isolated process owns one real Generic Host, application scope, scoped dispatcher Form,
+and active application message loop. Every measured cycle creates a modeless parent, modeless
+child, and modal grandchild with distinct service scopes. Every Form owns two nested UserControls,
+a container-owned component, a Bitmap, and a Font. Components subscribe to a publisher that
+outlives the complete workload, and must unsubscribe before releasing their service.
+
+The **manual baseline** uses ordinary Form creation/Show/ShowDialog and explicit DI scope disposal.
+The **scoped proposal** uses the actual `WinFormsUiScope`/`WinFormsFormScope` factories, owner
+relationships, Show, ShowDialog, and Form disposal hook. Both use the same service/UI graph and
+host configuration. Scoped runs alternate explicit modeless child close with owner-triggered
+child cleanup; the manual reference explicitly cleans children before parents. This is not a
+before/after source-revision comparison or a claim that a pre-existing leak has been fixed.
+
+One cycle means three windows; the default run measures 1000 cycles after ten warmups in each of
+four processes (manual/scoped times light/component-manager), or 12000 measured windows total.
+Posting modal completion through the dispatcher provides actual message processing. Batches
+are posted from the long-lived context rather than capturing previous per-cycle graphs in
+dispatcher delegates. Native windows are checked immediately after disposal.
+
+### Checks and measurement limits
+
+Service disposal, component disposal/unsubscription, UI-before-service cleanup, and destroyed
+native Form windows are strict per-cycle invariants. At warmed checkpoints, a nonzero survivor
+count for measured Forms, controls, components, services, scoped providers, lifetime records, or
+graphics resources fails the process. Weak references are preallocated before warmup, and
+non-inlined cycle methods let their local strong references leave the stack before collection.
+Each checkpoint does collect/finalize/collect without sleeps or repeated collection retries.
+
+The probe observes the scoped provider supplied to the marker-service factory and the marker's
+exactly-once disposal. It does not replace/intercept the container's internal scope factory or
+claim an independent count of every container allocation. Bitmap/Font ownership is explicit and
+their disposal is attempted before base Form disposal; this does not inventory every native
+resource allocated by WinForms or the runtime.
+
+Managed heap, private bytes, kernel handles, GDI objects, and USER objects are process diagnostics
+sampled after warmup and every 100 cycles, including a partial final batch. Reporting objects
+retained for output contribute small bounded instrumentation overhead. Throughput/allocation
+measurements exclude checkpoint collections/sampling, startup, and shutdown; process allocations
+can include runtime/host threads. No machine-specific timing or memory pass budget is invented.
+Successful correctness checks alone do not prove absence of process-resource growth.
+
+Application/context/coordinator weak reachability after hosted shutdown is reported separately.
+It is not silently treated as success: any persistent retaining root needs investigation.
+The earlier lifetime benchmark's component-manager growth and hosted retention remain separate
+open findings. This workload deliberately holds one application dispatcher alive while cycling UI
+scopes; it cannot clear findings from repeatedly starting complete application lifetimes.
+
+Rejected alternatives: a new public/testing API or friend assembly just to run the probe; strong
+per-window diagnostic registries that manufacture retention; repeated fresh hosts that confound
+scope turnover with application startup; forced sleeps or thread-pool settings; and CI assertions
+against noisy elapsed times or global memory/handle counts. Only C# hosts this shared-runtime
+probe; existing C#/VB sample regressions remain the language-level checks.
+
+### Local correctness validation
+
+```powershell
+.\build.cmd -projects src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj -configuration Release -verbosity minimal
+```
+
+Result: passed with zero warnings and zero errors.
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.UI.IntegrationTests\Release\net11.0-windows7.0\System.Windows.Forms.UI.IntegrationTests.exe `
+  --filter-class 'System.Windows.Forms.UITests.WinFormsScopeStressTests' `
+  --filter-class 'System.Windows.Forms.UITests.WinFormsApplicationScopeSampleTests' `
+  --no-progress --report-trx
+```
+
+Result: 30 passed, zero failed, zero skipped: four new short stress cases and all 26 sample/local
+Designer regression cases. Stress cases cover both ownership modes/backends, disposed object
+counts, zero weak survivors/subscriptions, and a partial final checkpoint without timing budgets.
+The new source is included in existing public x64/x86 integration-test jobs; arm64 remains
+build-only there. Remote CI has not been run or verified.
+
+### Thousand-cycle local measurement
+
+```powershell
+.\src\test\integration\ApplicationBuilderScopes\MeasureScopes.ps1 -Configuration Release -Cycles 1000 -Warmup 10 -Interval 100
+```
+
+Result: all four isolated processes completed. Raw JSON, stdout/stderr, checkpoint CSVs, source
+revision/worktree state and `summary.csv` are in
+`artifacts\log\ScopeStress\20261030-170824`. Source was `1e2662994` plus this issue's working-tree
+changes, Release/x64, Windows build 26200, `.NET 12.0.0-alpha.1.26519.114`, non-Terminal-Services.
+
+| Backend | Ownership | Measured windows | Windows/second | Allocated bytes/window | Managed-heap delta, cycle 0 to 1000 | Kernel-handle delta |
+|---|---|---:|---:|---:|---:|---:|
+| Light | Manual baseline | 3000 | 15.303 | 16653.3 | +59968 | -16 |
+| Light | Scoped proposal | 3000 | 19.113 | 17777.6 | +59968 | -16 |
+| Component manager | Manual baseline | 3000 | 18.939 | 18019.5 | +47680 | -16 |
+| Component manager | Scoped proposal | 3000 | 15.538 | 19241.8 | +59968 | -18 |
+
+These are whole-workload observations, including weak tracking and actual modal/modeless UI work,
+not an approved throughput budget. Sequential run order, OS activity and tiered/runtime activity
+can affect differences; the light result does not establish that scoped activation is faster.
+No product performance or cleanup fix is claimed.
+
+Every process additionally completed 30 warmup windows: **3030 services and components disposed,
+6060 nested UserControls disposed, zero active subscriptions**, and zero tracked cycle survivors
+in all seven categories at every checkpoint. The application, context and coordinator weak
+references also cleared after shutdown in all four processes.
+
+GDI count was **45** and USER count **29** at every checkpoint in all four processes. Kernel
+handles declined rather than accumulating. Managed heap increased during early warming and then
+stayed near 1.50-1.52 MB from cycle 100 through cycle 1000, with small bounded report-object growth
+and collection fluctuations rather than a window-count-proportional retained graph.
+Private bytes fluctuated (roughly 19-29 MB) and ended 0.55-1.19 MB above the warmed baselines,
+below earlier peaks. Positive final memory deltas are reported, not reclassified as zero growth.
+
+No accumulating scoped UI objects, scope-provider retention, event subscribers, or GDI/USER trend
+was detected in this **single-application window-turnover workload**. This does not resolve the
+older repeated-application component-manager/hosted findings or prove leak freedom for arbitrary
+services, exceptional user cleanup, actual OOP Designer operations, or other environments.
+
+```powershell
+.\.dotnet\dotnet.exe format whitespace src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj --no-restore --verify-no-changes --include src\test\integration\ApplicationBuilderScopes\CSharp\ScopeStressProbe.cs src\test\integration\ApplicationBuilderScopes\CSharp\Program.cs src\test\integration\UIIntegrationTests\WinFormsScopeStressTests.cs --verbosity quiet
+git diff --check
+```
+
+Result: both passed. The measurement script itself completed the four-process run and persisted
+all reports. The earlier smoke iteration exposed repeated base Form disposal notifications in
+the manual reference; the probe Form now guards redundant disposal, and the final baseline and
+proposal use the same idempotent UI graph. No production disposal behavior was changed.
+
+### Remaining acceptance
+
+Local stress infrastructure and the requested thousand-cycle comparison are implemented and
+executed. Remote x64/x86 Debug/Release CI, native Windows ARM, Terminal Services, Designer/public
+contract approval, the sample's manual compatibility matrix, and the earlier repeated-application
+resource/retention investigation remain open. No remote CI success or overall
+dotnet/winforms#14947 completion is inferred from this result. This is the last child in the
+DI/scopes implementation sequence; no subsequent stream is started automatically.
+
+## Research completion
+
+This issue supplies a source-backed comparison, the recommended activation model, application/
+form/dialog/control/component/context ownership rules, disposal and failure constraints, designer
+operation requirements, inheritance rules, and explicit prototype/OOP approval gates.
+
+The original dotnet/winforms#14948 change was documentation-only and claimed no build/test/CI
+execution. The subsequent internal prototype above belongs exclusively to dotnet/winforms#14949.
+The separate dotnet/winforms#14950 section records the subsequent scope implementation.
+Designer integration remains with its owning child issue.

@@ -529,3 +529,10 @@ Existing integration CI discovers short correctness checks for the harness. It d
 shared-machine timing gates or claim remote/ARM/Terminal Services measurements. Resource trends
 and one-time cache growth must be interpreted against the matching warmed legacy baseline;
 shipping overhead budgets require representative workload evidence and owner approval.
+
+### Follow-on DI and UI-scope research
+
+The [DI and UI-scope research](winforms-application-builder-di-scopes.md) for
+dotnet/winforms#14948 evaluates runtime activation and designer-safe service assignment, including
+the scope-cleanup boundary that must precede the existing UI-completion/host-stop barrier.
+It is a recommendation for the next prototype, not an implemented DI or Designer contract.

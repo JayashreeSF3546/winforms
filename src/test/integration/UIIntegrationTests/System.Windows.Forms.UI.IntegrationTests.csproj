@@ -26,6 +26,8 @@
     <ProjectReference Include="..\System.Windows.Forms.IntegrationTests.Common\System.Windows.Forms.IntegrationTests.Common.csproj" />
     <ProjectReference Include="..\WinFormsApplicationBuilder\CSharp\WinFormsApplicationBuilder.CSharp.csproj" />
     <ProjectReference Include="..\WinFormsApplicationBuilder\VisualBasic\WinFormsApplicationBuilder.VisualBasic.vbproj" />
+    <ProjectReference Include="..\ApplicationBuilderScopes\CSharp\ApplicationBuilderScopes.CSharp.csproj" />
+    <ProjectReference Include="..\ApplicationBuilderScopes\VisualBasic\ApplicationBuilderScopes.VisualBasic.vbproj" />
     <ProjectReference Include="..\WinFormsApplicationLifetimePerformance\WinFormsApplicationLifetimePerformance.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 

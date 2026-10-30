@@ -30,6 +30,7 @@ public sealed class WinFormsApplication : IDisposable
     private readonly List<Exception> _exceptions = [];
     private WinFormsApplicationOptions? _options;
     private ApplicationContext? _context;
+    private WinFormsUiScope? _uiScopes;
     private Application.ThreadContext? _threadContext;
     private Control? _dispatcher;
     private Task _startupCancellationTask = Task.CompletedTask;
@@ -302,6 +303,19 @@ public sealed class WinFormsApplication : IDisposable
                 WinFormsApplicationOptions.ValidateStartupForm(form);
                 _context = new ApplicationContext(form);
             }
+            else if (options.ServiceFormFactory is { } factory)
+            {
+                IServiceProvider services = _host?.Services
+                    ?? throw new InvalidOperationException(SR.WinFormsApplication_ServiceActivationRequiresHost);
+                _context = new ApplicationContext(WinFormsServiceActivation.Create(services, factory));
+            }
+            else if (options.ScopedContextFactory is { } scopedFactory)
+            {
+                IServiceProvider services = _host?.Services
+                    ?? throw new InvalidOperationException(SR.WinFormsApplication_ServiceActivationRequiresHost);
+                _uiScopes = new WinFormsUiScope(services, () => StopRequested);
+                _context = _uiScopes.CreateContext(scopedFactory);
+            }
             else
             {
                 ApplicationContext context = options.ContextFactory!()
@@ -398,7 +412,13 @@ public sealed class WinFormsApplication : IDisposable
         }
         else if (startupForm is { IsDisposed: false })
         {
-            startupForm.Dispose();
+            CaptureFailure(startupForm.Dispose);
+        }
+
+        if (_uiScopes is { } scopes)
+        {
+            _uiScopes = null;
+            CaptureFailure(scopes.Dispose);
         }
     }
 
@@ -425,6 +445,7 @@ public sealed class WinFormsApplication : IDisposable
         SignalStopRequest();
         if (Thread.CurrentThread == _ownerThread)
         {
+            _uiScopes?.BeginStopping();
             CaptureFailure(Lifetime.NotifyStopping);
         }
         else

@@ -11519,6 +11519,11 @@ Cette opération non conforme s'est produite sur la trace de la pile :
         <target state="new">This Windows Forms application builder has already been built.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_DesignTimeServices">
+        <source>Runtime service activation cannot be used for design-time components.</source>
+        <target state="new">Runtime service activation cannot be used for design-time components.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_HostAlreadySelected">
         <source>A host builder has already been selected for this Windows Forms application.</source>
         <target state="new">A host builder has already been selected for this Windows Forms application.</target>
@@ -11534,9 +11539,19 @@ Cette opération non conforme s'est produite sur la trace de la pile :
         <target state="new">Select a startup form or application context before building the application.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_NullComponent">
+        <source>The runtime service activation factory returned null.</source>
+        <target state="new">The runtime service activation factory returned null.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_NullContext">
         <source>The application context factory returned null.</source>
         <target state="new">The application context factory returned null.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_ServiceActivationRequiresHost">
+        <source>The runtime service startup factory requires a host. Select a host builder with UseHost before building the application.</source>
+        <target state="new">The runtime service startup factory requires a host. Select a host builder with UseHost before building the application.</target>
         <note />
       </trans-unit>
       <trans-unit id="WinFormsApplication_StartupAlreadyActivated">
@@ -11552,6 +11567,26 @@ Cette opération non conforme s'est produite sur la trace de la pile :
       <trans-unit id="WinFormsApplication_SynchronizationContextUnavailable">
         <source>The Windows Forms application requires automatic synchronization-context installation and either a default context or a usable WindowsFormsSynchronizationContext owned by the current thread.</source>
         <target state="new">The Windows Forms application requires automatic synchronization-context installation and either a default context or a usable WindowsFormsSynchronizationContext owned by the current thread.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_UiActivationState">
+        <source>Scoped activation requires a fresh, hidden, top-level form and cannot reenter an active modal invocation.</source>
+        <target state="new">Scoped activation requires a fresh, hidden, top-level form and cannot reenter an active modal invocation.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_UiAlreadyOwned">
+        <source>The form already belongs to a UI service scope. Factories must create a fresh form.</source>
+        <target state="new">The form already belongs to a UI service scope. Factories must create a fresh form.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_UiStopping">
+        <source>New UI activation is not permitted after stopping begins.</source>
+        <target state="new">New UI activation is not permitted after stopping begins.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_UiWrongOwner">
+        <source>The UI lifetime or control belongs to another owner.</source>
+        <target state="new">The UI lifetime or control belongs to another owner.</target>
         <note />
       </trans-unit>
       <trans-unit id="WinFormsApplication_UnsupportedHostBuilder">

@@ -114,6 +114,7 @@ public partial class Form : ContainerControl
 
     private static readonly int s_propOwner = PropertyStore.CreateKey();
     private static readonly int s_propOwnedForms = PropertyStore.CreateKey();
+    private static readonly int s_propRuntimeDispose = PropertyStore.CreateKey();
     private static readonly int s_propMaximizedBounds = PropertyStore.CreateKey();
 
     private static readonly int s_propMinTrackSize = PropertyStore.CreateKey();
@@ -3513,6 +3514,24 @@ public partial class Form : ContainerControl
     ///  overrides this function, it must call the base implementation.
     /// </summary>
     protected override void Dispose(bool disposing)
+    {
+        if (disposing && RuntimeDispose is { } dispose)
+        {
+            dispose(() => DisposeCore(disposing: true));
+        }
+        else
+        {
+            DisposeCore(disposing);
+        }
+    }
+
+    internal Action<Action>? RuntimeDispose
+    {
+        get => Properties.GetValueOrDefault<Action<Action>>(s_propRuntimeDispose);
+        set => Properties.AddOrRemoveValue(s_propRuntimeDispose, value);
+    }
+
+    private void DisposeCore(bool disposing)
     {
         if (disposing)
         {
