@@ -18,6 +18,12 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args is ["--stress", ..])
+        {
+            ScopeStressProbe.Run(args[1..]);
+            return;
+        }
+
         bool smoke = false;
         bool cancel = false;
         bool componentManager = false;

@@ -100,4 +100,95 @@ Record versions, architecture, language, backend, source diffs, and results for 
    visual acceptance, or Designer-team approval.
 
 Public API approval and Designer/OOP agreement remain dotnet/winforms#14951 gates.
-Dedicated thousands-of-iterations/resource-trend testing belongs to dotnet/winforms#14954.
+## Dedicated scope stress probe (dotnet/winforms#14954)
+
+The C# executable also hosts a development-only `--stress` mode. It is separate from the
+interactive C#/VB sample and uses the existing friend grant; no new public API or friend assembly
+is introduced. It exercises the shared runtime scope implementation, not language-specific
+Designer generation. Run without a debugger on an otherwise quiet Windows desktop.
+
+```powershell
+.\build.cmd -projects src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj -configuration Release -verbosity minimal
+.\src\test\integration\ApplicationBuilderScopes\MeasureScopes.ps1
+```
+
+The script launches four isolated processes: manual/scoped ownership, each with light and
+component-manager message loops. Each process runs **10 warmup cycles and 1000 measured cycles**.
+One cycle creates/shows/closes/disposes three Forms: a modeless parent, modeless child, and
+modal grandchild. That is **3000 measured windows per process**, plus warmup. Windows appear
+automatically; do not interact with them.
+
+Raw stdout/stderr, JSON reports, checkpoint CSVs, source revision/worktree status, and a summary
+are saved under `artifacts\log\ScopeStress\<timestamp>`. Override `-Cycles`, `-Warmup`, `-Interval`
+or `-Configuration` as needed. The 20-minute per-process watchdog detects hangs, not acceptable
+application latency. Each command-line option is also available on the executable:
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\ApplicationBuilderScopes.CSharp\Release\net11.0\ApplicationBuilderScopes.CSharp.exe `
+  --stress --mode scoped --cycles 1000 --warmup 10 --interval 100
+```
+
+Add `--component-manager` or choose `--mode manual` for the matching baseline. Stdout contains
+`READY` after warmup and then a JSON report after application shutdown.
+
+### What the probe verifies
+
+- Every window has a fresh service scope, a scoped disposable service, two nested UserControls,
+  a container-owned component, a Bitmap, and a Font.
+- UI disposal must happen while the service is alive. Services/components/controls/Forms must
+  complete cleanup, and a long-lived publisher must have no remaining component subscription.
+  The publisher is exercised while components are live as well as after each cycle.
+- Every Form must actually be shown, then disposed with its native window destroyed. Modal
+  completion is posted through the dispatcher. Scoped cycles alternate explicitly closing a
+  modeless child and disposing it through its owner's close.
+- After collect/finalize/collect at each warmed checkpoint, all tracked cycle Forms, controls,
+  components, services, scoped providers, lifetime records, Bitmaps and Fonts must be collectible.
+  These are strict checks: a nonzero survivor count fails the process.
+- The final report separately records whether the application, context, and coordinator are
+  still weakly reachable immediately after hosted shutdown. Those are diagnostic fields, not
+  silently treated as a cleanup pass.
+
+The manual baseline uses ordinary `Show`/`ShowDialog` and explicit `IServiceScope` ownership,
+with the same service/UI graph and child-before-parent cleanup. Both modes use one real host,
+application scope, coordinator-owned dispatcher Form, and application message loop per process.
+Only measured windows bypass the coordinator in manual mode. This isolates repeated UI-scope
+turnover from repeatedly starting hosts/message loops; it is **not** a replacement for the
+separate application-lifetime benchmark or its outstanding component-manager growth investigation.
+The baseline is a manual reference, not a measurement of an older source revision or a claimed fix.
+
+### Interpreting resources and throughput
+
+The probe captures managed heap after full collection, private bytes, kernel handles, GDI objects,
+and USER objects after warmup and every 100 cycles (including a final partial batch). Weak-reference
+storage is allocated before warmup and holds no strong references to measured graphs. Checkpoint
+report objects themselves remain until output and contribute a small, bounded instrumentation
+cost. Scoped providers are tracked through the `IServiceProvider` passed to the scoped service
+factory; disposal counts refer to the marker service, not an instrumented replacement DI container.
+
+Batch elapsed time and process-wide allocated bytes exclude checkpoint collections/resource
+sampling, but include actual UI creation, dispatch, teardown, and scheduling overhead. Summary
+throughput is measured windows per second, not a first-frame/startup latency measurement.
+Initialization and host shutdown are outside measured batches. No sleeps, timing assertions,
+fixed memory thresholds, or machine-wide tuning are used.
+
+Review **all checkpoints**, not just the final delta. Sustained memory/native-resource growth or
+retained application objects requires investigation even if strict cycle cleanup passes.
+JIT/runtime/native caches and unrelated threads can affect process totals; a zero survivor count
+does not prove there is no native leak. Do not label a successful process or a short run
+"leak-free." Repeat matching configurations and retain reports before drawing conclusions.
+
+Four short cases in `WinFormsScopeStressTests` verify both modes/backends and checkpoint/cleanup
+semantics, including a partial final batch. Existing public integration-test jobs discover them;
+remote CI, native ARM, Terminal Services, Designer acceptance, and the previous stream's
+resource-growth findings remain separate gates.
+
+Local Release/x64 execution completed all four 1000-cycle processes (**12000 measured windows**,
+plus 120 warmup windows). All cycle weak survivors and subscriptions were zero; every process
+disposed 3030 services/components and 6060 nested UserControls. Application/context/coordinator
+weak references cleared after shutdown. GDI/USER counts stayed at 45/29 across all checkpoints;
+managed heap settled near 1.50-1.52 MB after early warming, and kernel handles did not accumulate.
+The Release build passed with zero warnings/errors and all **30** selected stress/sample tests
+passed. This workload did not reproduce the separate repeated-application growth findings.
+Full commands, resource deltas, throughput, limitations, and the raw artifact location are in
+`docs\design\winforms-application-builder-di-scopes.md`.

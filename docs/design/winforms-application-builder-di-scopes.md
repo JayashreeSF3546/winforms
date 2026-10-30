@@ -810,6 +810,151 @@ public-contract/Designer agreement and CI gates remain open as well.
 Local prototype sample implementation is complete; external acceptance is not. Dedicated leak
 validation belongs to dotnet/winforms#14954 and is not started automatically.
 
+## Scoped UI retention probe (dotnet/winforms#14954)
+
+The committed sample baseline is `1e2662994`. The user's explicit request advances to the final
+DI/scopes child issue while prior Designer, manual/environment, and CI gates remain open.
+This step adds a dedicated `--stress` mode to the existing C# prototype executable, four short
+integration cases, and `MeasureScopes.ps1`. It does not change runtime scope semantics, approve a
+public API, or add another friend grant. The existing sample README documents commands and
+measurement boundaries.
+
+### Workload and comparison
+
+Each isolated process owns one real Generic Host, application scope, scoped dispatcher Form,
+and active application message loop. Every measured cycle creates a modeless parent, modeless
+child, and modal grandchild with distinct service scopes. Every Form owns two nested UserControls,
+a container-owned component, a Bitmap, and a Font. Components subscribe to a publisher that
+outlives the complete workload, and must unsubscribe before releasing their service.
+
+The **manual baseline** uses ordinary Form creation/Show/ShowDialog and explicit DI scope disposal.
+The **scoped proposal** uses the actual `WinFormsUiScope`/`WinFormsFormScope` factories, owner
+relationships, Show, ShowDialog, and Form disposal hook. Both use the same service/UI graph and
+host configuration. Scoped runs alternate explicit modeless child close with owner-triggered
+child cleanup; the manual reference explicitly cleans children before parents. This is not a
+before/after source-revision comparison or a claim that a pre-existing leak has been fixed.
+
+One cycle means three windows; the default run measures 1000 cycles after ten warmups in each of
+four processes (manual/scoped times light/component-manager), or 12000 measured windows total.
+Posting modal completion through the dispatcher provides actual message processing. Batches
+are posted from the long-lived context rather than capturing previous per-cycle graphs in
+dispatcher delegates. Native windows are checked immediately after disposal.
+
+### Checks and measurement limits
+
+Service disposal, component disposal/unsubscription, UI-before-service cleanup, and destroyed
+native Form windows are strict per-cycle invariants. At warmed checkpoints, a nonzero survivor
+count for measured Forms, controls, components, services, scoped providers, lifetime records, or
+graphics resources fails the process. Weak references are preallocated before warmup, and
+non-inlined cycle methods let their local strong references leave the stack before collection.
+Each checkpoint does collect/finalize/collect without sleeps or repeated collection retries.
+
+The probe observes the scoped provider supplied to the marker-service factory and the marker's
+exactly-once disposal. It does not replace/intercept the container's internal scope factory or
+claim an independent count of every container allocation. Bitmap/Font ownership is explicit and
+their disposal is attempted before base Form disposal; this does not inventory every native
+resource allocated by WinForms or the runtime.
+
+Managed heap, private bytes, kernel handles, GDI objects, and USER objects are process diagnostics
+sampled after warmup and every 100 cycles, including a partial final batch. Reporting objects
+retained for output contribute small bounded instrumentation overhead. Throughput/allocation
+measurements exclude checkpoint collections/sampling, startup, and shutdown; process allocations
+can include runtime/host threads. No machine-specific timing or memory pass budget is invented.
+Successful correctness checks alone do not prove absence of process-resource growth.
+
+Application/context/coordinator weak reachability after hosted shutdown is reported separately.
+It is not silently treated as success: any persistent retaining root needs investigation.
+The earlier lifetime benchmark's component-manager growth and hosted retention remain separate
+open findings. This workload deliberately holds one application dispatcher alive while cycling UI
+scopes; it cannot clear findings from repeatedly starting complete application lifetimes.
+
+Rejected alternatives: a new public/testing API or friend assembly just to run the probe; strong
+per-window diagnostic registries that manufacture retention; repeated fresh hosts that confound
+scope turnover with application startup; forced sleeps or thread-pool settings; and CI assertions
+against noisy elapsed times or global memory/handle counts. Only C# hosts this shared-runtime
+probe; existing C#/VB sample regressions remain the language-level checks.
+
+### Local correctness validation
+
+```powershell
+.\build.cmd -projects src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj -configuration Release -verbosity minimal
+```
+
+Result: passed with zero warnings and zero errors.
+
+```powershell
+$env:DOTNET_ROOT=Join-Path $PWD '.dotnet'
+& .\artifacts\bin\System.Windows.Forms.UI.IntegrationTests\Release\net11.0-windows7.0\System.Windows.Forms.UI.IntegrationTests.exe `
+  --filter-class 'System.Windows.Forms.UITests.WinFormsScopeStressTests' `
+  --filter-class 'System.Windows.Forms.UITests.WinFormsApplicationScopeSampleTests' `
+  --no-progress --report-trx
+```
+
+Result: 30 passed, zero failed, zero skipped: four new short stress cases and all 26 sample/local
+Designer regression cases. Stress cases cover both ownership modes/backends, disposed object
+counts, zero weak survivors/subscriptions, and a partial final checkpoint without timing budgets.
+The new source is included in existing public x64/x86 integration-test jobs; arm64 remains
+build-only there. Remote CI has not been run or verified.
+
+### Thousand-cycle local measurement
+
+```powershell
+.\src\test\integration\ApplicationBuilderScopes\MeasureScopes.ps1 -Configuration Release -Cycles 1000 -Warmup 10 -Interval 100
+```
+
+Result: all four isolated processes completed. Raw JSON, stdout/stderr, checkpoint CSVs, source
+revision/worktree state and `summary.csv` are in
+`artifacts\log\ScopeStress\20261030-170824`. Source was `1e2662994` plus this issue's working-tree
+changes, Release/x64, Windows build 26200, `.NET 12.0.0-alpha.1.26519.114`, non-Terminal-Services.
+
+| Backend | Ownership | Measured windows | Windows/second | Allocated bytes/window | Managed-heap delta, cycle 0 to 1000 | Kernel-handle delta |
+|---|---|---:|---:|---:|---:|---:|
+| Light | Manual baseline | 3000 | 15.303 | 16653.3 | +59968 | -16 |
+| Light | Scoped proposal | 3000 | 19.113 | 17777.6 | +59968 | -16 |
+| Component manager | Manual baseline | 3000 | 18.939 | 18019.5 | +47680 | -16 |
+| Component manager | Scoped proposal | 3000 | 15.538 | 19241.8 | +59968 | -18 |
+
+These are whole-workload observations, including weak tracking and actual modal/modeless UI work,
+not an approved throughput budget. Sequential run order, OS activity and tiered/runtime activity
+can affect differences; the light result does not establish that scoped activation is faster.
+No product performance or cleanup fix is claimed.
+
+Every process additionally completed 30 warmup windows: **3030 services and components disposed,
+6060 nested UserControls disposed, zero active subscriptions**, and zero tracked cycle survivors
+in all seven categories at every checkpoint. The application, context and coordinator weak
+references also cleared after shutdown in all four processes.
+
+GDI count was **45** and USER count **29** at every checkpoint in all four processes. Kernel
+handles declined rather than accumulating. Managed heap increased during early warming and then
+stayed near 1.50-1.52 MB from cycle 100 through cycle 1000, with small bounded report-object growth
+and collection fluctuations rather than a window-count-proportional retained graph.
+Private bytes fluctuated (roughly 19-29 MB) and ended 0.55-1.19 MB above the warmed baselines,
+below earlier peaks. Positive final memory deltas are reported, not reclassified as zero growth.
+
+No accumulating scoped UI objects, scope-provider retention, event subscribers, or GDI/USER trend
+was detected in this **single-application window-turnover workload**. This does not resolve the
+older repeated-application component-manager/hosted findings or prove leak freedom for arbitrary
+services, exceptional user cleanup, actual OOP Designer operations, or other environments.
+
+```powershell
+.\.dotnet\dotnet.exe format whitespace src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj --no-restore --verify-no-changes --include src\test\integration\ApplicationBuilderScopes\CSharp\ScopeStressProbe.cs src\test\integration\ApplicationBuilderScopes\CSharp\Program.cs src\test\integration\UIIntegrationTests\WinFormsScopeStressTests.cs --verbosity quiet
+git diff --check
+```
+
+Result: both passed. The measurement script itself completed the four-process run and persisted
+all reports. The earlier smoke iteration exposed repeated base Form disposal notifications in
+the manual reference; the probe Form now guards redundant disposal, and the final baseline and
+proposal use the same idempotent UI graph. No production disposal behavior was changed.
+
+### Remaining acceptance
+
+Local stress infrastructure and the requested thousand-cycle comparison are implemented and
+executed. Remote x64/x86 Debug/Release CI, native Windows ARM, Terminal Services, Designer/public
+contract approval, the sample's manual compatibility matrix, and the earlier repeated-application
+resource/retention investigation remain open. No remote CI success or overall
+dotnet/winforms#14947 completion is inferred from this result. This is the last child in the
+DI/scopes implementation sequence; no subsequent stream is started automatically.
+
 ## Research completion
 
 This issue supplies a source-backed comparison, the recommended activation model, application/
