@@ -28,3 +28,27 @@ Microsoft.Extensions.WinForms.UserSettingsCommit.Settings.get -> System.Text.Jso
 Microsoft.Extensions.WinForms.UserSettingsCommit.NotificationCompletion.get -> System.Threading.Tasks.Task!
 Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs
 Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs.Commit.get -> Microsoft.Extensions.WinForms.UserSettingsCommit!
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.ApplicationStarted = 0 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.ApplicationStopping = 1 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.ApplicationStopped = 2 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.ThreadException = 3 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.AppDomainUnhandledException = 4 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.UnobservedTaskException = 5 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.RunFailure = 6 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsExceptionLogging
+static Microsoft.Extensions.WinForms.WinFormsExceptionLogging.Attach(Microsoft.Extensions.WinForms.WinFormsApplication! application, Microsoft.Extensions.Logging.ILogger! logger, System.Threading.ThreadExceptionEventHandler! handleThreadException, System.Action<Microsoft.Extensions.WinForms.WinFormsLoggingFailure!>! reportLoggingFailure, System.Action<Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions!>? configure = null) -> Microsoft.Extensions.WinForms.WinFormsExceptionLogging!
+Microsoft.Extensions.WinForms.WinFormsExceptionLogging.DiagnosticCompletion.get -> System.Threading.Tasks.Task!
+Microsoft.Extensions.WinForms.WinFormsExceptionLogging.LogRunFailure(System.Exception! exception) -> void
+Microsoft.Extensions.WinForms.WinFormsExceptionLogging.Dispose() -> void
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.WinFormsExceptionLoggingOptions() -> void
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.LogAppDomainExceptions.get -> bool
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.LogAppDomainExceptions.set -> void
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.LogUnobservedTaskExceptions.get -> bool
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.LogUnobservedTaskExceptions.set -> void
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.IncludeExceptionDetails.get -> bool
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.IncludeExceptionDetails.set -> void
+Microsoft.Extensions.WinForms.WinFormsLoggingFailure
+Microsoft.Extensions.WinForms.WinFormsLoggingFailure.Source.get -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsLoggingFailure.Exception.get -> System.Exception!

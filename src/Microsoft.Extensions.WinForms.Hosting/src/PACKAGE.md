@@ -1,14 +1,17 @@
 # Microsoft.Extensions.WinForms.Hosting
 
-Opt-in configuration defaults and typed user settings for the WinForms Application Builder. This is a separate application
+Opt-in configuration defaults, typed user settings, and exception logging for the WinForms Application Builder. This is a separate application
 NuGet dependency, not an addition to the WindowsDesktop shared framework. Existing WinForms
 applications and the hostless Application Builder do not acquire configuration providers.
 
 This package and its public API are prototypes tracked by
-[dotnet/winforms#14957](https://github.com/dotnet/winforms/issues/14957) and
-[dotnet/winforms#14958](https://github.com/dotnet/winforms/issues/14958), pending API/package review.
-It targets the repository's current framework and requires the matching Application Builder
-prototype for WinForms lifetime integration.
+[dotnet/winforms#14957](https://github.com/dotnet/winforms/issues/14957),
+[dotnet/winforms#14958](https://github.com/dotnet/winforms/issues/14958), and
+[dotnet/winforms#14959](https://github.com/dotnet/winforms/issues/14959), pending API/package review.
+It targets the repository's current Windows framework and declares the WindowsDesktop WinForms
+framework reference required by the lifetime-bound logging API. It requires the matching Application
+Builder prototype in the framework/runtime, not just this package. The framework's WinForms assembly
+is referenced privately for compilation; it is not bundled or added as a fictitious NuGet dependency.
 
 ## Configure an application
 
@@ -53,7 +56,7 @@ Dim hostBuilder As IHostBuilder = New HostBuilder().
 ```
 
 Pass the **unbuilt** host builder to `WinFormsApplicationBuilder.UseHost`. Do not separately call
-`Build`, `Run`, or `RunAsync` on that host. This package supplies configuration only: it does not
+`Build`, `Run`, or `RunAsync` on that host. The configuration extension supplies configuration only: it does not
 install console lifetime hooks, logging destinations, exception handlers, UI activation, a new
 container, or health polling. Configure those separately with their owning APIs. Container scope
 validation is an explicit application choice through `UseDefaultServiceProvider`.
@@ -259,3 +262,158 @@ exists, validates the mapped model, and commits it atomically. Repeated imports 
 invoking the mapping or overwriting preferences. A damaged existing modern store is an error,
 not permission to import again. This explicit typed mapping avoids adding a
 `System.Configuration.ConfigurationManager` dependency to the optional package.
+
+## Logging providers and explicit exception routing
+
+Use ordinary `ILogger<T>`, `ILoggerFactory`, category filters, structured message templates, and
+`BeginScope` in application services. No WinForms logger, file sink, exporter, or global provider is
+introduced. `ConfigureWinFormsConfiguration` does not add destinations. For example, select Debug
+explicitly with `hostBuilder.ConfigureLogging(logging => logging.ClearProviders().AddDebug())`;
+Console is also an explicit standard provider choice. Debug visibility depends on attached
+debugger/listener support; it is not a durable file or crash-reporting guarantee.
+
+`Host.CreateDefaultBuilder` selects its usual providers, including Console, Debug, EventSource, and
+Windows EventLog in the selected Hosting implementation. Clear/select them explicitly when using
+that alternative. The privacy defaults below apply to this adapter's messages, **not** to arbitrary
+application, Generic Host, or third-party logs.
+
+`WinFormsExceptionLogging.Attach` is a separate opt-in. It requires an application UI exception
+handler and an independent logging-failure fallback. Attach before `Run`, and dispose the returned
+scope even if the application never runs. One undisposed scope is allowed per application.
+
+- UI routing is installed on the owning thread at `ApplicationStarted`, after startup UI activation,
+  and removed at `ApplicationStopping`, before UI cleanup. Subscribing to `Application.ThreadException`
+  **replaces** both its previous handler and the built-in exception UI; this is not passive observation.
+  Supply the application's complete policy, including any existing handler logic. The scope does not
+  restore an unknown previous handler, show a dialog, select continue/recovery, change exception mode,
+  or independently stop the application. Do not install competing UI handlers during its run.
+  Startup UI paths occurring before ApplicationStarted retain the pre-existing application policy;
+  configure that policy explicitly before Run when needed. LogRunFailure reports propagated errors,
+  not startup exceptions that another handler has already handled.
+- CLR and unobserved-task subscriptions are separate options, disabled by default. When enabled they
+  begin at attachment and end at `ApplicationStopped` (before owned host disposal), or earlier disposal.
+  They are process-wide: overlapping applications each receive the same notification; a thread ID
+  identifies the reporting thread, not ownership of its exception by a particular application.
+- The adapter preserves CLR `IsTerminating` and never calls `SetObserved`. Neither reporting path
+  claims recovery, changes process termination, or restarts a worker. Task notifications may occur
+  during finalization and are not a substitute for observing tasks when executing them.
+- Lifecycle messages use Information; exception notifications use Error. Event IDs 1000-1006 identify
+  `WinFormsDiagnosticSource` values. Structured state contains `Source`, the last observed lifetime
+  `Phase`, `IsTerminating` (only meaningful for CLR notifications), and `ManagedThreadId`.
+- `IncludeExceptionDetails` defaults to false: the adapter passes no exception object, exception
+  message, stack trace, exception data, settings, or command-line values to the logger. Enabling it
+  explicitly forwards the original exception, which can contain private information.
+
+The logger/fallback are synchronous and must not wait for UI work or shutdown. Calls are serialized
+within a scope; disposal drains an in-flight report before releasing its subscriptions. A blocked
+provider can therefore delay disposal; this is not a timeout or forced-interruption mechanism.
+Ordinary filter/provider failures go to `reportLoggingFailure`, not back through the failed logger.
+The fallback must not throw, recursively use that logger, or automatically dump sensitive data.
+If it nevertheless fails, disposal faults the separate `DiagnosticCompletion` task with both failures.
+An ordinary logging/fallback failure cannot replace the original UI exception or escape a CLR/task
+callback. Critical failures and forced process termination cannot provide reliable diagnostics.
+Observe the completion task outside callbacks, and do not await it from inside a report.
+
+### Factory ownership and run failures
+
+Keep logging usable through startup, stopping, provider teardown, and failure reporting. A factory
+created by the host is host-owned and is disposed after `ApplicationStopped`. If logging an exception
+propagated from `Run`, create a caller-owned factory and register **that instance** with the host;
+keep it alive outside the application. `LogRunFailure` explicitly reports the Run boundary after
+subscriptions have ended; it neither catches nor reclassifies the original failure.
+
+```csharp
+using ILoggerFactory factory = LoggerFactory.Create(logging => logging.ClearProviders().AddDebug());
+ILogger logger = factory.CreateLogger("ExampleApp");
+IHostBuilder hostBuilder = new HostBuilder()
+    .ConfigureWinFormsConfiguration(args)
+    .ConfigureServices(services => services.AddSingleton(factory));
+using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+    .UseStartupForm<MainForm>()
+    .UseHost(hostBuilder)
+    .Build();
+using WinFormsExceptionLogging diagnostics = WinFormsExceptionLogging.Attach(
+    application, logger, HandleUiException, ReportLoggingFailure);
+
+ExceptionDispatchInfo? runFailure = null;
+try
+{
+    application.Run();
+}
+catch (Exception exception)
+{
+    diagnostics.LogRunFailure(exception);
+    runFailure = ExceptionDispatchInfo.Capture(exception);
+}
+
+diagnostics.Dispose();
+if (diagnostics.DiagnosticCompletion.Exception is { } diagnosticFailure)
+{
+    if (runFailure is not null)
+    {
+        throw new AggregateException(runFailure.SourceException, diagnosticFailure);
+    }
+
+    throw diagnosticFailure;
+}
+
+runFailure?.Throw();
+```
+
+Import `Microsoft.Extensions.Logging` and `System.Runtime.ExceptionServices` in addition to the
+configuration example's namespaces. `MainForm`, `HandleUiException`, and `ReportLoggingFailure`
+are application-defined. The UI handler receives the original sender and `ThreadExceptionEventArgs`
+and selects the application's response. The fallback receives `WinFormsLoggingFailure`, whose
+exception is the **logging** failure, not the original UI/CLR/task exception. Error handling above
+observes fallback failures after disposal and preserves any original run failure when combining them.
+
+The same registration and opt-in switches work in VB:
+
+```vb
+Dim factory As ILoggerFactory = LoggerFactory.Create(
+    Sub(logging) logging.ClearProviders().AddDebug())
+Dim logger As ILogger = factory.CreateLogger("ExampleApp")
+hostBuilder.ConfigureServices(Sub(services) services.AddSingleton(factory))
+Dim diagnostics As WinFormsExceptionLogging = WinFormsExceptionLogging.Attach(
+    application, logger, AddressOf HandleUiException, AddressOf ReportLoggingFailure,
+    Sub(options)
+        options.LogAppDomainExceptions = True
+        options.LogUnobservedTaskExceptions = True
+        options.IncludeExceptionDetails = False
+    End Sub)
+```
+
+Create/register the factory before building the application. Apply the same caller ownership,
+Run-failure reporting, disposal, and completion-task observation as the C# example. Do not put a
+completion-task wait in a `Finally` block where its exception would replace an in-flight Run failure.
+
+`ILogger` has no universal flush API. Dispose owned factories/providers only after the application
+and diagnostic scope have finished. Caller-supplied provider instances remain caller-owned. A
+provider with an asynchronous flush API needs an explicit, awaited application shutdown participant;
+the existing synchronous host-disposal path does not automatically await it. Abnormal termination
+can lose logs, regardless of the notification's severity or `IsTerminating` value.
+
+### Optional file-provider guidance
+
+Select an established provider in the application, not in this package. For example,
+[`Serilog.Extensions.Logging`](https://github.com/serilog/serilog-extensions-logging) supplies
+`ILoggingBuilder.AddSerilog(fileLogger, dispose: false)`, and
+[`Serilog.Sinks.File`](https://github.com/serilog/serilog-sinks-file) supplies `WriteTo.File`.
+Select versions compatible with the application's Microsoft.Extensions dependencies. The optional
+WinForms package adds neither dependency nor a global `Serilog.Log.Logger`.
+
+Choose an absolute, writable log directory under the application's per-user Local Application Data
+folder, not the executable directory. Surface directory/permission failures; do not fall back to the
+working directory. Configure `rollingInterval`, `fileSizeLimitBytes`, `rollOnFileSizeLimit`, and
+`retainedFileCountLimit` deliberately. A size limit without size rolling can stop further output
+until the next roll. Retention is not an encryption or access-control guarantee.
+
+Multiple processes of the same user still need a policy: use documented shared-file support or
+independent paths with a retention policy covering the complete set. Other users should have separate
+profile roots. Review the provider's buffering, flush/disposal, full-disk, read-only, and internal
+diagnostic behavior. A sink can report failure through its own diagnostics instead of throwing from
+`ILogger`; the adapter's fallback cannot detect silent sink loss. Connect the provider's supported
+diagnostic mechanism to a separate application fallback without taking over another application's
+process-global diagnostic hook. Verify shutdown flushing and failure visibility with the selected
+provider. Real file-provider/deployment examples and expected manual results belong to
+[dotnet/winforms#14962](https://github.com/dotnet/winforms/issues/14962).

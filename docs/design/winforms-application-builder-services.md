@@ -541,6 +541,90 @@ multi-instance atomic writes, timeout/cancellation, and concurrent/reentrant not
   source files and `--verify-no-changes --verbosity quiet` passed. Relative documentation links,
   new-file whitespace/encoding checks, and `git diff --check` passed.
 
+## Logging/exception implementation (dotnet/winforms#14959)
+
+The optional package implements `WinFormsExceptionLogging.Attach` over the existing application
+lifetime and standard `ILogger`. Attachment is explicit, requires the application's complete UI
+exception policy and a separate provider-failure fallback, and does not modify the core runner,
+`Application.ThreadException`, unhandled-exception mode, host ownership, or UI scope contracts.
+UI subscription replaces the previous/default handler by the existing public event's semantics;
+it is not advertised as passive logging or preservation of unknown previous handlers.
+
+UI routing starts on the owning thread at ApplicationStarted and is removed at ApplicationStopping.
+It does not cover failed startup activation or route UI cleanup exceptions through a new handler.
+Optional CLR/task subscriptions start at attachment and end at ApplicationStopped, before provider
+disposal, including failed startup. Early disposal removes only that scope's handlers and rejects a
+foreign thread while UI routing remains attached. Repeated/overlapping applications own separate
+process-wide subscriptions; events are process-wide reports, not proof of application ownership.
+One undisposed scope is permitted per application to avoid competing UI routing.
+
+Structured messages carry source, latest observed phase, termination flag where available, and
+reporting thread ID. Exception objects/details are disabled by default. Standard logger category
+filters, destinations, and caller scopes remain application-controlled; this adapter cannot sanitize
+other application, host, or third-party logging. No file provider, network exporter, telemetry,
+settings dump, or global static service provider is selected.
+
+Synchronous reporting is serialized per scope and disposal drains an in-flight report. No UI
+marshalling, task observation, modal error UI, worker restart, or process recovery is added.
+Ordinary filter/provider failures reach the mandatory separate fallback. If the fallback itself
+fails, both errors are observable on DiagnosticCompletion after caller disposal, rather than
+replacing the original exception or recursively escaping an unhandled-exception callback.
+Reentrant disposal completes that task only after the active report returns. Arbitrary blocked
+providers, critical failures, and terminating processes cannot promise timely/reliable delivery.
+
+ApplicationStopped removes event roots while the host's logger is still alive. The caller owns the
+scope and its completion-task observation even when Run is never entered. Explicit LogRunFailure
+reports the outer Run boundary using a caller-owned logger/factory that outlives host disposal;
+the original Run exception still propagates or is explicitly handled. Standard Generic Host already
+logs hosted startup/service failures. No universal ILogger flush abstraction is invented; selected
+providers retain their own synchronous/asynchronous flush/disposal contracts.
+
+The package now targets the Windows TFM and declares its WindowsDesktop WinForms framework
+reference. A private project reference compiles against the matching prototype without bundling
+framework assemblies or emitting an unresolvable System.Windows.Forms NuGet dependency. Provider
+implementations remain an application NuGet dependency, not an addition to WindowsDesktop transport.
+API/package approval, especially this explicit framework requirement, remains an external gate.
+The current installed SDK reference pack lacks the prototype Application Builder APIs, so the
+package's build removes that pack's WinForms compile reference and uses the private repository
+project reference instead. This changes compilation, not deployment or the installed reference pack.
+
+Rejected alternatives are behavior-neutral claims for ThreadException subscription, silent
+continue/error-dialog policies, automatic global exception collection, default full exception
+disclosure, SetObserved/recovery on notification, a home-grown file logger, and hidden provider
+ownership/flush drivers. A new core observation API is deferred instead of expanding this child
+issue's runtime contracts. The package readme supplies C#/VB registration, provider/failure/privacy
+guidance, and normal/exceptional factory ownership. Remote CI, actual selected file-provider/manual
+deployment evidence, full samples, and resource budgets remain in the owning follow-up issues.
+
+### Local validation
+
+- `.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal -binaryLogName ExceptionLoggingTests.binlog`
+  passed with zero warnings and errors, including API and documentation analyzers.
+- `.\build.cmd -projects src\Microsoft.Extensions.WinForms.Hosting\src\Microsoft.Extensions.WinForms.Hosting.csproj -pack -verbosity minimal -binaryLogName ExceptionLoggingPackage.binlog`
+  passed with zero warnings and errors. The archive contains the Windows-targeted library/XML,
+  readme, and satellite resources, a normal Hosting 10.0.10 dependency, and an explicit
+  Microsoft.WindowsDesktop.App.WindowsForms framework reference. It neither bundles the WinForms
+  framework assembly nor declares a System.Windows.Forms NuGet dependency.
+- With `DOTNET_ROOT` and `PATH` selecting the repository's `.dotnet` runtime,
+  `.\artifacts\bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe --filter-class System.Windows.Forms.Tests.WinFormsExceptionLoggingTests --report-trx --results-directory "$PWD\artifacts\TestResults\ExceptionLogging" --output Minimal --timeout 3m`
+  passed: 19 tests, zero failures or skips. Coverage includes real UI routing and owned-provider
+  teardown, startup failure, privacy, filter/provider/fallback failure, process-wide subscription
+  ownership, termination/task semantics, wrong-thread/early/reentrant disposal, and in-flight drainage.
+  Synthetic event sources make CLR/task delivery deterministic without crashing or relying on GC;
+  real-run tests also exercise the public UI bridge and CLR/task subscription installation/removal.
+- With the same runtime environment,
+  `.\artifacts\bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe --filter-class 'System.Windows.Forms.Tests.WinForms*' --report-trx --results-directory "$PWD\artifacts\TestResults\ExceptionLoggingRegression" --output Minimal --timeout 4m`
+  passed: 244 tests, zero failures or skips, including the 19 logging cases and previous settings,
+  configuration, builder, lifetime, scope, and Designer-boundary regressions.
+- Independent C# and VB consumers restored the updated package into an isolated cache and passed
+  real UI routing, global opt-in installation/removal, explicit Run-boundary reporting, and completion.
+  The adapter was consumed through PackageReference without project references. The probes explicitly
+  supplied matching repository framework binaries and their aligned preview dependencies; they do
+  not prove compatibility with an unmodified installed reference/runtime pack or a full deployment.
+- Whitespace verification with `dotnet format whitespace --folder --include` for the six new C#
+  files and `--verify-no-changes --verbosity quiet` passed. New-file encoding/final-newline,
+  localization-source consistency, relative documentation links, and `git diff --check` passed.
+
 ## Sources reviewed
 
 Repository links above describe the current branch; external implementation links are pinned to
