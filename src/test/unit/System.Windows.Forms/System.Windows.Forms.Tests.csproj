@@ -10,6 +10,7 @@
     <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
     <Nullable>enable</Nullable>
     <DefaultItemExcludes>$(DefaultItemExcludes);ComDisabled\**</DefaultItemExcludes>
+    <UserSecretsId>WinForms-Configuration-Tests-14957</UserSecretsId>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -33,6 +34,7 @@
     <ProjectReference Include="..\..\..\System.Private.Windows.GdiPlus\System.Private.Windows.GdiPlus.csproj" />
     <ProjectReference Include="..\..\..\System.Windows.Forms.Primitives\src\System.Windows.Forms.Primitives.csproj" />
     <ProjectReference Include="..\..\..\System.Windows.Forms\System.Windows.Forms.csproj" />
+    <ProjectReference Include="..\..\..\Microsoft.Extensions.WinForms.Hosting\src\Microsoft.Extensions.WinForms.Hosting.csproj" />
     <ProjectReference Include="..\..\..\System.Design\src\System.Design.Facade.csproj" />
     <!-- This facade assembly is required to resolve UITypeEditor type from NETFX that is referenced in EditorAttributes -->
     <ProjectReference Include="..\..\..\System.Drawing\src\System.Drawing.Facade.csproj" />

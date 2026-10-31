@@ -2,8 +2,10 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Runtime.ExceptionServices;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.WinForms;
 
 namespace System.Windows.Forms.Tests;
@@ -14,6 +16,78 @@ namespace System.Windows.Forms.Tests;
 [Collection("Sequential")]
 public class WinFormsApplicationHostingTests
 {
+    [Theory]
+    [InlineData("10")]
+    [InlineData("0")]
+    [InlineData("not-an-integer")]
+    public void Run_ConfiguredOptions_ValidatesBeforeDeferredUiAndCleansUpFailures(string value)
+    {
+        RunOnSta(() =>
+        {
+            RecordingService service = new();
+            int activated = 0;
+            int validated = 0;
+            IHostBuilder hostBuilder = new HostBuilder()
+                .ConfigureWinFormsConfiguration(["--hostBuilder:reloadConfigOnChange=false"])
+                .UseContentRoot(AppContext.BaseDirectory)
+                .UseEnvironment(Environments.Production)
+                .ConfigureAppConfiguration(configuration =>
+                    configuration.AddInMemoryCollection([new("WinForms14957:Value", value)]))
+                .ConfigureServices((context, services) =>
+                {
+                    services.AddSingleton<IHostedService>(_ => service);
+                    services.AddOptions<WinFormsConfigurationTests.ConfigurationOptions>()
+                        .Bind(context.Configuration.GetSection("WinForms14957"))
+                        .Validate(options =>
+                        {
+                            activated.Should().Be(0);
+                            SynchronizationContext.Current.Should().BeNull();
+                            validated++;
+                            return options.Value > 0;
+                        }, "'WinForms14957:Value' must be greater than zero.")
+                        .ValidateOnStart();
+                });
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseHost(hostBuilder)
+                .UseApplicationContext(() =>
+                {
+                    validated.Should().Be(1);
+                    activated++;
+                    return new ApplicationContext();
+                })
+                .Build();
+            application.Lifetime.ApplicationStarted += (_, _) => _ = application.StopAsync();
+
+            if (value == "10")
+            {
+                application.Run(TestContext.Current.CancellationToken);
+                activated.Should().Be(1);
+                service.StartCount.Should().Be(1);
+            }
+            else
+            {
+                if (value == "0")
+                {
+                    OptionsValidationException failure = Assert.Throws<OptionsValidationException>(
+                        () => application.Run(TestContext.Current.CancellationToken));
+                    failure.OptionsType.Should().Be(typeof(WinFormsConfigurationTests.ConfigurationOptions));
+                    failure.Failures.Should().Contain("'WinForms14957:Value' must be greater than zero.");
+                }
+                else
+                {
+                    Assert.Throws<InvalidOperationException>(() => application.Run(TestContext.Current.CancellationToken))
+                        .Message.Should().Contain("WinForms14957:Value");
+                }
+
+                activated.Should().Be(0);
+                service.StartCount.Should().Be(0);
+            }
+
+            service.DisposeCount.Should().Be(1);
+            application.UiCompletion.IsCompleted.Should().BeTrue();
+        });
+    }
+
     [Theory]
     [InlineData(0, false, false)]
     [InlineData(1, false, false)]

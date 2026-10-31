@@ -404,6 +404,64 @@ budgets must remain explicitly open until obtained. This document does not appro
 Template creation, Designer DI infrastructure, VB single-instance/splash behavior, and application-
 framework parity remain outside this stream.
 
+## Configuration/options implementation (dotnet/winforms#14957)
+
+The initial implementation uses the optional application package
+[`Microsoft.Extensions.WinForms.Hosting`](../../src/Microsoft.Extensions.WinForms.Hosting/src/PACKAGE.md).
+Its public `IHostBuilder.ConfigureWinFormsConfiguration(args)` extension adds desktop configuration
+defaults to a fresh `HostBuilder`; pass that unbuilt builder to the existing `UseHost` method.
+The package and API remain prototypes pending owner review.
+
+The separate-package placement keeps provider implementations and their transitive NuGet
+dependencies out of `System.Windows.Forms.dll` and the WindowsDesktop transport manifest.
+Application restore/publish resolves the optional package's normal Hosting dependency. A direct
+PackageReference in the shared-framework assembly would not accomplish this: the WinForms
+transport selects explicit project outputs rather than automatically shipping dependency packages.
+No WindowsDesktop framework dependency or classification is changed.
+
+The extension composes public standard providers in the documented order, including the
+application-name JSON pair found in Hosting 10.0.10. Only the default content root differs from
+server-oriented composition: it is the executable's base directory, with environment, command-line,
+and subsequent explicit host overrides preserved. Missing optional sources remain optional;
+malformed files, binding failures, and validation failures propagate without replacement defaults.
+
+Unlike `ConfigureDefaults`, this configuration-only extension deliberately does not choose logging
+providers or a container factory. Applications register options using `AddOptions`, `Bind`,
+`Validate`, and `ValidateOnStart`; no parallel binder, monitor, validator, scope, or error-dialog
+framework is introduced. Existing `UseHost` callers retain their supplied composition unchanged,
+and hostless applications reference none of these providers.
+
+Focused tests cover full provider precedence, environment/content-root selection, isolated
+Development User Secrets, malformed JSON, reload configuration, named/cached/scoped/monitored
+options, invalid reload, and real-runner validation before deferred UI construction with owned
+host cleanup. Reload tests explicitly reload the standard root rather than depending on watcher
+timing. The package readme provides C#/VB registration guidance; the complete infrastructure
+samples and deployment matrix remain owned by dotnet/winforms#14962.
+
+API/packaging approval and remote CI remain external gates. This stage does not implement settings,
+exception integration, health checks, sample applications, or benchmarks.
+
+### Local validation
+
+- `.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal`
+  passed with zero warnings and errors, including the companion and affected framework projects.
+- `.\build.cmd -projects src\Microsoft.Extensions.WinForms.Hosting\src\Microsoft.Extensions.WinForms.Hosting.csproj -pack -verbosity minimal -binaryLogName ConfigurationPackage.binlog`
+  passed with zero warnings and errors and produced `Microsoft.Extensions.WinForms.Hosting.12.0.0-dev.nupkg`.
+  Archive inspection confirmed its library/XML/readme and normal Hosting 10.0.10 dependency.
+- With `DOTNET_ROOT` and `PATH` selecting the repository's `.dotnet` runtime,
+  `.\artifacts\bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe --filter-class 'System.Windows.Forms.Tests.WinForms*' --report-trx --results-directory artifacts\TestResults\ConfigurationOptions --output Minimal`
+  passed: 199 tests, zero failures or skips. This includes the configuration regressions and existing
+  builder, lifetime, scope, and Designer-boundary tests. The runner resolves the relative results
+  directory beneath its executable directory.
+- Independent C# and VB Windows-targeted applications restored the generated package using only
+  `PackageReference`, then bound command-line options, eagerly validated them, and started/stopped
+  the standard host successfully. These checks used the same preview targeting/runtime versions
+  as the repository, not the installed SDK's older default reference pack. They verify package
+  consumption and the registration syntax, not complete WinForms deployment or Designer acceptance.
+- C# whitespace verification with `dotnet format whitespace --folder --include` for the three affected
+  source files and `--verify-no-changes --verbosity quiet` passed. Relative documentation links and
+  `git diff --check` passed.
+
 ## Sources reviewed
 
 Repository links above describe the current branch; external implementation links are pinned to
