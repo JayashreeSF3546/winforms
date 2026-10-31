@@ -1,4 +1,9 @@
 #nullable enable
+Microsoft.Extensions.DependencyInjection.WinFormsHealthServiceCollectionExtensions
+static Microsoft.Extensions.DependencyInjection.WinFormsHealthServiceCollectionExtensions.AddWinFormsHealthDiagnostics(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder!
+Microsoft.Extensions.WinForms.WinFormsHealthDiagnostics
+Microsoft.Extensions.WinForms.WinFormsHealthDiagnostics.WinFormsHealthDiagnostics(Microsoft.Extensions.DependencyInjection.IServiceScopeFactory! scopeFactory, Microsoft.Extensions.Hosting.IHostApplicationLifetime! lifetime) -> void
+Microsoft.Extensions.WinForms.WinFormsHealthDiagnostics.CheckHealthAsync(System.Func<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckRegistration!, bool>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.Diagnostics.HealthChecks.HealthReport!>!
 Microsoft.Extensions.Hosting.WinFormsHostBuilderExtensions
 static Microsoft.Extensions.Hosting.WinFormsHostBuilderExtensions.ConfigureWinFormsConfiguration(this Microsoft.Extensions.Hosting.IHostBuilder! builder, string![]? args = null) -> Microsoft.Extensions.Hosting.IHostBuilder!
 Microsoft.Extensions.DependencyInjection.UserSettingsServiceCollectionExtensions

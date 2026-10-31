@@ -1,13 +1,14 @@
 # Microsoft.Extensions.WinForms.Hosting
 
-Opt-in configuration defaults, typed user settings, and exception logging for the WinForms Application Builder. This is a separate application
+Opt-in configuration defaults, typed user settings, exception logging, and health diagnostics for the WinForms Application Builder. This is a separate application
 NuGet dependency, not an addition to the WindowsDesktop shared framework. Existing WinForms
 applications and the hostless Application Builder do not acquire configuration providers.
 
 This package and its public API are prototypes tracked by
 [dotnet/winforms#14957](https://github.com/dotnet/winforms/issues/14957),
-[dotnet/winforms#14958](https://github.com/dotnet/winforms/issues/14958), and
-[dotnet/winforms#14959](https://github.com/dotnet/winforms/issues/14959), pending API/package review.
+[dotnet/winforms#14958](https://github.com/dotnet/winforms/issues/14958),
+[dotnet/winforms#14959](https://github.com/dotnet/winforms/issues/14959), and
+[dotnet/winforms#14960](https://github.com/dotnet/winforms/issues/14960), pending API/package review.
 It targets the repository's current Windows framework and declares the WindowsDesktop WinForms
 framework reference required by the lifetime-bound logging API. It requires the matching Application
 Builder prototype in the framework/runtime, not just this package. The framework's WinForms assembly
@@ -417,3 +418,233 @@ diagnostic mechanism to a separate application fallback without taking over anot
 process-global diagnostic hook. Verify shutdown flushing and failure visibility with the selected
 provider. Real file-provider/deployment examples and expected manual results belong to
 [dotnet/winforms#14962](https://github.com/dotnet/winforms/issues/14962).
+
+## Hosted services and desktop health (prototype, dotnet/winforms#14960)
+
+Use the ordinary Generic Host registrations for `IHostedService`, `IHostedLifecycleService`, and
+`BackgroundService`. Pass the **unbuilt** host builder to `UseHost`; do not create another host,
+message loop, scheduler, or static provider. Host startup and eager validation precede deferred UI
+activation and run off the owner STA. In the selected Hosting 10.0.10 implementation,
+`BackgroundService.ExecuteAsync` runs entirely through `Task.Run`: it is not a readiness gate.
+Required readiness belongs in an explicit hosted `StartAsync`, and cannot wait for UI dispatch.
+
+`AddWinFormsHealthDiagnostics` returns the normal `IHealthChecksBuilder` and preserves existing
+`HealthCheckService` registrations. It adds a singleton `WinFormsHealthDiagnostics`, but executes
+no check. Health checks use the normal `Microsoft.Extensions.Diagnostics.HealthChecks` package;
+there is no ASP.NET Core shared-framework requirement or HTTP endpoint.
+
+```csharp
+IHostBuilder hostBuilder = new HostBuilder()
+    .ConfigureLogging(logging =>
+        logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks", LogLevel.None))
+    .ConfigureServices((_, services) =>
+    {
+        services.AddWinFormsHealthDiagnostics()
+            .AddCheck<LocalStoreCheck>("local-store", tags: ["startup"])
+            .AddCheck<RemoteDependencyCheck>("remote", failureStatus: HealthStatus.Degraded,
+                tags: ["diagnostic"], timeout: TimeSpan.FromSeconds(5));
+        services.AddHostedService<LocalReadinessService>();
+        services.AddHostedService<SyncWorker>();
+    });
+
+WinFormsApplication? application = null;
+using (application = WinFormsApplication.CreateBuilder()
+    .UseApplicationContext(() => new ApplicationContext(new MainForm(
+        application!.Host!.Services.GetRequiredService<WinFormsHealthDiagnostics>())))
+    .UseHost(hostBuilder)
+    .Build())
+{
+    application.Run();
+}
+```
+
+Import `System.Windows.Forms`, `Microsoft.Extensions.Diagnostics.HealthChecks`, `Microsoft.Extensions.Logging`, and the
+hosting, dependency-injection, and WinForms namespaces. Check, worker, and Form types are
+application-defined. Implement `IHealthCheck.CheckHealthAsync` using typed, UI-free dependencies
+and cooperative cancellation. No remote check executes merely because it was registered.
+
+The standard health service can log descriptions, exceptions, and arbitrary report data, even when
+the WinForms exception-logging scope has `IncludeExceptionDetails = false`. The explicit category
+filter above disables that standard health logging. Application configuration/provider-specific
+rules may override filters; verify the effective filter before using private checks. Show or log only
+allowlisted status/name fields, and deliberately opt into other contents after privacy review.
+`WinFormsHealthDiagnostics` neither changes logging filters nor adds report logging of its own.
+
+Standard `AddHealthChecks` installs publisher infrastructure. Without registered
+`IHealthCheckPublisher` instances it starts no publisher timer; explicitly registering publishers
+opts into the ecosystem's scheduling and `HealthCheckPublisherOptions`, not a WinForms scheduler.
+Do not combine publishers and worker/manual checks accidentally when double execution is unwanted.
+
+### Explicit local readiness, not mandatory network connectivity
+
+Select the checks needed for startup. An empty selection is not proof of readiness; the following
+application policy rejects both an empty report and a non-Healthy local report. A different
+application may deliberately accept Degraded local state. Optional remote failure must not
+automatically prevent a usable offline UI from starting.
+
+```csharp
+public sealed class LocalReadinessService(WinFormsHealthDiagnostics diagnostics) : IHostedService
+{
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        HealthReport report = await diagnostics.CheckHealthAsync(
+            registration => registration.Tags.Contains("startup"), cancellationToken);
+        if (report.Entries.Count == 0 || report.Status != HealthStatus.Healthy)
+        {
+            throw new InvalidOperationException("Required local startup readiness failed.");
+        }
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+```
+
+The equivalent VB registrations and explicit readiness policy are:
+
+```vb
+Dim hostBuilder As IHostBuilder = New HostBuilder().
+    ConfigureLogging(
+        Sub(logging)
+            logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks", LogLevel.None)
+        End Sub).
+    ConfigureServices(
+        Sub(context, services)
+            services.AddWinFormsHealthDiagnostics().
+                AddCheck(Of LocalStoreCheck)("local-store", tags:={"startup"}).
+                AddCheck(Of RemoteDependencyCheck)(
+                    "remote", failureStatus:=HealthStatus.Degraded,
+                    tags:={"diagnostic"}, timeout:=TimeSpan.FromSeconds(5))
+            services.AddHostedService(Of LocalReadinessService)()
+            services.AddHostedService(Of SyncWorker)()
+        End Sub)
+
+Public NotInheritable Class LocalReadinessService
+    Implements IHostedService
+
+    Private ReadOnly _diagnostics As WinFormsHealthDiagnostics
+
+    Public Sub New(diagnostics As WinFormsHealthDiagnostics)
+        _diagnostics = diagnostics
+    End Sub
+
+    Public Async Function StartAsync(token As CancellationToken) As Task _
+        Implements IHostedService.StartAsync
+        Dim report As HealthReport = Await _diagnostics.CheckHealthAsync(
+            Function(registration) registration.Tags.Contains("startup"), token)
+        If report.Entries.Count = 0 OrElse report.Status <> HealthStatus.Healthy Then
+            Throw New InvalidOperationException("Required local startup readiness failed.")
+        End If
+    End Function
+
+    Public Function StopAsync(token As CancellationToken) As Task _
+        Implements IHostedService.StopAsync
+        Return Task.CompletedTask
+    End Function
+End Class
+```
+
+Compose the typed runtime Form through the public deferred context factory, not an internal
+prototype activation API:
+
+```vb
+Dim application As WinFormsApplication = Nothing
+application = WinFormsApplication.CreateBuilder().
+    UseApplicationContext(
+        Function()
+            Dim diagnostics = application.Host.Services.GetRequiredService(Of WinFormsHealthDiagnostics)()
+            Return New ApplicationContext(New MainForm(diagnostics))
+        End Function).
+    UseHost(hostBuilder).
+    Build()
+Using application
+    application.Run()
+End Using
+```
+
+`MainForm` has an application-defined constructor receiving the diagnostics service. Retain any
+parameterless constructor needed by its Designer; existing controls require no migration. No
+configuration default, readiness check, worker, endpoint, or network policy is implicitly selected.
+
+### Responsive, tracked UI diagnostics
+
+Pass `WinFormsHealthDiagnostics` to runtime-created UI through explicit composition as above,
+without a static provider. Request diagnostics after UI dispatch exists, for
+example through a caller-owned task launched after `Shown`. The service defers health-service
+resolution, options callbacks, selection predicates, checks, and operation-scope disposal away
+from the UI thread. Replacements registered through `HealthCheckService` are still used.
+
+These example methods belong to the owning Form. `_diagnostics` is its typed runtime dependency,
+`statusLabel` is its UI field, and `ownerToken` is canceled when that owner stops accepting work:
+
+```csharp
+private async Task RefreshHealthAsync(CancellationToken ownerToken)
+{
+    HealthReport report = await _diagnostics.CheckHealthAsync(
+        registration => registration.Tags.Contains("diagnostic"), ownerToken);
+    ownerToken.ThrowIfCancellationRequested();
+    if (!IsDisposed && !Disposing)
+    {
+        statusLabel.Text = report.Status.ToString();
+    }
+}
+```
+
+```vb
+Private Async Function RefreshHealthAsync(ownerToken As CancellationToken) As Task
+    Dim report As HealthReport = Await _diagnostics.CheckHealthAsync(
+        Function(registration) registration.Tags.Contains("diagnostic"), ownerToken)
+    ownerToken.ThrowIfCancellationRequested()
+    If Not IsDisposed AndAlso Not Disposing Then
+        statusLabel.Text = report.Status.ToString()
+    End If
+End Function
+```
+
+Calling these methods on the installed WinForms context allows ordinary `await`/`Await` to resume
+on the owner STA; do not use `ConfigureAwait(false)` before updating Controls. Preserve the returned
+task, surface infrastructure faults through the application's error policy, and treat
+`OperationCanceledException` as cancellation rather than a fabricated Unhealthy report. Dependency
+exceptions thrown inside a check retain the standard service's `HealthReportEntry` failure behavior.
+Factory, selection, provider, and disposal failures can instead fault the operation.
+
+Background workers must not retain or access Controls. If UI updates are needed, obtain an
+application-owned `IProgress<HealthStatus>` or owning synchronization context **after** UI activation
+through a cancellable asynchronous handoff in `ExecuteAsync`, never by waiting for UI in `StartAsync`.
+Create `Progress<T>` on the owning UI thread; its callback must recheck owner disposal and stopping.
+Use `Post`/`Progress<T>.Report`, not `Send`, `.Wait()`, or `.Result`. Stop posting as soon as
+`IHostApplicationLifetime.ApplicationStopping` is signaled, and recheck that signal inside the posted
+callback. No new dispatcher is supplied here.
+
+### Cancellation and shutdown ownership
+
+Each request links its caller token with `IHostApplicationLifetime.ApplicationStopping`.
+Canceling one request does not stop the application. A canceled operation is not returned as a
+successful report, even when a non-cooperative check returns after cancellation or cancellation
+arrives during asynchronous scope disposal. The task waits for its service/check work and
+operation-scope disposal; it does not abandon those owners on cancellation.
+
+Registration timeouts signal cancellation to the check. The standard service reports a cooperative
+timeout using the registration's `FailureStatus`; that differs from caller/host cancellation, which
+propagates. A check ignoring its timeout can run indefinitely or return its own result after the
+timeout: no forced interruption or replacement result is promised.
+
+Confirm close/veto decisions before committing host stop. Pending owner tasks must be canceled and
+awaited **before** disposing their dependencies or committing the owner's shutdown; a canceled
+token alone is not proof they completed. The host does not discover arbitrary UI/event-handler
+tasks, and this service is not another shutdown coordinator. Apply the same ownership rule to
+error-driven exits and other stop origins.
+
+At committed stop the runtime signals host stopping, exits and disposes owned UI/scopes, completes
+the UI barrier, then invokes hosted lifecycle stopping/service `StopAsync`. Those callbacks must not
+require live Forms or UI dispatch. Link UI-posting workers to `ApplicationStopping`: their
+`BackgroundService` stopping token is canceled only in the later service-stop phase.
+
+Generic Host timeout/cancellation does not forcibly stop workers. In particular, the standard
+`BackgroundService.StopAsync` can stop waiting when its timeout expires while `ExecuteTask` remains
+active. An application participant with dependency-owned pending work must explicitly drain that
+work before its dependency owner is disposed; cancellation of a wait is not a safe disposal barrier.
+Non-cooperative work may therefore delay an application-owned drain indefinitely. The existing
+WinForms UI barrier likewise remains mandatory on timeout and is not weakened by this package.
+Full deployment samples, manual offline/failure/resource checks, and budgets remain follow-up work
+in [dotnet/winforms#14962](https://github.com/dotnet/winforms/issues/14962) and
+[dotnet/winforms#14963](https://github.com/dotnet/winforms/issues/14963).

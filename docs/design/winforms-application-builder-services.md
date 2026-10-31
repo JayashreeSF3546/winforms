@@ -625,6 +625,94 @@ deployment evidence, full samples, and resource budgets remain in the owning fol
   files and `--verify-no-changes --verbosity quiet` passed. New-file encoding/final-newline,
   localization-source consistency, relative documentation links, and `git diff --check` passed.
 
+## Hosted-services/health implementation (dotnet/winforms#14960)
+
+The selected prototype adds only `WinFormsHealthDiagnostics` and
+`IServiceCollection.AddWinFormsHealthDiagnostics` to the existing optional package. The extension
+returns the standard `IHealthChecksBuilder`, preserves existing `HealthCheckService` registrations,
+and idempotently registers the desktop service. The companion has a normal
+`Microsoft.Extensions.Diagnostics.HealthChecks` 10.0.10 package dependency aligned with Hosting,
+not an ASP.NET Core shared-framework dependency. The hostless/core provider transport is unchanged.
+The two health-facing methods are explicitly `CLSCompliant(false)` because the standard health
+assemblies do not declare CLS compliance; the rest of the companion's CLS contract is unchanged.
+No replacement health types are invented to hide that ecosystem boundary.
+
+The service schedules one explicitly requested operation with `Task.Run`; it is not a worker loop
+or replacement scheduler. Within that operation it resolves the standard health service in an
+asynchronously disposed DI scope, evaluates the caller's selector, executes checks, and awaits
+scope disposal. This includes service/options resolution and predicate work that the standard
+implementation performs synchronously before scheduling individual checks. A replaceable scoped
+`HealthCheckService` remains owned until its operation completes.
+
+Each operation links caller cancellation with the existing host's `ApplicationStopping` token.
+It rejects pre-canceled work before health resolution and checks cancellation again after service
+execution and scope disposal. A non-cooperative check cannot produce a successful operation after
+caller/host cancellation, but neither its work nor disposal is abandoned. Standard per-registration
+timeouts remain cooperative signals with standard `FailureStatus` reporting; ignored timeouts are
+not synthesized as a new report. Dependency reports are returned unchanged; infrastructure and
+disposal failures propagate. The application still owns pending tasks and must drain them before
+dependency-owner disposal. No new runtime barrier, task registry, or host-stop policy is introduced.
+
+No startup gate, periodic poll, endpoint, UI post, network probe, or unhealthy-stop policy is added.
+Ordinary `AddHostedService`/`IHostedLifecycleService`/`BackgroundService` registrations and HostOptions
+retain their current owner. Startup readiness is a deliberately selected standard hosted `StartAsync`
+policy; optional remote diagnostics are excluded, permitting offline startup. The package readme
+provides C#/VB registrations, explicit nonempty/local readiness checks, tracked UI diagnostics,
+asynchronous UI handoff guidance, and cancellation/drain requirements for normal and failure exits.
+
+Research corrections are explicit: standard `AddHealthChecks` installs publisher infrastructure
+which is inactive without application-registered publishers, rather than omitting infrastructure
+entirely. Registering publishers opts into their standard scheduling. Standard health logging can
+include descriptions, exceptions, and arbitrary report data regardless of the logging scope's
+exception-detail option. The readme explicitly suppresses the health category in its examples and
+requires verification of effective filters; the adapter does not secretly rewrite application
+logging configuration. Standard `BackgroundService.StopAsync` timeout can stop waiting without
+stopping `ExecuteTask`; canceled waits are not dependency disposal barriers.
+
+Rejected alternatives include convenience hosted-service aliases, another scheduler/dispatcher,
+mandatory network readiness, new health-result interfaces or status DTOs, automatic report logging,
+silent cancellation-to-Unhealthy conversion, and abandoning scopes at a timeout. Policy remains
+explicit and ecosystem implementations remain replaceable.
+
+API/package-owner review, remote CI, full deployment variants and actual offline/provider failures,
+UI-posting races during all stop origins, non-cooperative worker shutdown policy, resource stress,
+and acceptance budgets remain external/follow-up gates under dotnet/winforms#14961–14963.
+This prototype selection is not official API approval.
+
+### Local validation evidence
+
+- `.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal -binaryLogName HostedHealthTests.binlog`
+  passed with zero warnings/errors. Initial iterations exposed the standard health assemblies'
+  missing CLS declaration and a test's use of a nonexistent public Form-factory overload; both were
+  corrected without altering core runtime contracts.
+- `.\build.cmd -projects src\Microsoft.Extensions.WinForms.Hosting\src\Microsoft.Extensions.WinForms.Hosting.csproj -pack -verbosity minimal -binaryLogName HostedHealthPackage.binlog`
+  passed with zero warnings/errors. The archive declares HealthChecks and Hosting 10.0.10 normal
+  dependencies plus the existing WindowsDesktop WinForms framework reference, not an ASP.NET Core
+  framework or bundled WinForms DLL. The packed readme matched its source and the adapter DLL SHA-256
+  matched the tested binary.
+- With `DOTNET_ROOT`/`PATH` set to the repository `.dotnet`,
+  `.\artifacts\bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe --filter-class System.Windows.Forms.Tests.WinFormsHealthDiagnosticsTests --report-trx --results-directory <repo>\artifacts\TestResults\HostedHealth`
+  passed all **12** focused cases, with no failures/skips. These exercise off-UI service/options/
+  predicate/factory execution, preserved custom scoped services, asynchronous disposal, cancellation
+  during disposal, cooperative and non-cooperative caller/host cancellation, pre-canceled activation,
+  selected offline/failure reports, timeout distinction, and propagated infrastructure failure.
+- `.\artifacts\bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe --filter-class 'System.Windows.Forms.Tests.WinForms*' --report-trx --results-directory <repo>\artifacts\TestResults\HostedHealthRegression`
+  passed all **259** combined cases, with no failures/skips. Three new real-host cases cover explicit
+  local startup readiness success/failure before UI activation, exclusion of optional offline
+  diagnostics, and hosted lifecycle/UI-cleanup ordering with unused health registration. Existing
+  BackgroundService failure and timeout/stop-barrier cases remain covered.
+- `.\.dotnet\dotnet.exe run --project <session>\files\exception-logging-package-consumer\CSharp\Consumer.csproj --verbosity quiet`
+  and the equivalent `VisualBasic\Consumer.vbproj` command passed against the actual NuGet package,
+  using the short isolated `NUGET_PACKAGES=<repo>\artifacts\tmp\HostedHealthConsumerPackages` cache.
+  Both extended probes retained logging checks and exercised health registration, local readiness,
+  a selected offline/Degraded report, and real STA message-loop continuation. The VB probe's local
+  variable collision was corrected before its successful run. These use explicit matching prototype
+  framework binary references, not project references, and do not prove ordinary unmodified
+  runtime-pack deployment or actual network failure.
+- `.\.dotnet\dotnet.exe format whitespace --folder --include` for the four affected C# files,
+  followed by `--verify-no-changes --verbosity quiet`, passed. New-file BOM/CRLF/final-newline/
+  trailing-whitespace checks, relative documentation links, and `git diff --check` passed.
+
 ## Sources reviewed
 
 Repository links above describe the current branch; external implementation links are pinned to
@@ -647,6 +735,10 @@ proof that a WinForms implementation or manual acceptance run exists.
 - [.NET 10 BackgroundService scheduling](https://learn.microsoft.com/en-us/dotnet/core/compatibility/extensions/10.0/backgroundservice-executeasync-task).
 - [Logging providers](https://learn.microsoft.com/en-us/dotnet/core/extensions/logging/providers).
 - [ASP.NET Core health checks](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/health-checks?view=aspnetcore-10.0).
+- [Standard health-service execution, v10.0.10](https://github.com/dotnet/aspnetcore/blob/v10.0.10/src/HealthChecks/HealthChecks/src/DefaultHealthCheckService.cs),
+  service/options validation, selection, per-check task/scope ownership, cancellation, timeout and logging.
+- [Standard health registration, v10.0.10](https://github.com/dotnet/aspnetcore/blob/v10.0.10/src/HealthChecks/HealthChecks/src/DependencyInjection/HealthCheckServiceCollectionExtensions.cs),
+  idempotent service registration and publisher infrastructure.
 - [WPF Generic Host composition](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/app-development/how-to-use-host-builder).
 - [MAUI dependency injection](https://learn.microsoft.com/en-us/dotnet/maui/fundamentals/dependency-injection?view=net-maui-10.0)
   and [window lifecycle](https://learn.microsoft.com/en-us/dotnet/maui/fundamentals/app-lifecycle?view=net-maui-10.0).
