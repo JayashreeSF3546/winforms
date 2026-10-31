@@ -1,3 +1,30 @@
 #nullable enable
 Microsoft.Extensions.Hosting.WinFormsHostBuilderExtensions
 static Microsoft.Extensions.Hosting.WinFormsHostBuilderExtensions.ConfigureWinFormsConfiguration(this Microsoft.Extensions.Hosting.IHostBuilder! builder, string![]? args = null) -> Microsoft.Extensions.Hosting.IHostBuilder!
+Microsoft.Extensions.DependencyInjection.UserSettingsServiceCollectionExtensions
+static Microsoft.Extensions.DependencyInjection.UserSettingsServiceCollectionExtensions.AddJsonUserSettings<T>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! applicationId, int schemaVersion, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T!>! typeInfo, System.Func<T!>! createDefaults, System.Action<Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T!>!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.Changed -> System.EventHandler<Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs!>?
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.LoadAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T!>!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.GetSchemaVersionAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int?>!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.SaveAsync(T! settings, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.WinForms.UserSettingsCommit!>!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.ResetAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.WinForms.UserSettingsCommit!>!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.UpgradeAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.WinForms.UserSettingsCommit!>!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.RecoverAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.WinForms.UserSettingsCommit!>!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.ImportAsync(System.Func<T!>! readLegacySettings, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.WinForms.UserSettingsCommit?>!
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.JsonUserSettingsOptions() -> void
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.StorageDirectory.get -> string?
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.StorageDirectory.set -> void
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.LockTimeout.get -> System.TimeSpan
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.LockTimeout.set -> void
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.Validate.get -> System.Action<T!>?
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.Validate.set -> void
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.Migrations.get -> System.Collections.Generic.IDictionary<int, System.Func<System.Text.Json.JsonElement, System.Text.Json.JsonElement>!>!
+Microsoft.Extensions.WinForms.UserSettingsCommit
+Microsoft.Extensions.WinForms.UserSettingsCommit.SchemaVersion.get -> int
+Microsoft.Extensions.WinForms.UserSettingsCommit.Revision.get -> long
+Microsoft.Extensions.WinForms.UserSettingsCommit.Settings.get -> System.Text.Json.JsonElement
+Microsoft.Extensions.WinForms.UserSettingsCommit.NotificationCompletion.get -> System.Threading.Tasks.Task!
+Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs
+Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs.Commit.get -> Microsoft.Extensions.WinForms.UserSettingsCommit!

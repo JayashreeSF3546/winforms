@@ -462,6 +462,85 @@ exception integration, health checks, sample applications, or benchmarks.
   source files and `--verify-no-changes --verbosity quiet` passed. Relative documentation links and
   `git diff --check` passed.
 
+## User-settings implementation (dotnet/winforms#14958)
+
+The optional companion package now contains the prototype `IUserSettingsService<T>` and
+`AddJsonUserSettings` registration. A source-generated `JsonTypeInfo<T>`, stable application ID,
+positive schema version, and fresh-defaults factory make model/identity/serialization ownership
+explicit. Storage configuration is snapshotted; registration and service resolution do not create
+directories. The package readme documents C#/VB consumption and opt-in generated-settings import.
+The implementation does not modify the core runtime, UI-scope contracts, generated settings, or
+WindowsDesktop framework dependencies.
+
+Each operation runs off the caller's UI thread. A per-instance asynchronous gate and retained
+exclusive-sharing lock file coordinate complete-document operations across service instances and
+processes. Contention waits are bounded and cancellable; only sharing/lock violations are retried.
+Ordinary permissions/I/O errors, cancellation, and lock timeout remain distinct. File handles are
+operation-owned and released before a commit's subscribers become eligible for delivery.
+
+The JSON envelope contains a positive schema version/revision and object settings payload. Save
+and reset validate both the new model and any existing compatible primary, flush a same-directory
+temporary file, and atomically replace the primary while retaining the previous valid backup.
+Cancellation before replacement aborts without a committed notification; after replacement the
+write is irreversible. This is atomic whole-document storage, not a read-modify-write merging API.
+
+Load never silently upgrades or recovers. Only genuine absence of both primary and backup selects
+fresh validated defaults. Upgrade applies registered consecutive migrations to detached JSON,
+then deserializes/validates the target typed model before committing. Recovery is explicit, validates
+a compatible backup first, preserves damaged primary input under a unique quarantine name, and
+does not replace a valid or newer primary. Unrecoverable corruption is an error, not a reset.
+
+`UserSettingsCommit` carries an immutable JSON snapshot, schema/revision, and separate
+`NotificationCompletion`. Ordered serial notifications capture subscribers at commit time.
+Reentrant/concurrent operations may commit without waiting for earlier subscriber completion;
+subscriber failures are observable on the notification task after storage success and do not
+prevent other captured subscribers from being attempted. No UI-thread, cross-process notification,
+file-watcher, implicit settings configuration projection, or shutdown driver is added. Application
+code must observe/join outstanding writes and notifications; a subscriber must not await its
+reentrant write's notification completion from inside serialized delivery.
+
+Legacy import accepts an application-selected typed mapping, excludes any automatic reflection
+enumeration, and invokes that mapping only when no modern primary or backup exists under the store
+lock. The application maps user-scoped values only and chooses whether to run legacy Upgrade first.
+The original generated-settings store remains unchanged. This practical optional bridge avoids
+adding System.Configuration dependencies to the companion package.
+
+Alternatives rejected here are automatic migration on load, silent corruption reset, arbitrary
+configuration writes, global providers, untracked notification failures, callbacks under storage
+locks, and implicit legacy property copying. Plaintext preferences are not encrypted secret
+storage; the package adds neither ACL manipulation nor network/telemetry collection.
+
+The public/package contracts remain prototypes pending API and packaging review. Remote CI,
+deployment/multi-user/Terminal Services/manual evidence, full reference samples, and resource/
+performance acceptance remain in the owning follow-up stages. Local focused tests exercise real
+files, typed migration failure without mutation, corruption/quarantine, cross-process contention,
+multi-instance atomic writes, timeout/cancellation, and concurrent/reentrant notification ordering.
+
+### Local validation
+
+- `.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal -binaryLogName UserSettingsTests.binlog`
+  passed with zero warnings and errors.
+- `.\build.cmd -projects src\Microsoft.Extensions.WinForms.Hosting\src\Microsoft.Extensions.WinForms.Hosting.csproj -pack -verbosity minimal -binaryLogName UserSettingsPackage.binlog`
+  passed with zero warnings and errors and produced the updated
+  `Microsoft.Extensions.WinForms.Hosting.12.0.0-dev.nupkg`.
+- With `DOTNET_ROOT` and `PATH` selecting the repository's `.dotnet` runtime,
+  `.\artifacts\bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe --filter-class System.Windows.Forms.Tests.WinFormsUserSettingsTests --report-trx --results-directory "$PWD\artifacts\TestResults\UserSettings" --output Minimal --timeout 2m`
+  passed: 26 tests, zero failures or skips.
+- With the same runtime environment,
+  `.\artifacts\bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe --filter-class 'System.Windows.Forms.Tests.WinForms*' --report-trx --results-directory "$PWD\artifacts\TestResults\UserSettingsRegression" --output Minimal --timeout 3m`
+  passed: 225 tests, zero failures or skips. These include the 26 settings cases and the
+  configuration, builder, lifetime, scope, and Designer-boundary regressions.
+- Independent C# and VB Windows-targeted applications restored the updated package using only
+  `PackageReference`, configured/validated a standard host, and saved/loaded typed settings.
+  Both passed using an isolated short-path package cache, avoiding the earlier same-version
+  development package. C# supplied source-generated metadata; VB explicitly supplied
+  application-owned reflection metadata for this untrimmed consumer check. These are package
+  consumption checks, not full WinForms UI, generated-settings deployment migration, or
+  trimming/AOT acceptance.
+- C# whitespace verification with `dotnet format whitespace --folder --include` for the six new
+  source files and `--verify-no-changes --verbosity quiet` passed. Relative documentation links,
+  new-file whitespace/encoding checks, and `git diff --check` passed.
+
 ## Sources reviewed
 
 Repository links above describe the current branch; external implementation links are pinned to

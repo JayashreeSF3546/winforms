@@ -1,0 +1,82 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:1.2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="1.2" xsi:schemaLocation="urn:oasis:names:tc:xliff:document:1.2 xliff-core-1.2-transitional.xsd">
+  <file datatype="xml" source-language="en" target-language="it" original="../SettingsSR.resx">
+    <body>
+      <trans-unit id="AbsoluteDirectory">
+        <source>The user settings storage directory must be an absolute path.</source>
+        <target state="new">The user settings storage directory must be an absolute path.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="InvalidDocument">
+        <source>The user settings document must contain exactly a positive schemaVersion, a positive revision, and an object settings payload.</source>
+        <target state="new">The user settings document must contain exactly a positive schemaVersion, a positive revision, and an object settings payload.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="InvalidFile">
+        <source>The user settings file '{0}' contains invalid JSON.</source>
+        <target state="new">The user settings file '{0}' contains invalid JSON.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="InvalidIdentity">
+        <source>The application ID must be a single, non-reserved Windows directory name without trailing dots or spaces.</source>
+        <target state="new">The application ID must be a single, non-reserved Windows directory name without trailing dots or spaces.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="InvalidMigration">
+        <source>Migrations must be non-null and keyed by a positive schema version below the current version.</source>
+        <target state="new">Migrations must be non-null and keyed by a positive schema version below the current version.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="InvalidModel">
+        <source>User settings must contain a non-null JSON object compatible with the registered model.</source>
+        <target state="new">User settings must contain a non-null JSON object compatible with the registered model.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="InvalidTimeout">
+        <source>The contention timeout must be positive and supported by a cancellation timer.</source>
+        <target state="new">The contention timeout must be positive and supported by a cancellation timer.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="LockTimeout">
+        <source>Timed out waiting for exclusive access to user settings at '{0}'.</source>
+        <target state="new">Timed out waiting for exclusive access to user settings at '{0}'.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="MissingBackup">
+        <source>No user settings backup is available for recovery.</source>
+        <target state="new">No user settings backup is available for recovery.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="MissingMigration">
+        <source>No user settings migration is registered from schema version {0} to the next version.</source>
+        <target state="new">No user settings migration is registered from schema version {0} to the next version.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="MissingPrimary">
+        <source>The user settings primary store is absent. Load defaults or explicitly import settings before upgrading.</source>
+        <target state="new">The user settings primary store is absent. Load defaults or explicitly import settings before upgrading.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="NewerSchema">
+        <source>The user settings schema is newer than this application supports. The document was not replaced.</source>
+        <target state="new">The user settings schema is newer than this application supports. The document was not replaced.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="RecoveryRequired">
+        <source>The primary user settings store is absent but a backup exists. Use RecoverAsync rather than silently replacing it with defaults.</source>
+        <target state="new">The primary user settings store is absent but a backup exists. Use RecoverAsync rather than silently replacing it with defaults.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="UpgradeRequired">
+        <source>The user settings schema requires an explicit UpgradeAsync operation before loading or saving.</source>
+        <target state="new">The user settings schema requires an explicit UpgradeAsync operation before loading or saving.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="ValidPrimary">
+        <source>The primary user settings document is valid. Recovery cannot replace it with an older backup.</source>
+        <target state="new">The primary user settings document is valid. Recovery cannot replace it with an older backup.</target>
+        <note />
+      </trans-unit>
+    </body>
+  </file>
+</xliff>
