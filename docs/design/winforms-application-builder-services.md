@@ -829,6 +829,101 @@ was started.
   links, and `git diff --check` passed. Only the inspected temporary YAML dependency directory was
   removed; its validation script and build/TRX reports remain available. No changes were committed.
 
+## Infrastructure reference samples (dotnet/winforms#14962)
+
+The [C#/VB infrastructure sample](../../src/test/integration/ApplicationBuilderInfrastructure/README.md)
+composes the current public prototype contracts through language-specific entry points and native
+Forms. A sample-only C# library shares standard host registration, explicit settings JSON metadata,
+options, health checks, UI-free background work and automation. It is not a new shipping package.
+There is no ambient provider, private service hookup, replacement dispatcher, or file-logging
+dependency. Existing runtime and companion implementations/public contracts are unchanged.
+
+The sample deliberately uses the same stable per-user application identity in both languages.
+Its generated settings metadata, schema-1 migration, explicit recovery/reset operations and
+standard Debug logger exercise the earlier children rather than reimplementing them. Only
+allowlisted aggregate health status is displayed, and the standard health logging category is
+disabled independently of exception-detail defaults. An explicit application policy continues
+only for the intentional demonstration UI exception; other UI failures request stop and are not
+reported as successful application completion. Standard BackgroundService failure stops the host.
+The caller-owned lifecycle logger/factory outlives `Run`; attachment completion is not a generic
+logging-provider flush or a file-durability guarantee.
+
+Pending operations belong to the root hosted session, not a Form or its UI continuation. The
+session accepts a single operation at a time; ordinary close stops acceptance, cancels and joins
+that operation before posting final close. Host/worker-origin stop also cancels it, but its final
+join is in hosted `StopAsync`, after UI cleanup and before root disposal. The worker observes
+committed host stop without retaining or posting to Controls. Stop intentionally uses an infinite
+host timeout and never abandons accepted work because a stop wait token expires. Noncooperative
+operations can therefore delay shutdown indefinitely. No forced-termination durability is claimed.
+
+Standard environment/JSON/command-line configuration remains separate from mutable preferences.
+The content root is executable-relative. The sample disables automatic JSON watchers by default
+and exposes explicit Reload so invalid monitored options are surfaced by the tracked operation,
+not thrown from an unattended watcher callback. The worker interval is a startup option; caption
+and offline diagnostic state use monitored values. Enabling watchers explicitly adopts standard
+provider/notification error behavior rather than adding a hidden error-suppression layer.
+
+### Local evidence and deployment boundaries
+
+The existing UI integration-test project references the samples without merging their assembly
+names or competing `appsettings.json` files into its output. Sixteen process cases cover both
+languages: executable-relative environment JSON and command-line-over-environment precedence;
+settings persistence/backup; explicit upgrade and corruption recovery/reset; offline reporting;
+an exception dispatched through the real UI callback path; pending-work close and host stop;
+real background failure; and invalid options before UI activation. Tests use disposable absolute
+storage and an unrelated working directory, inspect committed JSON and operation outcomes, and
+assert owner drain before exactly-once disposal. The process deadline is a hang guard only.
+These cases use the existing integration CI route, not a new pipeline or evidence of remote runs.
+
+- `.\build.cmd -projects src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj -configuration Debug -binaryLogName InfrastructureSamples.binlog -verbosity minimal`
+  passed with zero warnings/errors. Initial iterations corrected new-source analyzer findings and
+  a test helper referring to a nonpublic repository-root method; no runtime behavior was changed.
+- With `DOTNET_ROOT=<repo>\.dotnet`,
+  `.\artifacts\bin\System.Windows.Forms.UI.IntegrationTests\Debug\net12.0-windows7.0\System.Windows.Forms.UI.IntegrationTests.exe --filter-class System.Windows.Forms.UITests.WinFormsInfrastructureSampleTests --progress off --report-trx --results-directory <repo>\artifacts\TestResults\InfrastructureSamples`
+  passed **16/16** x64 Debug cases with no skips.
+- The equivalent Arcade command with `-configuration Release -binaryLogName InfrastructureSamplesRelease.binlog`
+  passed with zero warnings/errors. The Release executable with the same class/options and
+  `--results-directory <repo>\artifacts\TestResults\InfrastructureSamplesRelease` passed **16/16**
+  x64 Release cases with no skips.
+- `.\build.cmd -projects src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj -configuration Debug -platform x86 /p:TargetArchitecture=x86 -binaryLogName InfrastructureSamplesX86.binlog -verbosity minimal`
+  passed with zero warnings/errors. With `DOTNET_ROOT` and `DOTNET_ROOT_X86` set to
+  `<repo>\.dotnet\x86`,
+  `.\artifacts\bin\System.Windows.Forms.UI.IntegrationTests\x86\Debug\net12.0-windows7.0\System.Windows.Forms.UI.IntegrationTests.exe --filter-class System.Windows.Forms.UITests.WinFormsInfrastructureSampleTests --progress off --report-trx --results-directory <repo>\artifacts\TestResults\InfrastructureSamplesX86`
+  passed **16/16** cases with no skips. Both runner and child transcripts report actual x86
+  execution. This is not an x86 Release, native ARM64 or remote CI pass.
+- After the authoritative Debug build,
+  `.\.dotnet\dotnet.exe publish src\test\integration\ApplicationBuilderInfrastructure\CSharp\ApplicationBuilderInfrastructure.CSharp.csproj -c Debug --no-restore --no-build --self-contained false -o artifacts\tmp\InfrastructurePublish\CSharp --verbosity quiet`
+  and the equivalent VisualBasic project/output command passed. The retained session
+  `infrastructure-deployment-probe.ps1` passed **six** published-app scenarios: both languages,
+  each with `smoke`, `close-pending`, and `host-stop`. It verifies copied configuration and
+  repository-framework DLL hash parity, unrelated working directories, persisted preferences,
+  health/UI exception outcomes, cancellation and drain/disposal order. Transcripts are in
+  `artifacts\log\InfrastructurePublish`. These are real framework-dependent folder-publish runs
+  using the matching preview runtime and adjacent prototype binaries, not stock-runtime or
+  installer acceptance.
+- The repository SDK's `dotnet sln add` attempted to re-add an existing transitive companion
+  project and failed transactionally without a solution change. The three entries were instead
+  added using the existing solution project/configuration/nesting pattern; `dotnet sln Winforms.sln list`
+  recognizes all three. No unrelated solution entry was altered.
+- Explicit-path `dotnet format whitespace --folder --include` checks for the four sample sources
+  and new test source passed with `--verify-no-changes --verbosity quiet`. UTF-8 BOM, CRLF,
+  final-newline and trailing-whitespace checks passed for all five. Both documents' relative
+  links and `git diff --check` passed. `Private=false` build-only sample references prevent their
+  configuration content from being copied into the test runner; only hash-verified sample-owned
+  stale configuration files were removed from the three local test output folders, and rebuilt
+  outputs preserve this isolation. Disposable test/probe stores were removed; reports and the
+  published verification outputs remain under ignored build artifacts. No changes were committed.
+
+The sample README records exact interactive instructions, expected failure/recovery behavior and
+an exploratory deployment matrix. Actual signed/MSIX installation, genuine unelevated read-only
+installation/user-store ACLs, distinct Windows users, Terminal Services disconnect/reconnect,
+actual network isolation, visual/DPI acceptance, native ARM64 and remote CI remain **unexecuted
+external gates**, not simulated passes. No ACL, account, network or machine-wide runtime changes
+were made. Self-contained/single-file/trimming/AOT support is not inferred from a folder publish.
+Shipping API/package approval, Designer-team agreement, provider durability and resource budgets
+remain separate. This child is locally implemented but not fully accepted across those environments;
+the performance child dotnet/winforms#14963 has not been started.
+
 ## Sources reviewed
 
 Repository links above describe the current branch; external implementation links are pinned to
