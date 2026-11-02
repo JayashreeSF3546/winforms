@@ -1,6 +1,7 @@
 parameters:
   name: ''
   targetArchitecture: null
+  skipTests: false
   timeoutInMinutes: 120
   enableMicrobuild: true
   enablePublishBuildArtifacts: true
@@ -13,6 +14,8 @@ jobs:
     displayName: ${{ parameters.name }}
     timeoutInMinutes: ${{ parameters.timeoutInMinutes }}
     variables:
+    - name: _SkipTests
+      value: ${{ parameters.skipTests }}
     - template: /eng/common/templates/variables/pool-providers.yml
     pool:
       ${{ if eq(variables['System.TeamProject'], 'public') }}:
@@ -94,7 +97,7 @@ jobs:
         /bl:$(BUILD.SOURCESDIRECTORY)\artifacts\log\$(_BuildConfig)\Test-${{ parameters.targetArchitecture }}.binlog
         /m:1
       displayName: Run Unit Tests
-      condition: and(eq(variables['System.TeamProject'], 'public'), ne('${{ parameters.targetArchitecture }}', 'arm64'))
+      condition: and(eq(variables['System.TeamProject'], 'public'), ne('${{ parameters.targetArchitecture }}', 'arm64'), ne(variables['_SkipTests'], 'true'))
 
     # Run Integration Tests
     # Tests are run with /m:1 to avoid parallelism across different assemblies which can lead to
@@ -113,7 +116,7 @@ jobs:
       env:
         XUNIT_LOGS: $(BUILD.SOURCESDIRECTORY)\artifacts\log\$(_BuildConfig)
       displayName: Run Integration Tests
-      condition: and(eq(variables['System.TeamProject'], 'public'), ne('${{ parameters.targetArchitecture }}', 'arm64'))
+      condition: and(eq(variables['System.TeamProject'], 'public'), ne('${{ parameters.targetArchitecture }}', 'arm64'), ne(variables['_SkipTests'], 'true'))
 
     # Create Nuget package, sign, and publish
     - script: eng\cibuild.cmd
@@ -148,3 +151,4 @@ jobs:
     - template: post-build-PR.yml
       parameters:
         name: ${{ parameters.name }}
+        targetArchitecture: ${{ parameters.targetArchitecture }}

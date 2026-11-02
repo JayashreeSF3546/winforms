@@ -1,0 +1,59 @@
+#nullable enable
+Microsoft.Extensions.DependencyInjection.WinFormsHealthServiceCollectionExtensions
+static Microsoft.Extensions.DependencyInjection.WinFormsHealthServiceCollectionExtensions.AddWinFormsHealthDiagnostics(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder!
+Microsoft.Extensions.WinForms.WinFormsHealthDiagnostics
+Microsoft.Extensions.WinForms.WinFormsHealthDiagnostics.WinFormsHealthDiagnostics(Microsoft.Extensions.DependencyInjection.IServiceScopeFactory! scopeFactory, Microsoft.Extensions.Hosting.IHostApplicationLifetime! lifetime) -> void
+Microsoft.Extensions.WinForms.WinFormsHealthDiagnostics.CheckHealthAsync(System.Func<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckRegistration!, bool>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.Diagnostics.HealthChecks.HealthReport!>!
+Microsoft.Extensions.Hosting.WinFormsHostBuilderExtensions
+static Microsoft.Extensions.Hosting.WinFormsHostBuilderExtensions.ConfigureWinFormsConfiguration(this Microsoft.Extensions.Hosting.IHostBuilder! builder, string![]? args = null) -> Microsoft.Extensions.Hosting.IHostBuilder!
+Microsoft.Extensions.DependencyInjection.UserSettingsServiceCollectionExtensions
+static Microsoft.Extensions.DependencyInjection.UserSettingsServiceCollectionExtensions.AddJsonUserSettings<T>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! applicationId, int schemaVersion, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T!>! typeInfo, System.Func<T!>! createDefaults, System.Action<Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T!>!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.Changed -> System.EventHandler<Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs!>?
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.LoadAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T!>!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.GetSchemaVersionAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int?>!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.SaveAsync(T! settings, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.WinForms.UserSettingsCommit!>!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.ResetAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.WinForms.UserSettingsCommit!>!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.UpgradeAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.WinForms.UserSettingsCommit!>!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.RecoverAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.WinForms.UserSettingsCommit!>!
+Microsoft.Extensions.WinForms.IUserSettingsService<T>.ImportAsync(System.Func<T!>! readLegacySettings, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.WinForms.UserSettingsCommit?>!
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.JsonUserSettingsOptions() -> void
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.StorageDirectory.get -> string?
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.StorageDirectory.set -> void
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.LockTimeout.get -> System.TimeSpan
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.LockTimeout.set -> void
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.Validate.get -> System.Action<T!>?
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.Validate.set -> void
+Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T>.Migrations.get -> System.Collections.Generic.IDictionary<int, System.Func<System.Text.Json.JsonElement, System.Text.Json.JsonElement>!>!
+Microsoft.Extensions.WinForms.UserSettingsCommit
+Microsoft.Extensions.WinForms.UserSettingsCommit.SchemaVersion.get -> int
+Microsoft.Extensions.WinForms.UserSettingsCommit.Revision.get -> long
+Microsoft.Extensions.WinForms.UserSettingsCommit.Settings.get -> System.Text.Json.JsonElement
+Microsoft.Extensions.WinForms.UserSettingsCommit.NotificationCompletion.get -> System.Threading.Tasks.Task!
+Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs
+Microsoft.Extensions.WinForms.UserSettingsChangedEventArgs.Commit.get -> Microsoft.Extensions.WinForms.UserSettingsCommit!
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.ApplicationStarted = 0 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.ApplicationStopping = 1 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.ApplicationStopped = 2 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.ThreadException = 3 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.AppDomainUnhandledException = 4 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.UnobservedTaskException = 5 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsDiagnosticSource.RunFailure = 6 -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsExceptionLogging
+static Microsoft.Extensions.WinForms.WinFormsExceptionLogging.Attach(Microsoft.Extensions.WinForms.WinFormsApplication! application, Microsoft.Extensions.Logging.ILogger! logger, System.Threading.ThreadExceptionEventHandler! handleThreadException, System.Action<Microsoft.Extensions.WinForms.WinFormsLoggingFailure!>! reportLoggingFailure, System.Action<Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions!>? configure = null) -> Microsoft.Extensions.WinForms.WinFormsExceptionLogging!
+Microsoft.Extensions.WinForms.WinFormsExceptionLogging.DiagnosticCompletion.get -> System.Threading.Tasks.Task!
+Microsoft.Extensions.WinForms.WinFormsExceptionLogging.LogRunFailure(System.Exception! exception) -> void
+Microsoft.Extensions.WinForms.WinFormsExceptionLogging.Dispose() -> void
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.WinFormsExceptionLoggingOptions() -> void
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.LogAppDomainExceptions.get -> bool
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.LogAppDomainExceptions.set -> void
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.LogUnobservedTaskExceptions.get -> bool
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.LogUnobservedTaskExceptions.set -> void
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.IncludeExceptionDetails.get -> bool
+Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions.IncludeExceptionDetails.set -> void
+Microsoft.Extensions.WinForms.WinFormsLoggingFailure
+Microsoft.Extensions.WinForms.WinFormsLoggingFailure.Source.get -> Microsoft.Extensions.WinForms.WinFormsDiagnosticSource
+Microsoft.Extensions.WinForms.WinFormsLoggingFailure.Exception.get -> System.Exception!
