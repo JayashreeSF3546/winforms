@@ -713,6 +713,122 @@ This prototype selection is not official API approval.
   followed by `--verify-no-changes --verbosity quiet`, passed. New-file BOM/CRLF/final-newline/
   trailing-whitespace checks, relative documentation links, and `git diff --check` passed.
 
+## Service integration coverage (dotnet/winforms#14961)
+
+`WinFormsServiceIntegrationTests` consolidates cross-service behavior through complete applications
+using the real Generic Host, in the existing `System.Windows.Forms.Tests` project. It carries the
+`Category=ServiceIntegration` trait for focused selection and the existing sequential collection
+for application/thread-context isolation. Existing configuration, settings, logging, health,
+runtime, scope, and Designer regressions remain intact; these tests supplement rather than copy them.
+No runtime/public API, service dependency, or package contract changed.
+
+The six added cases cover:
+
+- Custom `IServiceProviderFactory<TBuilder>` and `ConfigureContainer<TBuilder>` hooks, a custom
+  configuration source overriding deployment JSON and command-line values, eager invalid-options
+  rejection before UI activation, one provider build, the coordinated IHost identity, and exactly-once
+  ownership/disposal. The custom factory deliberately uses the standard DI implementation under
+  its custom builder; this proves extension hooks, not every third-party container implementation.
+- Explicit application-owned asynchronous logging flush in hosted `StopAsync`, both success and
+  failure, while the UI barrier is complete and provider disposal/application return remain pending.
+  A handled UI exception and lifecycle diagnostics survive buffering; a flush failure remains the
+  propagated application failure. The synthetic provider's synchronous disposal drains the final
+  Stopped diagnostic emitted after hosted-service flush. This is not evidence of a real file sink,
+  asynchronous factory disposal, forced-termination durability, or silent provider-loss detection.
+- Typed settings upgrade and concurrent complete-document writes during hosted startup, completed
+  notifications before UI activation, then a separate complete application run rejecting a damaged
+  primary until explicit recovery restores its valid backup. Malformed JSON preserves the existing
+  `InvalidDataException` with a JSON inner exception; the implementation was not changed to suit
+  a test expectation.
+- A standard BackgroundService-owned health operation receiving committed host cancellation,
+  awaiting a standard per-check asynchronous scope, and preventing service stop/root-provider
+  disposal until the check's resource disposal completes. This scenario deliberately selects an
+  infinite cooperative host-stop timeout; it does not promise a timed-out/non-cooperative worker is
+  automatically joined. Existing timeout and non-cooperative cancellation cases remain separate.
+
+All coordination uses task-completion signals, operation completion, and the existing bounded
+caller-owned STA test harness. No sleeps, elapsed-time assertions, competing dispatcher, or scheduler
+were added. Existing focused regressions retain configuration precedence/reload/invalid options,
+settings persistence/upgrade/corruption/cross-process locking and notification concurrency, logging
+filter/provider/global-event failures, and health cancellation/readiness/offline reporting.
+
+### Existing CI route and minimal template repairs
+
+The SDK-included source remains in the existing unit test project, which already references the
+optional companion. `azure-pipelines-PR.yml` includes the x64/x86/arm64 jobs using
+`eng/pipelines/build-PR.yml`, whose matrix selects Debug and Release. Public x64/x86 jobs run
+`eng\cibuild.cmd -test`; their existing excluded traits are `IgnoreForCI` and `failing`, neither of
+which marks these cases. The source/test changes are outside the PR trigger's documentation exclusions.
+No duplicate workflow, runner, full-suite reexecution step, or new package was added.
+
+CI source inspection exposed inherited parameter mismatches. The user authorized the recommended
+minimal repairs: declare the already-passed `skipTests`, preserve it in the job's `_SkipTests` variable,
+gate unit/integration execution and result publication when it is true, declare the post-build
+architecture/artifact/title/merge parameters already referenced there, and pass the current architecture
+to the post-build call. Defaults preserve normal test execution, standard task merging behavior, and
+the existing disabled optional artifact block. Public/internal eligibility and ARM64 test exclusions
+are unchanged; ARM64 builds are not ARM64 runtime-test evidence. `eng/common` was not modified.
+
+The CI-style x86 local build also exposed a generator compiled for x86 which the x64 compiler could
+not load (`CS8034`). The private `netstandard2.0` generator now explicitly targets AnyCPU, preserving
+its compiler-host portability without changing runtime assembly targeting or disabling analyzers.
+This build-only correction is directly required to validate the existing x86 test leg.
+
+Static YAML parsing, template-declaration/call-site checks, unchanged architecture/configuration
+matrix checks, and test/publication condition cases exercise normal, skipped, public/internal,
+x64/x86/arm64, and unset macro behavior. These checks are not authenticated Azure template expansion,
+queue-time variable evaluation, actual CI success, or publication evidence.
+
+Remote CI has **not** been run: GitHub CLI is unauthenticated in this environment, and no authenticated
+Azure execution/validation context is available. The public issue was read anonymously, not through
+changed credentials. The child remains incomplete for its remote-CI acceptance requirement until
+the appropriate PR/pipeline runs are linked and reviewed. Existing API/package review, actual
+third-party container/provider deployment, terminating CLR/task paths, native ARM64/Terminal Services,
+manual deployments, and resource budgets remain external/follow-up gates. No sample/performance child
+was started.
+
+### Local validation evidence
+
+- `.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -verbosity minimal -binaryLogName ServiceIntegrationTests.binlog`
+  passed with zero warnings/errors. The first focused run caught a test expecting an unwrapped JSON
+  exception; the assertion was corrected to the existing settings contract and no product code changed.
+- With `DOTNET_ROOT` pointing to the repository `.dotnet`,
+  `.\artifacts\bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe --filter-class System.Windows.Forms.Tests.WinFormsServiceIntegrationTests --report-trx --results-directory <repo>\artifacts\TestResults\ServiceIntegration`
+  passed **6/6** x64 Debug cases, with no skips.
+- `.\artifacts\bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe --filter-class 'System.Windows.Forms.Tests.WinForms*' --report-trx --results-directory <repo>\artifacts\TestResults\ServiceIntegrationRegression`
+  passed **265/265** combined x64 Debug regressions, with no skips.
+- The initial targeted Release build lacked the existing `UnsupportedTypes` test fixture.
+  `.\build.cmd -projects 'src\test\unit\*Framework\UnsupportedTypes\UnsupportedTypes.csproj' -configuration Release -verbosity minimal -binaryLogName ServiceIntegrationReleaseFixture.binlog`
+  built that actual fixture with zero warnings/errors. The project glob avoids the batch wrapper's
+  splitting of the fixture directory's space; no Debug binary was copied into Release.
+  `.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -configuration Release -verbosity minimal -binaryLogName ServiceIntegrationRelease.binlog`
+  then passed with zero warnings/errors, and the Release executable's
+  `--filter-class System.Windows.Forms.Tests.WinFormsServiceIntegrationTests --report-trx --results-directory <repo>\artifacts\TestResults\ServiceIntegrationRelease`
+  run passed **6/6** x64 Release cases, with no skips.
+- Before correcting generator targeting, the CI-style `-platform x86 /p:TargetArchitecture=x86`
+  build exposed `CS8034`. Architecture-neutral assemblies were also run with the actual x86 runtime:
+  `.\.dotnet\x86\dotnet.exe .\artifacts\bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.dll --filter-class System.Windows.Forms.Tests.WinFormsServiceIntegrationTests --report-trx --results-directory <repo>\artifacts\TestResults\ServiceIntegrationX86Debug`
+  and the equivalent Release DLL/result-directory command both passed **6/6**, with runner-reported
+  x86 architecture and no skips. Direct DLL invocation avoided treating an existing x64 apphost as
+  an x86 executable. No missing runtime was silently substituted.
+- After the generator portability correction,
+  `.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -platform x86 /p:TargetArchitecture=x86 -verbosity minimal -binaryLogName ServiceIntegrationX86Debug.binlog`
+  and the equivalent `-configuration Release -binaryLogName ServiceIntegrationX86Release.binlog`
+  build both passed with zero warnings/errors. With `DOTNET_ROOT`/`DOTNET_ROOT_X86` set to
+  `<repo>\.dotnet\x86`,
+  `.\artifacts\bin\System.Windows.Forms.Tests\x86\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe --filter-class System.Windows.Forms.Tests.WinFormsServiceIntegrationTests --report-trx --results-directory <repo>\artifacts\TestResults\ServiceIntegrationX86Debug`
+  and the equivalent x86 Release executable/result-directory command each passed **6/6**, with no
+  skips. These match the pipeline's platform/architecture properties and execute real x86 apphosts;
+  they are local evidence, not remote CI results.
+- `node <session>\files\service-integration-yaml-check\check.cjs` passed parsing of the three local
+  YAML documents, declaration/call-site and matrix checks, and **28** modeled test/publication
+  condition cases. A missing YAML parser was installed only into the temporary session tool directory,
+  with dependency scripts disabled, not into repository dependencies.
+- `.\.dotnet\dotnet.exe format whitespace --folder --include src\test\unit\System.Windows.Forms\Microsoft\Extensions\WinForms\WinFormsServiceIntegrationTests.cs --verify-no-changes --verbosity quiet`
+  passed. New C# BOM/CRLF/final-newline/trailing-whitespace checks, all 11 relative architecture-document
+  links, and `git diff --check` passed. Only the inspected temporary YAML dependency directory was
+  removed; its validation script and build/TRX reports remain available. No changes were committed.
+
 ## Sources reviewed
 
 Repository links above describe the current branch; external implementation links are pinned to
