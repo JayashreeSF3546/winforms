@@ -711,21 +711,31 @@ public class ComboBoxTests
                 customForeColor,
                 channelTolerance: foreColorPixelTolerance);
             Color disabledBorderColor = ModernControlColorMath.GetDisabledBorderColor();
-            int enabledDisabledBorderPixels = CountPixels(
-                enabledBitmap,
-                disabledBorderColor,
-                channelTolerance: disabledBorderPixelTolerance);
             int disabledDisabledBorderPixels = CountPixels(
                 disabledBitmap,
                 disabledBorderColor,
+                channelTolerance: disabledBorderPixelTolerance);
+            Color enabledStrokeColor = ModernControlColorMath.GetFieldStrokeStrong(
+                control.BackColor,
+                Application.IsDarkModeEnabled);
+            int enabledStrokeInEnabled = CountPixels(
+                enabledBitmap,
+                enabledStrokeColor,
+                channelTolerance: disabledBorderPixelTolerance);
+            int enabledStrokeInDisabled = CountPixels(
+                disabledBitmap,
+                enabledStrokeColor,
                 channelTolerance: disabledBorderPixelTolerance);
 
             Assert.True(
                 disabledForeColorPixels <= enabledForeColorPixels,
                 "Disabled ComboBox must not increase ForeColor-like border pixels.");
             Assert.True(
-                disabledDisabledBorderPixels > enabledDisabledBorderPixels,
-                "Disabled ComboBox should shift border pixels toward the disabled border color.");
+                enabledStrokeInDisabled < enabledStrokeInEnabled,
+                "Disabled ComboBox must not paint the enabled field-stroke border color.");
+            Assert.True(
+                disabledDisabledBorderPixels > 0,
+                "Disabled ComboBox border should render with the disabled border color.");
         }
     }
 
@@ -2856,6 +2866,79 @@ public class ComboBoxTests
         control.Font = font1;
         Assert.Same(font1, control.Font);
         Assert.Equal(3, callCount);
+    }
+
+    [WinFormsTheory]
+    [EnumData<AutoCompleteMode>]
+    public void ComboBox_Font_ScaledDuringHandleCreation_DoesNotRecreateHandle(AutoCompleteMode autoCompleteMode)
+    {
+        using IDisposable dpiScope = ScaleHelper.EnterDpiAwarenessScope(DPI_AWARENESS_CONTEXT.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        using Form parent = new() { AutoScaleMode = AutoScaleMode.None };
+        Assert.NotEqual(IntPtr.Zero, parent.Handle);
+        using Font font = new("Arial", 12);
+        using ComboBox control = new()
+        {
+            Font = font,
+            AutoCompleteSource = AutoCompleteSource.ListItems,
+            AutoCompleteMode = autoCompleteMode
+        };
+        control.Items.AddRange(["First", "Second"]);
+
+        int fontChangedCallCount = 0;
+        int handleCreatedCallCount = 0;
+        int handleDestroyedCallCount = 0;
+        control.FontChanged += (sender, e) => fontChangedCallCount++;
+        control.HandleCreated += (sender, e) => handleCreatedCallCount++;
+        control.HandleDestroyed += (sender, e) => handleDestroyedCallCount++;
+
+        parent.Controls.Add(control);
+        Assert.False(control.IsHandleCreated);
+        control.DeviceDpiInternal = (int)PInvoke.GetDpiForWindow(parent) * 2;
+        Assert.NotEqual(IntPtr.Zero, control.Handle);
+
+        Assert.True(control.IsHandleCreated);
+        Assert.Equal(parent.DeviceDpi, control.DeviceDpi);
+        Assert.Equal(font.Size / 2, control.Font.Size);
+        Assert.Equal(1, fontChangedCallCount);
+        Assert.Equal(1, handleCreatedCallCount);
+        Assert.Equal(0, handleDestroyedCallCount);
+        Assert.Equal(autoCompleteMode, control.AutoCompleteMode);
+        Assert.Equal(2, (int)PInvokeCore.SendMessage(control, PInvoke.CB_GETCOUNT));
+
+        control.SelectedIndex = 1;
+        Assert.Equal("Second", control.Text);
+    }
+
+    [WinFormsTheory]
+    [EnumData<AutoCompleteMode>]
+    public void ComboBox_Font_SetWithHandle_RecreatesHandleForAutoComplete(AutoCompleteMode autoCompleteMode)
+    {
+        using ComboBox control = new()
+        {
+            AutoCompleteSource = AutoCompleteSource.ListItems,
+            AutoCompleteMode = autoCompleteMode
+        };
+        control.Items.AddRange(["First", "Second"]);
+        control.CreateControl();
+
+        int handleCreatedCallCount = 0;
+        int handleDestroyedCallCount = 0;
+        control.HandleCreated += (sender, e) => handleCreatedCallCount++;
+        control.HandleDestroyed += (sender, e) => handleDestroyedCallCount++;
+
+        using Font font = new("Arial", 12);
+        control.Font = font;
+
+        int expectedCallCount = autoCompleteMode == AutoCompleteMode.None ? 0 : 1;
+        Assert.True(control.IsHandleCreated);
+        Assert.Same(font, control.Font);
+        Assert.Equal(expectedCallCount, handleCreatedCallCount);
+        Assert.Equal(expectedCallCount, handleDestroyedCallCount);
+        Assert.Equal(autoCompleteMode, control.AutoCompleteMode);
+        Assert.Equal(2, (int)PInvokeCore.SendMessage(control, PInvoke.CB_GETCOUNT));
+
+        control.SelectedIndex = 1;
+        Assert.Equal("Second", control.Text);
     }
 
     public static IEnumerable<object[]> ForeColor_Set_TestData()
