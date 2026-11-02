@@ -922,7 +922,174 @@ external gates**, not simulated passes. No ACL, account, network or machine-wide
 were made. Self-contained/single-file/trimming/AOT support is not inferred from a folder publish.
 Shipping API/package approval, Designer-team agreement, provider durability and resource budgets
 remain separate. This child is locally implemented but not fully accepted across those environments;
-the performance child dotnet/winforms#14963 has not been started.
+the performance child dotnet/winforms#14963 is described separately below.
+
+## Infrastructure performance probe (dotnet/winforms#14963)
+
+The standalone
+[`WinFormsInfrastructurePerformance`](../../src/test/integration/WinFormsInfrastructurePerformance/README.md)
+probe compares a conventional manual Generic Host plus `Application.Run` with Application Builder
+over the same services, providers, settings implementation and bounded workload. A hostless empty
+reference remains separate; it is not presented as an equivalent full-service baseline. Profiles
+isolate empty hosting, configuration/options and explicit reload, settings persistence/failure/
+recovery/upgrade, filtered and buffered logging/explicit stop-time flush, health and a cooperative
+worker, and their combined workload. Watchers are compared off/on in separate configuration runs.
+
+Each cycle creates and tears down a complete native UI lifetime. Both paths finish background
+operations and all commit notifications before final close, then drain hosted services and
+dispose the provider after UI cleanup. The probe verifies native dispatch/disposal, exact completed
+work counts, asynchronous health-scope disposal, and exclusive reopening of every owned file.
+Timing and process-wide allocation boundaries cover the same operation action, including the
+exact flush action. First use, warmed cycles, raw checkpoints, baseline/proposed deltas and full
+run metadata remain separate. Preallocated report storage avoids reporting a growing result
+collection as service retention. Kernel-handle totals are not claimed to be file-handle counts.
+Weak references track Forms, application/host owners and actual root providers.
+
+The explicitly buffered test logger measures formatting, buffering and an in-memory flush call.
+It does not establish durable logging throughput, file-provider flush latency or exception-adapter
+performance. Both paths use the same JSON settings service, so their difference measures integration
+overhead, not a new storage algorithm against legacy settings. Explicit reload does not measure
+watcher delivery latency. Collection/checkpoint work is outside the timed lifetimes but can perturb
+the next cycle. The probe's README documents commands, output schemas and interpretation limits.
+
+### Lifetime defect discovered by repeated measurement
+
+Long runs exposed an intermittent real-runner defect, not an acceptable skipped sample: during
+user-close teardown, the standard host's echoed stop could enqueue another UI exit. Processing it
+before the original quit message could post a second quit, disposing the next lifetime's Form
+before its first posted dispatch. The user approved extending this child to fix that blocker.
+
+A deterministic test synchronizes the host echo before the first close unwinds, then runs a second
+complete application on the same STA. It failed on **both** message-loop backends before the fix.
+The runner now marks UI stopping before signaling the host; stop requests and already-posted stop
+callbacks cannot start a second exit once UI teardown is committed. A racing dispatcher disposal
+during that committed teardown also cannot introduce another quit. Four regression cases cover
+both backends and both echoed-first/already-posted stop orderings. No queue draining, sleeps,
+weakened dispatch checks or retries of failed cycles are used.
+
+### Local Release measurements and remaining blockers
+
+The following are exploratory measurements on an Intel Core i5-8265U, eight logical processors,
+Windows build 26200, x64 `.NET 12.0.0-alpha.1.26529.106`, SDK
+`12.0.100-alpha.1.26480.102`, Hosting/HealthChecks 10.0.10, outside Terminal Services.
+The source revision was `e1dd1038d` plus this uncommitted implementation. Each manifest records
+the actual binary hashes, runtime configuration/switches and worktree status. No build/test ran
+concurrently with these comparison processes; this shared machine was not otherwise isolated or
+CPU/storage-tuned. Substantial between-process timing variation prevents general speedup claims.
+
+- `.\src\test\integration\WinFormsInfrastructurePerformance\Measure.ps1 -Cycles 100 -Warmup 5 -Repeats 3 -Workloads empty,configuration,logging,health`
+  **passed**: 33 processes, each with 100 measured complete lifetimes, plus first use and five
+  warmups. Reports: `artifacts\log\InfrastructurePerformance\20261102-221230-258`.
+  Across the three paired process medians, integrated-minus-conventional configure/build time
+  ranged from -0.194 to +0.058 ms for empty hosting, -0.562 to +0.273 ms for configuration without
+  watchers, and -0.481 to -0.023 ms with watchers. Full-lifetime allocation differences were
+  +10,096 to +19,496 bytes, +1,560 to +5,112 bytes, and +2,256 to +12,464 bytes respectively.
+  Startup differences ranged from -1.281 to +2.215 ms for empty, -4.994 to +5.745 ms for
+  configuration without watchers, and -8.313 to +0.235 ms with watchers. Logging startup
+  differences were +2.112 to +18.845 ms; health ranged from -47.734 to +15.901 ms. These are
+  observed ranges, not inferred API guarantees or acceptable regression budgets.
+- `.\src\test\integration\WinFormsInfrastructurePerformance\Measure.ps1 -Cycles 3 -Warmup 1 -Repeats 1 -Workloads settings,all`
+  **passed**: five short process comparisons. Reports:
+  `artifacts\log\InfrastructurePerformance\20261102-222114-746`.
+  In the combined profile, conventional/integrated warmed medians were configure/build
+  **5.708/8.911 ms**, startup **55.949/57.990 ms**, shutdown **21.845/32.995 ms**,
+  complete lifetime **193.996/209.585 ms**, and lifetime allocation **455,296/452,984 bytes**.
+  Process-cold build was 127.137/168.735 ms, startup 604.134/499.236 ms, and external
+  launch-to-dispatch 797.399/751.513 ms. Three measured samples are not a stability study.
+- In that same short combined profile, conventional/integrated normalized median settings-save
+  time was **20.108/18.633 ms**, load **1.296/1.037 ms**, and the whole deliberately damaged-file
+  rejection/recovery/verification operation **31.294/25.127 ms**. Buffered logging was
+  **0.001045/0.000978 ms per record**, both **101.6 allocated bytes per record**;
+  health was **0.173/0.297 ms**; the in-memory stop-time flush was **0.0088/0.0048 ms** with zero
+  observed allocation. The raw report retains upgrade/reset, disabled-record and options/reload
+  measurements too. Do not equate this flush with a durable file sink or compare settings latency
+  as though the two paths had different persistence algorithms.
+- In the 33 long lightweight-backend processes, final Form/application/provider weak counts
+  were all zero and GDI deltas were zero. Warmed-to-final managed deltas ranged from -14,504 to
+  +24,416 bytes, private bytes +401,408 to +8,794,112, working set -733,184 to +9,261,056,
+  kernel handles +1 to +9, threads 0 to +1, and USER objects -4 to +21. Checkpoints matter:
+  for example, integrated empty USER objects went 16, 36, 36, 36, 36 at 0/25/50/75/100
+  measured cycles, whereas watcher-enabled configuration fluctuated 19, 23, 19, 24, 23.
+  These finite observations are not general leak-freedom proof.
+- `.\src\test\integration\WinFormsInfrastructurePerformance\Measure.ps1 -Cycles 100 -Warmup 5 -Repeats 1 -Workloads empty,health -Backends component-manager`
+  **passed its work/ownership checks**, but reproduced the inherited resource-growth concern.
+  Reports: `artifacts\log\InfrastructurePerformance\20261102-222136-971`.
+  Hostless empty USER objects rose **16, 41, 66, 91, 116**; integrated health rose
+  **18, 45, 70, 95, 120**. Managed growth was approximately 148-164 KB per 100 lifetimes
+  across these five cases, with zero final Form/owner/provider weak survivors and zero GDI
+  deltas. Conventional empty/health and integrated empty also added 100 USER objects.
+  This reproduces a backend-wide trend, not an infrastructure-only regression or an accepted
+  budget. The earlier hosted retaining-root observation is not erased by zero survivors here.
+
+The full default `-Cycles 100 -Warmup 5 -Repeats 3` run **did not complete**. Before the lifetime
+fix, attempts aborted on an undispatched integrated lifetime. After that fix, the run in
+`artifacts\log\InfrastructurePerformance\20261102-220720-590` completed the conventional settings
+process but aborted during integrated settings with `IOException: Unable to remove the file to
+be replaced` from native `File.Replace`. This error also occurred once in an initial short Debug
+test; its subsequent whole-test retry passed, without adding any retry to the probe or service.
+
+Two independent host-free PowerShell/.NET controls reproduced the identical native error using
+only write-through temporary-file creation, flush-to-disk, primary read, and `File.Replace` with
+backup: after 307 successful replacements in the user's C-volume temporary directory, and after
+18 on the repository's D-volume artifact directory. All three remaining files in each control
+could subsequently be opened exclusively and had ordinary Archive attributes. This isolates the
+failure from host coordination and the settings implementation, but does **not** establish its
+OS/storage/filter-driver cause. No security settings, ACLs or machine-wide configuration were
+changed; no unsafe replacement fallback or blind retry was introduced. Failed-run stdout/stderr
+remain alongside successful raw reports. The short persistence numbers cannot stand in for the
+blocked 100-cycle persistence/failure-recovery stability evidence.
+
+For small applications, preserve the hostless path and optional service composition rather than
+enabling a full stack by default. Configuration/reload added roughly 230 KB to the observed
+whole-lifetime allocation relative to empty hosting; disabled logging still has host/provider
+cost, enabled buffering allocates per record, and durable settings commits are millisecond-scale
+work that must remain off the UI thread. Enable watchers and explicit health work only when
+needed. These observations identify costs to consider; they do not authorize a new default or
+replace owner-approved startup/memory/native-resource budgets.
+
+Long persistence runs on a stable representative storage environment, the component-manager
+resource investigation, native ARM64, Terminal Services, remote CI, provider durability and
+owner-agreed budgets remain open. Local implementation is not full acceptance of this child.
+
+### Local correctness/build evidence
+
+- `.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -configuration Debug -verbosity minimal -binaryLogName InfrastructureLifetimeRegression.binlog`
+  passed with zero warnings/errors. With `DOTNET_ROOT` selecting `.dotnet`,
+  `.\artifacts\bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe --filter-class 'System.Windows.Forms.Tests.WinForms*' --report-trx --results-directory artifacts\TestResults\InfrastructureLifetimeRegressionAfter --output Minimal`
+  passed **269 tests**, including the four new stop-order/backend cases. The pre-fix focused
+  run using `--filter-method '*Run_UserCloseWithConcurrentHostStop_DoesNotQuitNextLifetime'`
+  failed both then-existing backend cases at the second lifetime's dispatch assertion.
+- `.\build.cmd -projects src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj -configuration Debug -verbosity minimal -binaryLogName InfrastructurePerformanceTests.binlog`
+  and the same command with `-configuration Release` both passed with zero warnings/errors.
+  Their runners,
+  `.\artifacts\bin\System.Windows.Forms.UI.IntegrationTests\Debug\net12.0-windows7.0\System.Windows.Forms.UI.IntegrationTests.exe --filter-class '*WinForms*' --report-trx --results-directory artifacts\TestResults\InfrastructurePerformanceDebugFinal --output Minimal`
+  and
+  `.\artifacts\bin\System.Windows.Forms.UI.IntegrationTests\Release\net12.0-windows7.0\System.Windows.Forms.UI.IntegrationTests.exe --filter-class '*WinForms*' --report-trx --results-directory artifacts\TestResults\InfrastructurePerformanceRelease --output Minimal`,
+  each reported **73 passed / 40 failed / zero skipped**. All seven new performance-process cases
+  passed in each run, as did the other 66 non-failing cases. All 40 failures were the unchanged
+  `WinFormsApplicationSampleTests.Sample_DispatchesAndCleansUpBeforeStopped`: the existing
+  C#/VB lifetime samples write lifecycle diagnostics with `Debug.WriteLine`, while those tests
+  require redirected stdout lines such as `Started`; stdout was empty despite exit code zero.
+  The discrepancy exists in the committed sample/test sources and was not changed in this child.
+  These broader runs are **not** reported as green.
+- `.\build.cmd -projects src\test\integration\UIIntegrationTests\System.Windows.Forms.UI.IntegrationTests.csproj -configuration Debug -platform x86 -verbosity minimal -binaryLogName InfrastructurePerformanceTestsX86.binlog`
+  passed with zero warnings/errors. With both `DOTNET_ROOT` and `DOTNET_ROOT_X86` selecting
+  `.dotnet\x86`,
+  `.\artifacts\bin\System.Windows.Forms.UI.IntegrationTests\x86\Debug\net12.0-windows7.0\System.Windows.Forms.UI.IntegrationTests.exe --filter-class '*WinFormsInfrastructurePerformanceTests' --report-trx --results-directory artifacts\TestResults\InfrastructurePerformanceX86 --output Minimal`
+  reported **six passed / one failed / zero skipped**. The conventional full-stack lightweight
+  case surfaced the same native replacement error, now on x86; the integrated full-stack cases
+  and both watchers-on cases completed. No x86 retry or architecture acceptance is claimed.
+- `.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj -configuration Debug -platform x86 -verbosity minimal -binaryLogName InfrastructureLifetimeRegressionX86.binlog`
+  passed with zero warnings/errors. With the same x86 runtime selection,
+  `.\artifacts\bin\System.Windows.Forms.Tests\x86\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe --filter-method '*Run_UserCloseWithConcurrentHostStop_DoesNotQuitNextLifetime' --report-trx --results-directory artifacts\TestResults\InfrastructureStopRegressionX86 --output Minimal`
+  passed all **four** deterministic regression cases.
+- Explicit-file `dotnet format whitespace --folder --include` verification with
+  `--verify-no-changes --verbosity quiet` passed for all six affected C# files. UTF-8 BOM/CRLF,
+  final-newline and trailing-whitespace checks passed. `Measure.ps1` parsed successfully;
+  `.\.dotnet\dotnet.exe sln .\Winforms.sln list` included the probe, all 15 local documentation
+  links resolved, and `git diff --check` passed. Native-control findings were recorded in
+  `artifacts\log\InfrastructurePerformance\native-replacement-controls.json` and both explicitly
+  owned control stores were removed. No changes were committed.
 
 ## Sources reviewed
 

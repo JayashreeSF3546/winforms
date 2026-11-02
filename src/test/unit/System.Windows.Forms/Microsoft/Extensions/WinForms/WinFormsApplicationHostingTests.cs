@@ -18,6 +18,51 @@ namespace System.Windows.Forms.Tests;
 public class WinFormsApplicationHostingTests
 {
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void Run_UserCloseWithConcurrentHostStop_DoesNotQuitNextLifetime(bool componentManager, bool stopAlreadyPosted)
+    {
+        using AppContextSwitchScope scope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
+        RunOnSta(() =>
+        {
+            for (int cycle = 0; cycle < 2; cycle++)
+            {
+                using Form form = new();
+                using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                    .UseStartupForm(form)
+                    .UseHost(new HostBuilder())
+                    .Build();
+                using ManualResetEventSlim hostStopEchoed = new();
+                var lifetime = application.Host!.Services.GetRequiredService<IHostApplicationLifetime>();
+                using CancellationTokenRegistration registration = lifetime.ApplicationStopping.Register(hostStopEchoed.Set);
+                application.Lifetime.ApplicationStopping += (_, _) =>
+                    hostStopEchoed.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken).Should().BeTrue();
+                bool dispatched = false;
+                Task? stop = null;
+                form.Shown += (_, _) => form.BeginInvoke(() =>
+                {
+                    dispatched = true;
+                    if (stopAlreadyPosted)
+                    {
+                        stop = application.StopAsync();
+                    }
+
+                    form.Close();
+                });
+
+                application.Run(TestContext.Current.CancellationToken);
+                stop?.GetAwaiter().GetResult();
+
+                dispatched.Should().BeTrue($"lifetime {cycle} must dispatch before shutdown");
+                form.IsDisposed.Should().BeTrue();
+                Application.MessageLoop.Should().BeFalse();
+            }
+        });
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void Run_ExplicitHealthReadiness_PrecedesUiAndExcludesOfflineDiagnostics(bool ready)
