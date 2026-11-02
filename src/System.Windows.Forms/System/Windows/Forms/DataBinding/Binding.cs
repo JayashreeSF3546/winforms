@@ -3,8 +3,6 @@
 
 using System.ComponentModel;
 using System.Globalization;
-using System.Reflection;
-using System.Linq.Expressions;
 
 namespace System.Windows.Forms;
 
@@ -452,20 +450,11 @@ public partial class Binding
                     EventDescriptor? ed = TypeDescriptor.GetEvents(BindableComponent).Find(changeEventName, true);
                     if (ed is not null)
                     {
-                        try
+                        _propChangeDelegate = CreateDelegateForPropertyChange(ed.EventType);
+                        if (_propChangeDelegate is not null)
                         {
-                            _propChangeDelegate = CreateDelegateForPropertyChange(ed.EventType);
-                            if (_propChangeDelegate is not null)
-                            {
-                                ed.AddEventHandler(BindableComponent, _propChangeDelegate);
-                                _propChangeEvent = ed;
-                            }
-                        }
-                        catch
-                        {
-                            // ignore and fall back to AddValueChanged
-                            _propChangeDelegate = null;
-                            _propChangeEvent = null;
+                            ed.AddEventHandler(BindableComponent, _propChangeDelegate);
+                            _propChangeEvent = ed;
                         }
                     }
 
@@ -1174,44 +1163,18 @@ public partial class Binding
         }
     }
 
-
+    /// <summary>
+    ///  Binds compatible change event signatures without casting event arguments at invocation time.
+    /// </summary>
     private Delegate? CreateDelegateForPropertyChange(Type delegateType)
     {
-        MethodInfo? invoke = delegateType.GetMethod("Invoke");
-        if (invoke is null)
-        {
-            return null;
-        }
+        EventHandler handler = Target_PropertyChanged;
 
-        ParameterInfo[] parameters = invoke.GetParameters();
-        if (parameters.Length < 2 || invoke.ReturnType != typeof(void))
-        {
-            return null;
-        }
-
-        Type senderType = parameters[0].ParameterType;
-        Type argsType = parameters[1].ParameterType;
-
-        // Target method to call: Target_PropertyChanged(object?, EventArgs)
-        MethodInfo? targetMethod = typeof(Binding).GetMethod("Target_PropertyChanged", BindingFlags.NonPublic | BindingFlags.Instance);
-        if (targetMethod is null)
-        {
-            return null;
-        }
-
-        // Parameters for the lambda must match the event delegate signature
-        ParameterExpression senderParam = Expression.Parameter(senderType, "sender");
-        ParameterExpression argsParam = Expression.Parameter(argsType, "e");
-
-        // Convert sender to object and args to EventArgs (if necessary)
-        Expression senderAsObject = Expression.Convert(senderParam, typeof(object));
-        Expression argsAsEventArgs = argsType == typeof(EventArgs) ? (Expression)argsParam : Expression.Convert(argsParam, typeof(EventArgs));
-
-        // Call Target_PropertyChanged(this, (object)sender, (EventArgs)args)
-        Expression call = Expression.Call(Expression.Constant(this), targetMethod, senderAsObject, argsAsEventArgs);
-
-        LambdaExpression lambda = Expression.Lambda(delegateType, call, senderParam, argsParam);
-        return lambda.Compile();
+        return Delegate.CreateDelegate(
+            delegateType,
+            handler.Target,
+            handler.Method,
+            throwOnBindFailure: false);
     }
 
     [MemberNotNullWhen(true, nameof(_bindingManagerBase))]

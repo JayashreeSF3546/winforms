@@ -3,12 +3,13 @@
 
 #nullable disable
 
+using System.ComponentModel;
 using System.Globalization;
+using System.Reflection;
 using System.Security;
 
 namespace System.Windows.Forms.Tests;
 
-// NB: doesn't require thread affinity
 public class BindingTests
 {
     public static IEnumerable<object[]> Ctor_String_Object_String_TestData()
@@ -613,6 +614,161 @@ public class BindingTests
         binding.BindingComplete -= handler;
         binding.WriteValue();
         Assert.Equal(0, callCount);
+    }
+
+    [WinFormsTheory]
+    [InlineData(nameof(NotificationControl.Custom), true)]
+    [InlineData(nameof(NotificationControl.Generic), true)]
+    [InlineData(nameof(NotificationControl.Standard), true)]
+    [InlineData(nameof(NotificationControl.Unsupported), false)]
+    public void Binding_PropertyChanged_UpdatesSourceAndUnhooks(string propertyName, bool supported)
+    {
+        using NotificationControl control = new()
+        {
+            BindingContext = new BindingContext()
+        };
+        control.CreateControl();
+
+        NotificationSource source = new();
+        Binding binding = control.DataBindings.Add(
+            propertyName,
+            source,
+            nameof(NotificationSource.Value),
+            formattingEnabled: true,
+            DataSourceUpdateMode.OnPropertyChanged);
+
+        Assert.True(binding.IsBinding);
+        PropertyDescriptor property = TypeDescriptor.GetProperties(control)[propertyName];
+
+        foreach (int value in new[] { int.MinValue, 0, int.MaxValue })
+        {
+            property.SetValue(control, value);
+            Assert.Equal(supported ? value : 0, source.Value);
+        }
+
+        Assert.Equal(supported, control.HasHandler(propertyName));
+
+        int previousValue = source.Value;
+        binding.DataSourceUpdateMode = DataSourceUpdateMode.Never;
+        property.SetValue(control, 1);
+        Assert.Equal(previousValue, source.Value);
+
+        binding.DataSourceUpdateMode = DataSourceUpdateMode.OnPropertyChanged;
+        control.DataBindings.Remove(binding);
+
+        Assert.False(control.HasHandler(propertyName));
+        property.SetValue(control, 2);
+        Assert.Equal(previousValue, source.Value);
+    }
+
+    [WinFormsFact]
+    public void Binding_PropertyChanged_ThrowingEventAccessor_PropagatesException()
+    {
+        using ThrowingNotificationControl control = new()
+        {
+            BindingContext = new BindingContext()
+        };
+        control.CreateControl();
+
+        NotificationSource source = new();
+        TargetInvocationException exception = Assert.Throws<TargetInvocationException>(() =>
+            control.DataBindings.Add(
+                nameof(ThrowingNotificationControl.Value),
+                source,
+                nameof(NotificationSource.Value),
+                formattingEnabled: true,
+                DataSourceUpdateMode.OnPropertyChanged));
+
+        Assert.IsType<InvalidOperationException>(exception.InnerException);
+    }
+
+    private delegate void CustomChangedHandler(object sender, CancelEventArgs e);
+
+    /// <summary>
+    ///  Supplies a value updated by control property change notifications.
+    /// </summary>
+    private sealed class NotificationSource
+    {
+        public int Value { get; set; }
+    }
+
+    /// <summary>
+    ///  Exposes properties with compatible and incompatible change event signatures.
+    /// </summary>
+    private sealed class NotificationControl : Control
+    {
+        private int _custom;
+        private int _generic;
+        private int _standard;
+        private int _unsupported;
+
+        public event CustomChangedHandler CustomChanged;
+        public event EventHandler<CancelEventArgs> GenericChanged;
+        public event EventHandler StandardChanged;
+        public event EventHandler<object> UnsupportedChanged;
+
+        public int Custom
+        {
+            get => _custom;
+            set
+            {
+                _custom = value;
+                CustomChanged?.Invoke(this, new CancelEventArgs());
+            }
+        }
+
+        public int Generic
+        {
+            get => _generic;
+            set
+            {
+                _generic = value;
+                GenericChanged?.Invoke(this, new CancelEventArgs());
+            }
+        }
+
+        public int Standard
+        {
+            get => _standard;
+            set
+            {
+                _standard = value;
+                StandardChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        public int Unsupported
+        {
+            get => _unsupported;
+            set
+            {
+                _unsupported = value;
+                UnsupportedChanged?.Invoke(this, new object());
+            }
+        }
+
+        public bool HasHandler(string propertyName) => propertyName switch
+        {
+            nameof(Custom) => CustomChanged is not null,
+            nameof(Generic) => GenericChanged is not null,
+            nameof(Standard) => StandardChanged is not null,
+            nameof(Unsupported) => UnsupportedChanged is not null,
+            _ => throw new ArgumentOutOfRangeException(nameof(propertyName))
+        };
+    }
+
+    /// <summary>
+    ///  Rejects subscriptions to distinguish accessor failures from unsupported signatures.
+    /// </summary>
+    private sealed class ThrowingNotificationControl : Control
+    {
+        public int Value { get; set; }
+
+        public event CustomChangedHandler ValueChanged
+        {
+            add => throw new InvalidOperationException();
+            remove { }
+        }
     }
 
     private class SubBinding : Binding
