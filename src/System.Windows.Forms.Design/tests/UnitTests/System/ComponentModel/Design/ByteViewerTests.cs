@@ -306,6 +306,91 @@ public class ByteViewerTests
         Assert.True(control.IsHandleCreated);
     }
 
+    [WinFormsTheory]
+    [InlineData(0, DisplayMode.Hexdump, false)]
+    [InlineData(17, DisplayMode.Hexdump, false)]
+    [InlineData(1600, DisplayMode.Hexdump, false)]
+    [InlineData(1600, DisplayMode.Hexdump, true)]
+    [InlineData(1600, DisplayMode.Ansi, false)]
+    [InlineData(1600, DisplayMode.Ansi, true)]
+    [InlineData(1600, DisplayMode.Unicode, false)]
+    [InlineData(1600, DisplayMode.Unicode, true)]
+    [InlineData(1600, DisplayMode.Auto, false)]
+    public void ByteViewer_OnDpiChangedAfterParent_PreservesStateAndUpdatesLayout(int length, DisplayMode mode, bool createHandle)
+    {
+        using SubByteViewer control = new()
+        {
+            Dock = DockStyle.Fill,
+            Size = new Size(2000, 660)
+        };
+        byte[] bytes = new byte[length];
+        control.SetBytes(bytes);
+        control.SetDisplayMode(mode);
+        if (createHandle)
+        {
+            Assert.NotEqual(IntPtr.Zero, control.Handle);
+        }
+
+        VScrollBar scrollBar = Assert.Single(control.Controls.OfType<VScrollBar>());
+        int startLine = length == 1600 ? 3 : 0;
+        scrollBar.Value = startLine;
+        bool isHexdump = mode is DisplayMode.Hexdump or DisplayMode.Auto;
+
+        foreach (int height in new[] { 660, 330, 660 })
+        {
+            control.Height = height;
+            control.OnDpiChangedAfterParent(EventArgs.Empty);
+
+            Assert.Same(bytes, control.GetBytes());
+            Assert.Equal(mode, control.GetDisplayMode());
+            Assert.Equal(startLine, (int)control.TestAccessor.Dynamic._startLine);
+            Assert.Equal(startLine, scrollBar.Value);
+            Assert.Equal(isHexdump, scrollBar.Visible);
+
+            int gap = (int)Math.Round(2 * control.DeviceDpi / 96d) + (int)Math.Round(3 * control.DeviceDpi / 96d);
+            int cellHeight = (int)Math.Round(21 * control.DeviceDpi / 96d);
+            int rows = (control.ClientSize.Height - 2 * gap) / cellHeight;
+            int lines = (length + 15) / 16;
+            Assert.Equal(rows, (int)control.TestAccessor.Dynamic._rowCount);
+            Assert.Equal(Math.Min(rows, lines - startLine), (int)control.TestAccessor.Dynamic._displayLinesCount);
+
+            if (isHexdump)
+            {
+                Assert.Equal(lines > rows, scrollBar.Enabled);
+                if (lines > rows)
+                {
+                    Assert.Equal(rows, scrollBar.LargeChange);
+                }
+            }
+        }
+    }
+
+    [WinFormsTheory]
+    [InlineData(DisplayMode.Ansi)]
+    [InlineData(DisplayMode.Unicode)]
+    public void ByteViewer_OnLayout_TextMode_KeepsHexScrollbarHidden(DisplayMode mode)
+    {
+        using SubByteViewer control = new()
+        {
+            Dock = DockStyle.Fill,
+            Size = new Size(2000, 660)
+        };
+        control.SetBytes(new byte[1600]);
+        control.SetDisplayMode(mode);
+
+        control.Height = 300;
+
+        VScrollBar scrollBar = Assert.Single(control.Controls.OfType<VScrollBar>());
+        Assert.False(scrollBar.Visible);
+        Assert.Equal(mode, control.GetDisplayMode());
+
+        control.SetDisplayMode(DisplayMode.Hexdump);
+
+        Assert.True(scrollBar.Visible);
+        Assert.True(scrollBar.Enabled);
+        Assert.Equal((int)control.TestAccessor.Dynamic._rowCount, scrollBar.LargeChange);
+    }
+
     public static IEnumerable<object[]> OnLayout_TestData()
     {
         yield return new object[] { new LayoutEventArgs(null, null) };
@@ -997,6 +1082,9 @@ public class ByteViewerTests
         Assert.Equal(0, createdCallCount);
     }
 
+    /// <summary>
+    ///  Exposes protected control behavior for ByteViewer tests.
+    /// </summary>
     private class SubByteViewer : ByteViewer
     {
         public new const int ScrollStateAutoScrolling = ScrollableControl.ScrollStateAutoScrolling;
@@ -1080,6 +1168,9 @@ public class ByteViewerTests
         public new bool GetStyle(ControlStyles flag) => base.GetStyle(flag);
 
         public new bool GetTopLevel() => base.GetTopLevel();
+
+        public new void OnDpiChangedAfterParent(EventArgs e)
+            => base.OnDpiChangedAfterParent(e);
 
         public new void OnHandleCreated(EventArgs e) => base.OnHandleCreated(e);
 

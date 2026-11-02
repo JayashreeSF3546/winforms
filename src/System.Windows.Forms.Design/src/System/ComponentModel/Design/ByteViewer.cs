@@ -561,7 +561,8 @@ public class ByteViewer : TableLayoutPanel
 
         // Recompute DPI-scaled metrics and any state that depends on DPI, then repaint.
         UpdateScaling();
-        InitState();
+        PerformLayout();
+        Invalidate();
     }
 
     /// <summary>
@@ -627,9 +628,12 @@ public class ByteViewer : TableLayoutPanel
                 _scrollBar.Hide();
                 _scrollBar.Maximum = _linesCount - 1;
                 _scrollBar.LargeChange = _rowCount;
-                _scrollBar.Show();
                 _scrollBar.Enabled = true;
-                _scrollBar.Select();
+                if (_realDisplayMode == DisplayMode.Hexdump)
+                {
+                    _scrollBar.Show();
+                    _scrollBar.Select();
+                }
             }
             else
             {
