@@ -41,6 +41,7 @@ public sealed class WinFormsApplication : IDisposable
     private bool _loopEntered;
     private bool _stopRequested;
     private bool _stopPosted;
+    private bool _uiStopping;
     private bool _cleanupStarted;
     private bool _disposed;
 
@@ -442,16 +443,21 @@ public sealed class WinFormsApplication : IDisposable
 
     internal void NotifyStopping()
     {
-        SignalStopRequest();
-        if (Thread.CurrentThread == _ownerThread)
-        {
-            _uiScopes?.BeginStopping();
-            CaptureFailure(Lifetime.NotifyStopping);
-        }
-        else
+        if (Thread.CurrentThread != _ownerThread)
         {
             RequestStop();
+            return;
         }
+
+        lock (_stateLock)
+        {
+            // Host stop echoes must not queue another exit after UI teardown has committed.
+            _uiStopping = true;
+        }
+
+        SignalStopRequest();
+        _uiScopes?.BeginStopping();
+        CaptureFailure(Lifetime.NotifyStopping);
     }
 
     internal void CaptureFailure(Action action)
@@ -495,7 +501,7 @@ public sealed class WinFormsApplication : IDisposable
         Control? dispatcher;
         lock (_stateLock)
         {
-            if (!_loopEntered || _cleanupStarted || _disposed || _stopPosted || _dispatcher is null)
+            if (!_loopEntered || _uiStopping || _cleanupStarted || _disposed || _stopPosted || _dispatcher is null)
             {
                 return;
             }
@@ -512,7 +518,7 @@ public sealed class WinFormsApplication : IDisposable
         {
             lock (_stateLock)
             {
-                if (!_cleanupStarted && !_disposed)
+                if (!_uiStopping && !_cleanupStarted && !_disposed)
                 {
                     _exceptions.Add(exception);
                     _threadContext?.PostQuit();
@@ -525,7 +531,7 @@ public sealed class WinFormsApplication : IDisposable
     {
         lock (_stateLock)
         {
-            if (_cleanupStarted || _disposed)
+            if (_uiStopping || _cleanupStarted || _disposed)
             {
                 return;
             }

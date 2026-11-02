@@ -2,8 +2,11 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Runtime.ExceptionServices;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.WinForms;
 
 namespace System.Windows.Forms.Tests;
@@ -14,6 +17,234 @@ namespace System.Windows.Forms.Tests;
 [Collection("Sequential")]
 public class WinFormsApplicationHostingTests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void Run_UserCloseWithConcurrentHostStop_DoesNotQuitNextLifetime(bool componentManager, bool stopAlreadyPosted)
+    {
+        using AppContextSwitchScope scope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
+        RunOnSta(() =>
+        {
+            for (int cycle = 0; cycle < 2; cycle++)
+            {
+                using Form form = new();
+                using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                    .UseStartupForm(form)
+                    .UseHost(new HostBuilder())
+                    .Build();
+                using ManualResetEventSlim hostStopEchoed = new();
+                var lifetime = application.Host!.Services.GetRequiredService<IHostApplicationLifetime>();
+                using CancellationTokenRegistration registration = lifetime.ApplicationStopping.Register(hostStopEchoed.Set);
+                application.Lifetime.ApplicationStopping += (_, _) =>
+                    hostStopEchoed.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken).Should().BeTrue();
+                bool dispatched = false;
+                Task? stop = null;
+                form.Shown += (_, _) => form.BeginInvoke(() =>
+                {
+                    dispatched = true;
+                    if (stopAlreadyPosted)
+                    {
+                        stop = application.StopAsync();
+                    }
+
+                    form.Close();
+                });
+
+                application.Run(TestContext.Current.CancellationToken);
+                stop?.GetAwaiter().GetResult();
+
+                dispatched.Should().BeTrue($"lifetime {cycle} must dispatch before shutdown");
+                form.IsDisposed.Should().BeTrue();
+                Application.MessageLoop.Should().BeFalse();
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Run_ExplicitHealthReadiness_PrecedesUiAndExcludesOfflineDiagnostics(bool ready)
+    {
+        RunOnSta(() =>
+        {
+            int uiThread = Environment.CurrentManagedThreadId;
+            int activated = 0;
+            int checkedReadiness = 0;
+            int optionalChecks = 0;
+            InvalidOperationException expected = new("Required local readiness failed.");
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseApplicationContext(() =>
+                {
+                    checkedReadiness.Should().Be(1);
+                    activated++;
+
+                    return new ApplicationContext();
+                })
+                .UseHost(new HostBuilder().ConfigureServices((_, services) =>
+                {
+                    services.AddWinFormsHealthDiagnostics()
+                        .AddCheck("required-local", () =>
+                        {
+                            Environment.CurrentManagedThreadId.Should().NotBe(uiThread);
+                            SynchronizationContext.Current.Should().BeNull();
+                            activated.Should().Be(0);
+                            checkedReadiness++;
+
+                            return ready ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy();
+                        }, tags: ["startup"])
+                        .AddCheck("offline-diagnostic", () =>
+                        {
+                            Interlocked.Increment(ref optionalChecks);
+
+                            return HealthCheckResult.Degraded("Optional offline dependency.");
+                        }, tags: ["diagnostic"]);
+                    services.AddSingleton<IHostedService>(provider => new HealthReadinessService(
+                        provider.GetRequiredService<WinFormsHealthDiagnostics>(), expected));
+                }))
+                .Build();
+            application.Lifetime.ApplicationStarted += (_, _) => _ = application.StopAsync();
+
+            if (ready)
+            {
+                application.Run(TestContext.Current.CancellationToken);
+            }
+            else
+            {
+                Assert.Throws<InvalidOperationException>(() => application.Run(TestContext.Current.CancellationToken))
+                    .Should().BeSameAs(expected);
+            }
+
+            activated.Should().Be(ready ? 1 : 0);
+            checkedReadiness.Should().Be(1);
+            optionalChecks.Should().Be(0);
+        });
+    }
+
+    [Fact]
+    public void Run_HostedLifecycleAndUnusedHealthRegistration_PreserveUiOrdering()
+    {
+        RunOnSta(() =>
+        {
+            int uiThread = Environment.CurrentManagedThreadId;
+            int unusedChecks = 0;
+            List<string> events = [];
+            Form form = new();
+            WinFormsApplication? application = null;
+            IHostBuilder hostBuilder = new HostBuilder().ConfigureServices((_, services) =>
+            {
+                services.AddWinFormsHealthDiagnostics().AddCheck("unused", () =>
+                {
+                    Interlocked.Increment(ref unusedChecks);
+
+                    return HealthCheckResult.Unhealthy("Registration must not execute diagnostics.");
+                });
+                services.AddSingleton<IHostedService>(new RecordingLifecycleService(phase =>
+                {
+                    Environment.CurrentManagedThreadId.Should().NotBe(uiThread);
+                    SynchronizationContext.Current.Should().BeNull();
+                    if (phase is "stopping" or "stop" or "stopped")
+                    {
+                        form.IsDisposed.Should().BeTrue();
+                        application!.UiCompletion.IsCompleted.Should().BeTrue();
+                    }
+
+                    events.Add(phase);
+                }));
+            });
+            using (application = WinFormsApplication.CreateBuilder()
+                .UseApplicationContext(() =>
+                {
+                    events.Add("activate");
+
+                    return new ApplicationContext(form);
+                })
+                .UseHost(hostBuilder)
+                .Build())
+            {
+                form.Disposed += (_, _) => events.Add("dispose-ui");
+                application.Lifetime.ApplicationStarted += (_, _) => _ = application.StopAsync();
+                application.Run(TestContext.Current.CancellationToken);
+            }
+
+            events.Should().Equal("starting", "start", "started", "activate", "dispose-ui", "stopping", "stop", "stopped");
+            unusedChecks.Should().Be(0);
+        });
+    }
+
+    [Theory]
+    [InlineData("10")]
+    [InlineData("0")]
+    [InlineData("not-an-integer")]
+    public void Run_ConfiguredOptions_ValidatesBeforeDeferredUiAndCleansUpFailures(string value)
+    {
+        RunOnSta(() =>
+        {
+            RecordingService service = new();
+            int activated = 0;
+            int validated = 0;
+            IHostBuilder hostBuilder = new HostBuilder()
+                .ConfigureWinFormsConfiguration(["--hostBuilder:reloadConfigOnChange=false"])
+                .UseContentRoot(AppContext.BaseDirectory)
+                .UseEnvironment(Environments.Production)
+                .ConfigureAppConfiguration(configuration =>
+                    configuration.AddInMemoryCollection([new("WinForms14957:Value", value)]))
+                .ConfigureServices((context, services) =>
+                {
+                    services.AddSingleton<IHostedService>(_ => service);
+                    services.AddOptions<WinFormsConfigurationTests.ConfigurationOptions>()
+                        .Bind(context.Configuration.GetSection("WinForms14957"))
+                        .Validate(options =>
+                        {
+                            activated.Should().Be(0);
+                            SynchronizationContext.Current.Should().BeNull();
+                            validated++;
+                            return options.Value > 0;
+                        }, "'WinForms14957:Value' must be greater than zero.")
+                        .ValidateOnStart();
+                });
+            using WinFormsApplication application = WinFormsApplication.CreateBuilder()
+                .UseHost(hostBuilder)
+                .UseApplicationContext(() =>
+                {
+                    validated.Should().Be(1);
+                    activated++;
+                    return new ApplicationContext();
+                })
+                .Build();
+            application.Lifetime.ApplicationStarted += (_, _) => _ = application.StopAsync();
+
+            if (value == "10")
+            {
+                application.Run(TestContext.Current.CancellationToken);
+                activated.Should().Be(1);
+                service.StartCount.Should().Be(1);
+            }
+            else
+            {
+                if (value == "0")
+                {
+                    OptionsValidationException failure = Assert.Throws<OptionsValidationException>(
+                        () => application.Run(TestContext.Current.CancellationToken));
+                    failure.OptionsType.Should().Be(typeof(WinFormsConfigurationTests.ConfigurationOptions));
+                    failure.Failures.Should().Contain("'WinForms14957:Value' must be greater than zero.");
+                }
+                else
+                {
+                    Assert.Throws<InvalidOperationException>(() => application.Run(TestContext.Current.CancellationToken))
+                        .Message.Should().Contain("WinForms14957:Value");
+                }
+
+                activated.Should().Be(0);
+                service.StartCount.Should().Be(0);
+            }
+
+            service.DisposeCount.Should().Be(1);
+            application.UiCompletion.IsCompleted.Should().BeTrue();
+        });
+    }
+
     [Theory]
     [InlineData(0, false, false)]
     [InlineData(1, false, false)]
@@ -375,6 +606,57 @@ public class WinFormsApplicationHostingTests
             form.IsDisposed.Should().BeFalse();
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         });
+    }
+
+    /// <summary>
+    ///  Applies an explicit application-owned local readiness policy before startup UI activation.
+    /// </summary>
+    private sealed class HealthReadinessService(
+        WinFormsHealthDiagnostics diagnostics, Exception failure) : IHostedService
+    {
+        public async Task StartAsync(CancellationToken cancellationToken)
+        {
+            HealthReport report = await diagnostics.CheckHealthAsync(
+                registration => registration.Tags.Contains("startup"), cancellationToken);
+            if (report.Entries.Count == 0 || report.Status != HealthStatus.Healthy)
+            {
+                throw failure;
+            }
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken)
+            => Task.CompletedTask;
+    }
+
+    /// <summary>
+    ///  Records the real host's lifecycle callbacks without installing another lifetime mechanism.
+    /// </summary>
+    private sealed class RecordingLifecycleService(Action<string> record) : IHostedLifecycleService
+    {
+        public Task StartingAsync(CancellationToken cancellationToken)
+            => Record("starting");
+
+        public Task StartAsync(CancellationToken cancellationToken)
+            => Record("start");
+
+        public Task StartedAsync(CancellationToken cancellationToken)
+            => Record("started");
+
+        public Task StoppingAsync(CancellationToken cancellationToken)
+            => Record("stopping");
+
+        public Task StopAsync(CancellationToken cancellationToken)
+            => Record("stop");
+
+        public Task StoppedAsync(CancellationToken cancellationToken)
+            => Record("stopped");
+
+        private Task Record(string phase)
+        {
+            record(phase);
+
+            return Task.CompletedTask;
+        }
     }
 
     private static void RunOnSta(Action action)

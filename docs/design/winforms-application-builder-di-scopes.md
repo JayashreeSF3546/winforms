@@ -11,6 +11,9 @@ Proposal: [dotnet/winforms#14082](https://github.com/dotnet/winforms/issues/1408
 Dependency: the [host/lifetime implementation](winforms-application-builder-lifetime.md)
 from [dotnet/winforms#14940](https://github.com/dotnet/winforms/issues/14940).
 
+The [service infrastructure boundaries](winforms-application-builder-services.md) for
+dotnet/winforms#14956 consume these scope contracts without adding Designer service activation.
+
 ## Scope and recommendation
 
 Use explicit runtime activation factories as the composition boundary. Factories supply typed

@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="MissingPrimary" xml:space="preserve"><value>The user settings primary store is absent. Load defaults or explicitly import settings before upgrading.</value></data>
+  <data name="MissingBackup" xml:space="preserve"><value>No user settings backup is available for recovery.</value></data>
+  <data name="NewerSchema" xml:space="preserve"><value>The user settings schema is newer than this application supports. The document was not replaced.</value></data>
+  <data name="UpgradeRequired" xml:space="preserve"><value>The user settings schema requires an explicit UpgradeAsync operation before loading or saving.</value></data>
+  <data name="ValidPrimary" xml:space="preserve"><value>The primary user settings document is valid. Recovery cannot replace it with an older backup.</value></data>
+  <data name="MissingMigration" xml:space="preserve"><value>No user settings migration is registered from schema version {0} to the next version.</value></data>
+  <data name="RecoveryRequired" xml:space="preserve"><value>The primary user settings store is absent but a backup exists. Use RecoverAsync rather than silently replacing it with defaults.</value></data>
+  <data name="InvalidModel" xml:space="preserve"><value>User settings must contain a non-null JSON object compatible with the registered model.</value></data>
+  <data name="InvalidDocument" xml:space="preserve"><value>The user settings document must contain exactly a positive schemaVersion, a positive revision, and an object settings payload.</value></data>
+  <data name="InvalidFile" xml:space="preserve"><value>The user settings file '{0}' contains invalid JSON.</value></data>
+  <data name="LockTimeout" xml:space="preserve"><value>Timed out waiting for exclusive access to user settings at '{0}'.</value></data>
+  <data name="InvalidIdentity" xml:space="preserve"><value>The application ID must be a single, non-reserved Windows directory name without trailing dots or spaces.</value></data>
+  <data name="InvalidTimeout" xml:space="preserve"><value>The contention timeout must be positive and supported by a cancellation timer.</value></data>
+  <data name="AbsoluteDirectory" xml:space="preserve"><value>The user settings storage directory must be an absolute path.</value></data>
+  <data name="InvalidMigration" xml:space="preserve"><value>Migrations must be non-null and keyed by a positive schema version below the current version.</value></data>
+</root>
