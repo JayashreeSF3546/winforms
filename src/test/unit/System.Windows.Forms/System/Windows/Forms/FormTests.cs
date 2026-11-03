@@ -2005,6 +2005,60 @@ public partial class FormTests
         return hr.Succeeded;
     }
 
+    [WinFormsTheory]
+    [InlineData("", "Dialog")]
+    [InlineData("Dialog", "")]
+    public void Form_Text_SetWithoutControlBox_UpdatesWindowSize(string initialText, string text)
+    {
+        using Form form = new();
+        form.ClientSize = new Size(349, 202);
+        form.ControlBox = false;
+        form.FormBorderStyle = FormBorderStyle.FixedDialog;
+        form.Text = initialText;
+
+        Size expectedClientSize = form.ClientSize;
+
+        form.Text = text;
+
+        Assert.Equal(expectedClientSize, form.ClientSize);
+        Assert.Equal(form.SizeFromClientSizeInternal(expectedClientSize), form.Size);
+        Assert.False(form.IsHandleCreated);
+
+        _ = form.Handle;
+
+        Assert.Equal(expectedClientSize, form.ClientSize);
+    }
+
+    [WinFormsTheory]
+    [BoolData]
+    public void Form_Text_ChangeNonEmptyCaption_DoesNotRaiseClientSizeChanged(bool createHandle)
+    {
+        using Form form = new()
+        {
+            ControlBox = false,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            Text = "First",
+            ClientSize = new Size(349, 202)
+        };
+
+        if (createHandle)
+        {
+            _ = form.Handle;
+        }
+
+        int callCount = 0;
+        form.ClientSizeChanged += (_, _) => callCount++;
+        Size expectedSize = form.Size;
+        Size expectedClientSize = form.ClientSize;
+
+        form.Text = "Second";
+
+        Assert.Equal(0, callCount);
+        Assert.Equal(expectedSize, form.Size);
+        Assert.Equal(expectedClientSize, form.ClientSize);
+        Assert.Equal(createHandle, form.IsHandleCreated);
+    }
+
     public static IEnumerable<object[]> Visible_Set_TestData()
     {
         foreach (DialogResult dialogResult in Enum.GetValues(typeof(DialogResult)))

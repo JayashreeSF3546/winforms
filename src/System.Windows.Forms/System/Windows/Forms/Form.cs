@@ -4721,12 +4721,14 @@ public partial class Form : ContainerControl
             RecreateHandle();
         }
 
-        // ✅ Fix: in this configuration, Text changes can alter non-client behavior at HDPI.
-        // Preserve explicit ClientSize so the client area does not shrink and clip.
+        // Preserve an explicitly set client size when caption styles change the non-client area.
         if (!ControlBox && _formState[s_formStateSetClientSize] == 1 && !IsHandleCreated)
         {
-            Size size = ClientSize;
-            ClientSize = size;
+            Size clientSize = ClientSize;
+            if (Size != SizeFromClientSizeInternal(clientSize))
+            {
+                ClientSize = clientSize;
+            }
         }
 
         _formState[s_formStateIsTextEmpty] = newTextEmpty;
