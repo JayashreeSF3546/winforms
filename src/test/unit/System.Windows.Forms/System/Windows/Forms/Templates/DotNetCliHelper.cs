@@ -1,8 +1,6 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System.Text;
-
 namespace System.Windows.Forms.Tests;
 
 internal static class DotNetCliHelper
@@ -44,40 +42,35 @@ internal static class DotNetCliHelper
             }
         };
 
-        StringBuilder standardOutput = new();
-        StringBuilder standardError = new();
-        process.OutputDataReceived += (_, e) =>
-        {
-            if (e.Data is not null)
-            {
-                standardOutput.AppendLine(e.Data);
-            }
-        };
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data is not null)
-            {
-                standardError.AppendLine(e.Data);
-            }
-        };
-
         process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
 
+        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+        Task<string> standardError = process.StandardError.ReadToEndAsync();
         TimeSpan effectiveTimeout = timeout ?? s_defaultTimeout;
-        if (!process.WaitForExit((int)effectiveTimeout.TotalMilliseconds))
+
+        try
         {
-            process.Kill(entireProcessTree: true);
+            Task.WhenAll(process.WaitForExitAsync(), standardOutput, standardError)
+                .WaitAsync(effectiveTimeout)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (TimeoutException ex)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
             throw new TimeoutException(
-                $"'{fileName} {arguments}' did not complete within {effectiveTimeout}. " +
-                $"Output so far:{Environment.NewLine}{standardOutput}{Environment.NewLine}Error:{Environment.NewLine}{standardError}");
+                $"'{fileName} {arguments}' did not complete within {effectiveTimeout}.",
+                ex);
         }
 
-        // Ensures the asynchronous output/error stream handlers have finished flushing before we read the buffers.
-        process.WaitForExit();
-
-        return new CommandResult(process.ExitCode, standardOutput.ToString(), standardError.ToString());
+        return new CommandResult(
+            process.ExitCode,
+            standardOutput.GetAwaiter().GetResult(),
+            standardError.GetAwaiter().GetResult());
     }
 
     internal readonly record struct CommandResult(int ExitCode, string StandardOutput, string StandardError)

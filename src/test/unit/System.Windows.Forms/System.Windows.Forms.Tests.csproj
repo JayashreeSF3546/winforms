@@ -79,6 +79,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)..\..\..\..\pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\content\**\*"
+             Link="TemplateContent\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="TestResources\Files\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

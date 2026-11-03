@@ -5,7 +5,8 @@ namespace System.Windows.Forms.Tests;
 
 // These tests shell out to the "dotnet" CLI, hit NuGet for restore, and perform a full build of the
 // generated project. They are inherently slower and less isolated than a typical unit test, and require
-// the WinForms SDK templates and .NET SDK to be installed in the environment running the tests.
+// the .NET SDK to be installed in the environment running the tests. Repository templates are installed
+// into a temporary hive with SDK templates disabled.
 [Trait("Category", "OuterLoop")]
 public class TemplateTests
 {
@@ -17,7 +18,18 @@ public class TemplateTests
         string tempDir = DotNetCliHelper.CreateTempFolder();
         try
         {
-            DotNetCliHelper.CommandResult newResult = DotNetCliHelper.RunCommand("dotnet", $"new {templateName} -n {projectName}", tempDir);
+            string contentDir = Path.Combine(AppContext.BaseDirectory, "TemplateContent");
+            string hiveDir = Path.Combine(tempDir, "hive");
+            string isolation = $"--debug:custom-hive \"{hiveDir}\" --debug:disable-sdk-templates";
+
+            DotNetCliHelper.CommandResult installResult = DotNetCliHelper.RunCommand(
+                "dotnet", $"new install \"{contentDir}\" {isolation}", tempDir);
+            Assert.True(installResult.ExitCode == 0, $"'dotnet new install' of the repository templates failed.{Environment.NewLine}{installResult}");
+
+            DotNetCliHelper.CommandResult newResult = DotNetCliHelper.RunCommand(
+                "dotnet",
+                $"new {templateName} -n {projectName} --language C# --no-restore {isolation}",
+                tempDir);
             Assert.True(newResult.ExitCode == 0, $"'dotnet new {templateName}' failed.{Environment.NewLine}{newResult}");
 
             string projectDir = Path.Combine(tempDir, projectName);
