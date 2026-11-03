@@ -31,35 +31,146 @@ partial class TextBoxes
     /// </summary>
     private void InitializeComponent()
     {
-        this.textBox1 = new System.Windows.Forms.TextBox();
+        this.textBox = new System.Windows.Forms.TextBox();
+        this.RTLTextBox = new System.Windows.Forms.TextBox();
+        this.multilineTextBox = new System.Windows.Forms.TextBox();
+        this.RTLMultilineTextBox = new System.Windows.Forms.TextBox();
+        this.richTextBox = new System.Windows.Forms.RichTextBox();
+        this.RTLRichTextBox = new System.Windows.Forms.RichTextBox();
         this.SuspendLayout();
         // 
-        // textBox1
+        // textBox
         // 
-        this.textBox1.BorderStyle = System.Windows.Forms.BorderStyle.None;
-        this.textBox1.Font = new System.Drawing.Font("Cascadia Code", 20F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);
-        this.textBox1.Location = new System.Drawing.Point(15, 5);
-        this.textBox1.Margin = new System.Windows.Forms.Padding(6, 7, 6, 7);
-        this.textBox1.Name = "textBox1";
-        this.textBox1.Size = new System.Drawing.Size(1401, 62);
-        this.textBox1.TabIndex = 0;
-        this.textBox1.Text = "The quick brown fox jumps over the lazy dog";
+        this.textBox.Location = new System.Drawing.Point(20, 20);
+        this.textBox.Name = "textBox";
+        this.textBox.Size = new System.Drawing.Size(120, 30);
+        this.textBox.TabIndex = 0;
+        this.textBox.Text = "Some long long text for a TextBox";
         // 
-        // Form1
+        // RTLTextBox
         // 
-        this.AutoScaleDimensions = new System.Drawing.SizeF(13F, 32F);
+        this.RTLTextBox.Location = new System.Drawing.Point(160, 20);
+        this.RTLTextBox.Name = "RTLTextBox";
+        this.RTLTextBox.Size = new System.Drawing.Size(120, 30);
+        this.RTLTextBox.TabIndex = 1;
+        this.RTLTextBox.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
+        this.RTLTextBox.Text = "Some long long text for a RTL TextBox";
+        // 
+        // multilineTextBox
+        // 
+        this.multilineTextBox.Location = new System.Drawing.Point(20, 60);
+        this.multilineTextBox.Name = "multilineTextBox";
+        this.multilineTextBox.Size = new System.Drawing.Size(120, 110);
+        this.multilineTextBox.TabIndex = 2;
+        this.multilineTextBox.Multiline = true;
+        this.multilineTextBox.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
+        this.multilineTextBox.Text = @"Some long
+long text
+for
+
+a multiline TextBox
+that
+
+contains several
+lines
+with
+
+withspaces,tabs     and
+numbers
+12345";
+        // 
+        // RTLMultilineTextBox
+        // 
+        this.RTLMultilineTextBox.Location = new System.Drawing.Point(160, 60);
+        this.RTLMultilineTextBox.Name = "RTLMultilineTextBox";
+        this.RTLMultilineTextBox.Size = new System.Drawing.Size(120, 110);
+        this.RTLMultilineTextBox.TabIndex = 3;
+        this.RTLMultilineTextBox.Multiline = true;
+        this.RTLMultilineTextBox.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
+        this.RTLMultilineTextBox.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
+        this.RTLMultilineTextBox.Text = @"Some long
+long text
+for
+
+a multiline TextBox
+that
+
+contains several
+lines
+with
+
+withspaces,tabs     and
+numbers
+12345";
+        // 
+        // richTextBox
+        // 
+        this.richTextBox.Location = new System.Drawing.Point(20, 190);
+        this.richTextBox.Name = "richTextBox";
+        this.richTextBox.Size = new System.Drawing.Size(120, 110);
+        this.richTextBox.TabIndex = 4;
+        this.richTextBox.Text = @"Some long
+long text
+for
+
+a RichTextBox
+
+that
+contains several
+lines
+with
+
+withspaces and
+numbers
+12345";
+        // 
+        // RTLRichTextBox
+        // 
+        this.RTLRichTextBox.Location = new System.Drawing.Point(160, 190);
+        this.RTLRichTextBox.Name = "RTLRichTextBox";
+        this.RTLRichTextBox.Size = new System.Drawing.Size(120, 110);
+        this.RTLRichTextBox.TabIndex = 5;
+        this.RTLRichTextBox.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
+        this.RTLRichTextBox.Text = @"Some long
+long text
+for
+
+a RichTextBox
+
+that
+contains several
+lines
+with
+
+withspaces and
+numbers
+12345";
+        // 
+        // Form
+        // 
+        this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
         this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-        this.ClientSize = new System.Drawing.Size(1733, 1108);
-        this.Controls.Add(this.textBox1);
-        this.Margin = new System.Windows.Forms.Padding(6, 7, 6, 7);
-        this.Name = "Form1";
-        this.Text = "WinForms";
+        this.ClientSize = new System.Drawing.Size(300, 330);
+        this.Controls.Add(this.textBox);
+        this.Controls.Add(this.RTLTextBox);
+        this.Controls.Add(this.multilineTextBox);
+        this.Controls.Add(this.RTLMultilineTextBox);
+        this.Controls.Add(this.richTextBox);
+        this.Controls.Add(this.RTLRichTextBox);
+        this.Name = "TextBoxes";
+        this.Text = "TextBoxes";
         this.ResumeLayout(false);
         this.PerformLayout();
+
     }
 
     #endregion
 
-    private System.Windows.Forms.TextBox textBox1;
+    private System.Windows.Forms.TextBox textBox;
+    private System.Windows.Forms.TextBox RTLTextBox;
+    private System.Windows.Forms.TextBox multilineTextBox;
+    private System.Windows.Forms.TextBox RTLMultilineTextBox;
+    private System.Windows.Forms.RichTextBox richTextBox;
+    private System.Windows.Forms.RichTextBox RTLRichTextBox;
 }
 
