@@ -1,0 +1,8 @@
+<Project>
+  <!-- Explicit local validation only. Never copy these overrides into template payloads. -->
+  <PropertyGroup>
+    <NETCoreAppMaximumVersion>12.0</NETCoreAppMaximumVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <PrototypeCoreVersion Condition="'$(PrototypeCoreVersion)' == ''">12.0.0-alpha.1.26551.101</PrototypeCoreVersion>
+  </PropertyGroup>
+</Project>

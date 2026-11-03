@@ -363,6 +363,49 @@ an invented threshold. A passing prototype run does not establish shipping accep
 For this documentation child, verify source references, relative links, whitespace, and scope.
 Template install/create/build/run/publish and CI are not performed or claimed here.
 
+## Basic template implementation (dotnet/winforms#14966)
+
+The subsequent basic-template child adds the opt-in `winforms-builder` family in native C# and VB,
+without changing any classic payload. Both entries use standard template metadata, exact package
+versions, GUID-generated settings identities, restore/open-file post-actions, English localization
+metadata, and the existing content-only package. The package now explicitly declares its `Template`
+package type; it remains nonshipping. Per-culture catalogs currently contain English fallback text,
+not reviewed translations.
+
+Generated applications target `net12.0-windows`, pin the prototype hosting package to `12.0.0-dev`,
+and pin the other direct Microsoft.Extensions dependencies to `10.0.10`. They compose one unbuilt
+host, configuration-filtered debug logging, validated options, and registered typed user settings.
+The public deferred application-context factory constructs the typed Form after host startup.
+The parameterless Form constructor only initializes Designer-owned UI. C# uses generated JSON
+metadata; VB uses explicit typed reflection metadata without a C# helper or VB Application Framework
+dependency. Settings operations remain explicit, and no trimming/NativeAOT claim is made.
+
+These are deliberately labeled prototypes: the hosting package cannot add the missing framework
+APIs to an unmodified public SDK. Generated projects contain no repository imports/references.
+The separate [local validation harness](../../pkg/Microsoft.Dotnet.WinForms.ProjectTemplates/tests/README.md)
+selects repository-built framework DLLs and matching private dependencies solely for controlled
+consumer validation. It does not establish an approved external SDK/reference/runtime contract.
+
+| Local evidence | Result |
+|---|---|
+| Arcade build/pack of templates and current hosting product/dependencies | Passed |
+| Isolated packed-artifact install/create/uninstall, manifests, unique settings IDs, unsupported framework rejection, classic byte preservation | Passed |
+| Four generated project builds: simple and spaced/dotted names in each language, warnings as errors | Passed |
+| Native C#/VB fixture builds and five runtime scenarios per language | Passed: ten scenarios |
+| Actual default-entry-point publishing, C#/VB, framework-dependent/self-contained win-x64 | Passed: four publishes |
+| Published application launch from another working directory, configured title, ordinary window close, exit zero | Passed: four runs |
+
+Runtime scenarios cover deployment JSON, environment/CLI precedence, disabled watchers, deferred
+settings storage and persistence, invalid options, inert parameterless construction, actual generated
+startup/UI close, and host-origin stop. Constructor isolation is not a Visual Studio Designer test.
+The guide records commands, the framework-train override, isolation requirements, and watchdogs.
+
+Shipping/API/package approval, an installed matching framework experience, actual Visual Studio
+discovery and out-of-process Designer round trips, additional locales/architectures, clean-machine
+deployment, and remote CI remain open. Full template CI, exploratory coverage, and performance
+remain owned by their later children. No Hybrid implementation or adoption samples are included;
+the previously documented Hybrid asynchronous-cleanup prerequisite is unchanged.
+
 ## Research sources
 
 Local links above identify the inspected repository seams. External source links pin the reviewed

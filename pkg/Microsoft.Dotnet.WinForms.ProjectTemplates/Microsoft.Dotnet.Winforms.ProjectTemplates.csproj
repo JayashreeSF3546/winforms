@@ -32,6 +32,7 @@
   <!-- nuspec properties -->
   <PropertyGroup>
     <PackageId>Microsoft.Dotnet.WinForms.ProjectTemplates</PackageId>
+    <PackageType>Template</PackageType>
     <Description>Project templates for .NET Core Windows Forms projects</Description>
     <Authors>Microsoft</Authors>
     <RepositoryUrl>https://github.com/dotnet/winforms</RepositoryUrl>

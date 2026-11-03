@@ -1,0 +1,35 @@
+<Project>
+  <PropertyGroup>
+    <PrototypeRepository>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..\'))</PrototypeRepository>
+    <PrototypeWinFormsDirectory>$(PrototypeRepository)artifacts\bin\System.Windows.Forms\Debug\net12.0</PrototypeWinFormsDirectory>
+    <StartupObject Condition="'$(TemplateSmoke)' == 'true' and '$(MSBuildProjectExtension)' == '.csproj'">TemplateSmoke</StartupObject>
+    <StartupObject Condition="'$(TemplateSmoke)' == 'true' and '$(MSBuildProjectExtension)' == '.vbproj'">$(RootNamespace).TemplateSmoke</StartupObject>
+    <OutputType Condition="'$(TemplateSmoke)' == 'true'">Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Match framework dependencies of the local product DLLs, not the older installed desktop pack. -->
+    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="$(PrototypeCoreVersion)" />
+    <PackageReference Include="System.Configuration.ConfigurationManager" Version="$(PrototypeCoreVersion)" />
+    <PackageReference Include="System.Resources.Extensions" Version="$(PrototypeCoreVersion)" />
+    <PackageReference Include="System.Windows.Extensions" Version="$(PrototypeCoreVersion)" />
+    <KnownFrameworkReference Update="Microsoft.NETCore.App">
+      <TargetingPackVersion>$(PrototypeCoreVersion)</TargetingPackVersion>
+      <DefaultRuntimeFrameworkVersion>$(PrototypeCoreVersion)</DefaultRuntimeFrameworkVersion>
+      <LatestRuntimeFrameworkVersion>$(PrototypeCoreVersion)</LatestRuntimeFrameworkVersion>
+    </KnownFrameworkReference>
+  </ItemGroup>
+  <ItemGroup Condition="'$(TemplateSmoke)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)TemplateSmoke.cs" Condition="'$(MSBuildProjectExtension)' == '.csproj'" />
+    <Using Include="$(RootNamespace)" Condition="'$(MSBuildProjectExtension)' == '.csproj'" />
+    <Compile Include="$(MSBuildThisFileDirectory)TemplateSmoke.vb" Condition="'$(MSBuildProjectExtension)' == '.vbproj'" />
+  </ItemGroup>
+  <Target Name="UseExplicitPrototypeWinForms" AfterTargets="ResolveTargetingPackAssets">
+    <Error Condition="!Exists('$(PrototypeWinFormsDirectory)\System.Windows.Forms.dll')"
+      Text="Build the repository WinForms prototype first. This harness is not a shipping framework reference." />
+    <ItemGroup>
+      <Reference Remove="@(Reference)"
+        Condition="'%(Reference.FrameworkReferenceName)' == 'Microsoft.WindowsDesktop.App.WindowsForms' and ('%(Filename)' == 'System.Windows.Forms' or '%(Filename)' == 'System.Windows.Forms.Primitives' or '%(Filename)' == 'System.Drawing.Common' or '%(Filename)' == 'Accessibility' or '%(Filename)' == 'Microsoft.Win32.SystemEvents' or '%(Filename)' == 'System.Configuration.ConfigurationManager' or '%(Filename)' == 'System.Resources.Extensions' or '%(Filename)' == 'System.Windows.Extensions')" />
+      <Reference Include="$(PrototypeWinFormsDirectory)\*.dll" Private="true" />
+    </ItemGroup>
+  </Target>
+</Project>
