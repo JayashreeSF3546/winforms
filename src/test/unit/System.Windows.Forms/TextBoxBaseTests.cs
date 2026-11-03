@@ -2316,7 +2316,7 @@ public partial class TextBoxBaseTests
             Assert.Skip("Cascadia Code font is not installed on this machine.");
         }
 
-        using Font cascadiaCode = new("Cascadia Code", 12f);
+        using Font cascadiaCode = new("Cascadia Code", 20f);
         using SubTextBox control = new()
         {
             BorderStyle = BorderStyle.None,
@@ -2324,12 +2324,14 @@ public partial class TextBoxBaseTests
         };
 
         int gdiCellHeight = GetGdiFontCellHeight(cascadiaCode);
+        if (gdiCellHeight <= control.FontHeight)
+        {
+            Assert.Skip("Installed font metrics do not reproduce the height mismatch.");
+        }
 
-        // The bug was that PreferredHeight (and thus the default AutoSize height) could be shorter than the
-        // font's actual GDI cell height, clipping descenders like "g", "j", "p", "q", and "y".
-        Assert.True(
-            control.PreferredHeight >= gdiCellHeight,
-            $"PreferredHeight ({control.PreferredHeight}) should be at least the GDI font cell height ({gdiCellHeight}).");
+        Assert.True(control.PreferredHeight >= gdiCellHeight);
+        Assert.True(control.GetPreferredSize(Size.Empty).Height >= gdiCellHeight);
+        Assert.False(control.IsHandleCreated);
     }
 
     private static bool IsFontFamilyInstalled(string familyName)
@@ -2352,10 +2354,10 @@ public partial class TextBoxBaseTests
         public int tmOverhang;
         public int tmDigitizedAspectX;
         public int tmDigitizedAspectY;
-        public byte tmFirstChar;
-        public byte tmLastChar;
-        public byte tmDefaultChar;
-        public byte tmBreakChar;
+        public ushort tmFirstChar;
+        public ushort tmLastChar;
+        public ushort tmDefaultChar;
+        public ushort tmBreakChar;
         public byte tmItalic;
         public byte tmUnderlined;
         public byte tmStruckOut;
@@ -2385,8 +2387,10 @@ public partial class TextBoxBaseTests
             try
             {
                 IntPtr oldFont = SelectObject(hdc, hFont);
-                GetTextMetrics(hdc, out TEXTMETRIC tm);
+                bool success = GetTextMetrics(hdc, out TEXTMETRIC tm);
                 SelectObject(hdc, oldFont);
+                Assert.True(success);
+
                 return tm.tmHeight;
             }
             finally
