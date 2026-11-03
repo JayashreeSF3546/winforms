@@ -795,12 +795,6 @@ public class ContainerControl : ScrollableControl, IContainerControl
     {
         base.OnChildLayoutResuming(child, performLayout);
 
-        // do not scale children if AutoScaleMode is set to Dpi
-        if (AutoScaleMode == AutoScaleMode.Dpi && !HasAutoSizeCheckBoxOrRadioButtonInSubtree(child))
-        {
-            return;
-        }
-
         // We need to scale children before their layout engines get to them.
         // We don't have a lot of opportunity for that because the code
         // generator always generates a PerformLayout() right after a
@@ -814,7 +808,8 @@ public class ContainerControl : ScrollableControl, IContainerControl
             && !performLayout
             && AutoScaleMode != AutoScaleMode.None && AutoScaleMode != AutoScaleMode.Inherit
             && _state[s_stateScalingNeededOnLayout]
-            && (AutoScaleFactor.Width != 1.0F || AutoScaleFactor.Height != 1.0F))
+            && (AutoScaleFactor.Width != 1.0F || AutoScaleFactor.Height != 1.0F)
+            && (AutoScaleMode != AutoScaleMode.Dpi || HasAutoSizeCheckBoxOrRadioButtonInSubtree(child)))
         {
             _state[s_stateScalingChild] = true;
             try
@@ -2019,20 +2014,23 @@ public class ContainerControl : ScrollableControl, IContainerControl
     }
 
     /// <summary>
-    /// Returns true if this control subtree contains an AutoSize CheckBox or RadioButton.
+    ///  Returns true if this control subtree contains an AutoSize CheckBox or RadioButton.
     /// </summary>
-    private bool HasAutoSizeCheckBoxOrRadioButtonInSubtree(Control control)
+    private static bool HasAutoSizeCheckBoxOrRadioButtonInSubtree(Control control)
     {
         if (control.AutoSize && control is CheckBox or RadioButton)
         {
             return true;
         }
 
-        foreach (Control child in control.Controls)
+        if (control.ChildControls is { } children)
         {
-            if (HasAutoSizeCheckBoxOrRadioButtonInSubtree(child))
+            for (int i = 0; i < children.Count; i++)
             {
-                return true;
+                if (HasAutoSizeCheckBoxOrRadioButtonInSubtree(children[i]))
+                {
+                    return true;
+                }
             }
         }
 

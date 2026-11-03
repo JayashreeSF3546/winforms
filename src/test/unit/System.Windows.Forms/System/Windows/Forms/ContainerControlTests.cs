@@ -570,6 +570,95 @@ public class ContainerControlTests
         control.PerformAutoScale();
     }
 
+    [WinFormsTheory]
+    [InlineData(false, true, 1F)]
+    [InlineData(false, true, 3F)]
+    [InlineData(true, true, 1F)]
+    [InlineData(true, true, 3F)]
+    [InlineData(false, false, 3F)]
+    [InlineData(true, false, 3F)]
+    public void ContainerControl_DpiScaling_GroupBoxChildHasExpectedSize(
+        bool radioButton, bool autoSize, float designScale)
+    {
+        using Form form = new();
+        using GroupBox group = new();
+        using ButtonBase child = radioButton ? new RadioButton() : new CheckBox();
+
+        form.SuspendLayout();
+        group.SuspendLayout();
+
+        group.Size = new Size(600, 300);
+        group.Controls.Add(child);
+        child.AutoSize = autoSize;
+        child.Text = "Option";
+        child.Location = new Point(72, 96);
+        child.Size = new Size(235, 52);
+        form.Controls.Add(group);
+
+        form.AutoScaleMode = AutoScaleMode.Dpi;
+        SizeF current = form.CurrentAutoScaleDimensions;
+        form.AutoScaleDimensions = new SizeF(
+            current.Width * designScale,
+            current.Height * designScale);
+
+        group.ResumeLayout(false);
+        group.PerformLayout();
+        form.ResumeLayout(false);
+
+        Size expected = autoSize
+            ? child.PreferredSize
+            : new Size(
+                (int)Math.Round(235F / designScale),
+                (int)Math.Round(52F / designScale));
+
+        Assert.Equal(expected, child.Size);
+        Assert.False(form.IsHandleCreated);
+        Assert.False(group.IsHandleCreated);
+        Assert.False(child.IsHandleCreated);
+    }
+
+    [WinFormsFact]
+    public void ContainerControl_OnChildLayoutResuming_NoScaling_DoesNotCreateChildCollection()
+    {
+        using ContainerControl control = new()
+        {
+            AutoScaleMode = AutoScaleMode.Dpi
+        };
+        control.PerformAutoScale();
+        using Control child = new();
+
+        Assert.Null(child.ChildControls);
+
+        control.OnChildLayoutResuming(child, performLayout: false);
+
+        Assert.Null(child.ChildControls);
+    }
+
+    [WinFormsTheory]
+    [InlineData(false, 1F)]
+    [InlineData(false, 3F)]
+    [InlineData(true, 1F)]
+    [InlineData(true, 3F)]
+    public void ContainerControl_OnChildLayoutResuming_DpiScaling_DoesNotCreateChildCollection(
+        bool performLayout, float designScale)
+    {
+        using ContainerControl control = new()
+        {
+            AutoScaleMode = AutoScaleMode.Dpi
+        };
+        SizeF current = control.CurrentAutoScaleDimensions;
+        control.AutoScaleDimensions = new SizeF(
+            current.Width * designScale,
+            current.Height * designScale);
+        using Control child = new();
+
+        Assert.Null(child.ChildControls);
+
+        control.OnChildLayoutResuming(child, performLayout);
+
+        Assert.Null(child.ChildControls);
+    }
+
     [WinFormsFact]
     public void ContainerControl_CreateContainerControl_Invoke_CallsBindingContextChanged()
     {
