@@ -8,6 +8,13 @@ We provide the following templates:
 * [Windows Forms control library (C#)](./content/WinFormsControlLibrary-CSharp)
 * [Windows Forms control library (VB)](./content/WinFormsControlLibrary-VisualBasic)
 
+## Application Builder template planning
+
+The proposed Application Builder families, C#/VB parity, package prerequisites, Hybrid lifetime
+gates, and sample boundaries are defined in the
+[template and sample matrix](../../docs/design/winforms-application-builder-templates.md).
+These are architecture recommendations, not templates currently provided by this package.
+
 # Item templates are located in the VSProject repo
 * [VB](https://devdiv.visualstudio.com/DevDiv/_git/VS?path=/src/vsproject/Templates/Windows/VisualBasic/ItemTemplates/WindowsForms&version=GBmain&_a=contents)
 * [C#](https://devdiv.visualstudio.com/DevDiv/_git/VS?path=/src/vsproject/Templates/Windows/CSharp/ItemTemplates&version=GBmain&_a=contents)
