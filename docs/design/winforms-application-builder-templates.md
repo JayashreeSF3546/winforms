@@ -378,6 +378,19 @@ versioned artifact. Hybrid remains excluded and non-discoverable until its publi
 are resolved. See the [validation guide](../../pkg/Microsoft.Dotnet.WinForms.ProjectTemplates/tests/README.md)
 for commands and the exact boundary between implemented checks and remaining acceptance.
 
+For dotnet/winforms#14970, the [exploratory runbook](../../pkg/Microsoft.Dotnet.WinForms.ProjectTemplates/tests/EXPLORATORY-TESTING.md)
+and `New-TemplateExploration.ps1` prepare copied C#/VB projects for actual IDE work, without
+changing generated originals, the developer's template installation, or global machine settings.
+A separate UI Automation client checks accessible main-window identity/close and the actual
+startup-error text/acknowledgment/exit code for both published apps. It uses standard Desktop
+client assemblies, not the repository WinForms product. Local results record observed DPI,
+architecture, high-contrast and remote-session state; they are not appearance or remote-session
+acceptance. The copied solution also restored from a private cache, built and ran locally.
+Designer, screen-reader/keyboard, theme/DPI transitions, native ARM, slow hardware and
+packaged/restricted/clean-machine checks have explicit hands-on procedures and remain NotRun.
+The initial template is intentionally empty; meaningful control navigation is tested after
+adding representative controls in the actual Designer, not by adding test UI to the payload.
+
 External-consumer compilation, execution, publishing, actual Designer work, and remote CI are
 separate gates. The inherited API/package reviews, service persistence stress/native-I/O findings,
 component-manager resource observations, and broader integration-test gaps remain tracked in the

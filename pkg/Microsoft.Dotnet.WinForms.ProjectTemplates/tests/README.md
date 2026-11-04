@@ -9,6 +9,12 @@ Run the following commands from the repository root.
 The [gated Hybrid scaffold checks](#gated-hybrid-scaffold) below also cover source-only isolation
 for dotnet/winforms#14967. They do not enable Hybrid template discovery or browser activation.
 
+For dotnet/winforms#14970, the [exploratory runbook](EXPLORATORY-TESTING.md) prepares
+an isolated C#/VB editing workspace and checks the real published apps through UI Automation.
+It provides Designer, keyboard/screen-reader, appearance, session and deployment procedures,
+with manual results explicitly NotRun until a tester performs them. It does not replace actual
+Visual Studio or clean-machine testing with a compilation/parameterless-construction proxy.
+
 ## Automated lifecycle matrix
 
 `Test-TemplateLifecycle.ps1` runs creation/package checks, explicit restore, no-restore build,
