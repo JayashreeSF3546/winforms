@@ -34,6 +34,8 @@ public sealed class WinFormsApplication : IDisposable
     private Application.ThreadContext? _threadContext;
     private Control? _dispatcher;
     private Task _startupCancellationTask = Task.CompletedTask;
+    private List<Func<ValueTask>>? _uiShutdownCallbacks;
+    private Task? _uiShutdownTask;
     private ExceptionDispatchInfo? _runFailure;
     private bool _activationAttempted;
     private bool _activating;
@@ -203,6 +205,16 @@ public sealed class WinFormsApplication : IDisposable
         finally
         {
             NotifyStopping();
+            if (_uiShutdownCallbacks is not null)
+            {
+                RecordException(new InvalidOperationException(SR.WinFormsApplication_UiShutdownInterrupted));
+            }
+
+            if (_uiShutdownTask is { IsCompleted: true })
+            {
+                CaptureFailure(() => _uiShutdownTask.GetAwaiter().GetResult());
+            }
+
             lock (_stateLock)
             {
                 _cleanupStarted = true;
@@ -268,6 +280,43 @@ public sealed class WinFormsApplication : IDisposable
     {
         RequestStop();
         return WaitForStopAsync(cancellationToken);
+    }
+
+    /// <summary>
+    ///  Prototypes asynchronous cleanup registered before resource activation during normal UI dispatch.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   The initial prototype supports the standard root context only. It does not make direct Form
+    ///   disposal or forced message-loop termination graceful, or provide WebView disposal completion.
+    ///  </para>
+    /// </remarks>
+    internal void RegisterUiShutdown(Func<ValueTask> shutdown)
+    {
+        ArgumentNullException.ThrowIfNull(shutdown);
+        VerifyAccess();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_running || !_loopEntered || !Application.MessageLoop || _context?.GetType() != typeof(ApplicationContext)
+            || _context.MainForm is { Modal: true } or { IsMdiContainer: true } or { Owner: not null }
+            || StopRequested)
+        {
+            throw new InvalidOperationException(SR.WinFormsApplication_UiShutdownRegistration);
+        }
+
+        (_uiShutdownCallbacks ??= []).Add(shutdown);
+    }
+
+    internal bool TryDeferUiShutdown(Form? closingForm = null)
+    {
+        if (_uiShutdownCallbacks is null || _cleanupStarted || _disposed
+            || (closingForm is not null && !ReferenceEquals(_context?.MainForm, closingForm)))
+        {
+            return false;
+        }
+
+        RequestStop();
+
+        return true;
     }
 
     internal ApplicationContext? StartupContext => _context;
@@ -537,7 +586,42 @@ public sealed class WinFormsApplication : IDisposable
             }
         }
 
+        if (_uiShutdownCallbacks is not null)
+        {
+            _uiShutdownTask = ShutdownUiAsync();
+            return;
+        }
+
         NotifyStopping();
+        ExitOnUiThread();
+    }
+
+    private async Task ShutdownUiAsync()
+    {
+        try
+        {
+            NotifyStopping();
+            foreach (Func<ValueTask> shutdown in _uiShutdownCallbacks!)
+            {
+                try
+                {
+                    await shutdown().ConfigureAwait(true);
+                }
+                catch (Exception exception) when (!exception.IsCriticalException())
+                {
+                    RecordException(exception);
+                }
+            }
+        }
+        finally
+        {
+            _uiShutdownCallbacks = null;
+            ExitOnUiThread();
+        }
+    }
+
+    private void ExitOnUiThread()
+    {
         try
         {
             Application.Exit(new CancelEventArgs());

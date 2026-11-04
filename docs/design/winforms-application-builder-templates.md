@@ -406,6 +406,219 @@ deployment, and remote CI remain open. Full template CI, exploratory coverage, a
 remain owned by their later children. No Hybrid implementation or adoption samples are included;
 the previously documented Hybrid asynchronous-cleanup prerequisite is unchanged.
 
+## Hybrid implementation readiness (dotnet/winforms#14967)
+
+The implementation entry check reconfirmed the asynchronous-cleanup prerequisite against
+[released MAUI 10.0.120](https://github.com/dotnet/maui/blob/10.0.120/src/BlazorWebView/src/WindowsForms/BlazorWebView.cs)
+and [the latest change to the control on main](https://github.com/dotnet/maui/blob/130525230b0287ec12a058aa5a38bd2af73c939a/src/BlazorWebView/src/WindowsForms/BlazorWebView.cs).
+Both implement `Dispose(bool)` by scheduling and observing asynchronous manager disposal, then
+calling base disposal inside that operation. Neither exposes that operation as a public task for
+the application to await. `TryDispatchAsync` remains a work-dispatch API, not a cleanup completion
+contract.
+
+At the entry check, the [WinForms runner](../../src/System.Windows.Forms/Microsoft/Extensions/WinForms/WinFormsApplication.cs)
+provided no asynchronous pre-dispatcher-teardown hook. Host-origin stop requested application
+exit and posted quit; final cleanup tore down the thread context, synchronously disposed startup
+resources, and then permitted host shutdown. Canceling a Form's closing event could not defer that
+committed host-origin stop. The initial internal prototype below changes that behavior only for
+opt-in registrations in a bounded scenario; it does not establish a public integration contract.
+
+This is source evidence of an unresolved integration contract, not a newly reproduced runtime
+failure or a claim that every package version is affected. The subsequent protocol investigation
+also traced NuGet package `11.0.0-rc.2.26505.5` through its
+[package manifest](https://api.nuget.org/v3-flatcontainer/microsoft.aspnetcore.components.webview.windowsforms/11.0.0-rc.2.26505.5/microsoft.aspnetcore.components.webview.windowsforms.nuspec)
+to [MAUI commit d32b799](https://github.com/dotnet/maui/blob/d32b79928709cf53b671336dabd0caef5a679fc2/src/BlazorWebView/src/WindowsForms/BlazorWebView.cs).
+That exact control source likewise discards the dispatcher task from `Dispose(bool)` and exposes
+no cleanup completion task. Unlike the reviewed main source, this revision does not attach
+`ObserveExceptionsAsync` at that call. The package has not been built or run here and is not selected
+as a validated Hybrid dependency.
+
+No discoverable Hybrid template or dependency is added while this gate is unresolved. Before
+supported template implementation proceeds, WebView/lifetime owners must approve a public protocol that keeps UI
+dispatch and the host provider alive through successful asynchronous cleanup and reports cleanup
+failures. Any required foundation API change must be reviewed separately rather than hidden in
+template-generated code.
+
+The next focused validation must use a component and renderer-scoped service whose asynchronous
+disposal can be deliberately held and released. For user close, host stop, and partial startup
+failure, prove cleanup completes with UI dispatch available before root-service disposal; also
+exercise cleanup failure and repeated stop requests. Only after that protocol is demonstrated
+should the template add shared-root composition, navigation policy, local assets, WebView2
+prerequisites, Designer isolation, and build/run/publish checks.
+
+### Public protocol investigation and proposal for approval
+
+The approved investigation is documentation-only. The following API sketches are proposals,
+not available contracts or permission to implement framework changes in the template child.
+
+The preview package manifest selects shared WebView package `11.0.0-rc.1.26425.128` and WebView2
+`1.0.4078.44`. The shared package's
+[manifest](https://api.nuget.org/v3-flatcontainer/microsoft.aspnetcore.components.webview/11.0.0-rc.1.26425.128/microsoft.aspnetcore.components.webview.nuspec)
+pins [WebViewManager](https://github.com/dotnet/dotnet/blob/3551975be08744f0418857c5bed8ab1545c5dd47/src/aspnetcore/src/Components/WebView/WebView/src/WebViewManager.cs)
+and [PageContext](https://github.com/dotnet/dotnet/blob/3551975be08744f0418857c5bed8ab1545c5dd47/src/aspnetcore/src/Components/WebView/WebView/src/PageContext.cs).
+The manager awaits page cleanup; page cleanup disconnects JS interop, awaits renderer disposal,
+then awaits its asynchronous service scope. The required completion boundary therefore includes
+renderer and renderer-scoped services, not merely the native browser control.
+Do not promise that arbitrary JS interop is available during component disposal: this revision
+deliberately marks it disconnected.
+
+| Existing public seam | Why it does not establish the required protocol |
+|---|---|
+| `BlazorWebView.Dispose()` and `Disposed` | Dispose returns before asynchronous work completes. A Disposed-event adapter has no guaranteed failure result, startup-race handling, or promise that parent/child HWND destruction waits. |
+| `TryDispatchAsync(Action<IServiceProvider>)` | Completes dispatched work against a live page scope, not manager disposal. An async lambda converted to Action would be async void. |
+| Root-component collection removal | The control schedules internal asynchronous removal without exposing a join; removing a component is not disposal of the page service scope or manager. |
+| `FormClosing` cancellation | Can delay an ordinary user close, but cannot delay the runner's committed host-stop quit. A single Form handler is not an application-wide cleanup barrier. |
+| Custom `ApplicationContext.ExitThreadCore` | Does not prevent Form destruction that has already occurred and cannot suppress the runner's explicit posted quit for host stop. |
+| `ApplicationStopping` event or Generic Host stopping token | Synchronous notification, not awaitable cleanup. An async event handler returns at its first incomplete await. |
+| Hosted service `StopAsync` | Runs after the runner's UI completion barrier; it is too late for UI-dispatched cleanup. |
+| Implement `IAsyncDisposable` on a generated Form/context | The current runner invokes synchronous disposal after the loop; implementing an interface does not change that call or ordering. |
+
+#### Proposed upstream WebView contract
+
+Ask the MAUI/WebView owners to provide a supported awaitable disposal operation on
+`BlazorWebView`, preferably `IAsyncDisposable.DisposeAsync()` (final API subject to their review).
+Required semantics:
+
+- Start on the control's owning UI thread with dispatch available. Completion joins any in-flight
+  initialization, stops new navigation/render work, and disposes the manager, renderer/page scopes,
+  and underlying native control in the supported order. If initialization never began, cleanup is
+  still well-defined.
+- Concurrent/repeated calls join one operation. Mixing synchronous and asynchronous disposal must
+  not double-dispose or produce an early success result. Parent Form destruction must follow the
+  awaited operation, not race it.
+- Return cleanup failures to the caller, including failures otherwise routed to renderer/browser
+  error handling where the supported boundary permits. Attempt remaining owned cleanup after a
+  failure; do not skip service-scope cleanup simply because renderer disposal failed. The inspected
+  `PageContext` currently awaits these sequentially without a finally protecting the second call.
+- Borrow `Services`; never dispose the application's root provider. Do not require template code
+  to access the private manager or reconstruct renderer ownership.
+
+An alternative public `CloseAsync`/completion contract is acceptable if its owners guarantee the
+same resource, failure, initialization, and dispatch ordering. Observing current implementation
+details through an inherited event is not equivalent to that guarantee.
+
+#### Proposed WinForms runtime contract
+
+Ask the Application Builder/lifetime owners for an opt-in asynchronous UI shutdown phase before
+Form/control destruction and dispatcher teardown. An illustrative registration shape is
+`WinFormsApplication.RegisterUiShutdown(Func<ValueTask> shutdown)`; naming, registration lifetime,
+and placement on the application versus builder require API review. Registration must be possible
+before the corresponding asynchronous UI resource begins activation.
+
+Required behavior, not merely an extra event:
+
+- Coordinate accepted user close, `StopAsync`, host `StopApplication`, run cancellation, and
+  supported application-exit paths through one shared stop operation. Preserve cancellation of an
+  ordinary user close before commitment. A committed stop remains non-vetoable but waits for
+  registered cleanup instead of posting quit immediately.
+- Invoke callbacks once on the owning STA while the existing main loop continues dispatching.
+  Do not block the UI thread, introduce a template-owned pump, or call `Application.DoEvents`.
+  While cleanup awaits, repeated stop requests join it and do not dispose Forms independently.
+- Keep the Forms, dispatch controls, host provider, and required host services available until
+  all callbacks finish. Then dispose the UI, mark UI completion, and continue existing host
+  stop/disposal. This does not undo the host's already-signaled ApplicationStopping token.
+- Handle partial startup and failure before the main loop begins explicitly. A callback awaiting
+  UI dispatch cannot simply be awaited from the current synchronous finally block; the runtime
+  owners must define a supported dispatch-capable path or prohibit resource activation until the
+  normal loop can provide it. Do not conceal this case with nested pumps or blocking waits.
+- Aggregate/report callback failures through the existing run/stop failure channel, attempt the
+  remaining cleanup, and preserve non-success exit semantics. Canceling a StopAsync caller's wait
+  must not cancel the shared cleanup or falsely signal safe provider disposal. A timeout is a
+  diagnostic/escalation decision, not proof cleanup completed.
+
+Direct premature `Form.Dispose`, abrupt process termination, and OS-forced shutdown cannot be
+advertised as graceful asynchronous cleanup. The owners must define supported exit paths and any
+restrictions, including modal/owned Forms, before the template promises coordinated lifetime.
+Applications without registrations must retain their current close and startup behavior.
+
+With both contracts approved and implemented, generated composition would register the WebView's
+awaitable cleanup once and reuse the runner's phase. It would still build only one host/root and
+would not implement its own shutdown state machine. Adding only one of these contracts is
+insufficient: an awaitable WebView still needs a live dispatcher, and a runtime deferral still
+needs a trustworthy WebView completion/failure result.
+
+#### Approval and validation boundary
+
+Recommended next step: approve a separately scoped foundation design/prototype covering both
+owners, then implement and test the protocol before resuming the discoverable Hybrid template.
+Approval to investigate did not approve the API sketches, a runtime behavior change, a package
+selection, or an upstream issue/PR submission. The proposal itself changed no foundation code.
+The subsequent implementation request authorized the initial internal prototype below, not
+upstream submissions or a shipping/public API approval.
+
+Use completion-source-controlled asynchronous disposal, not timing delays, to test one cleanup
+invocation, a still-responsive STA, live root services while cleanup is held, and the ordering
+`component/page cleanup -> UI disposal -> host stop/disposal`. Cover successful cleanup, component
+and scoped-service failure, initialization failure, stop before activation, cancellation of an
+individual stop waiter, repeated/reentrant user/host stop, and unchanged non-Hybrid behavior.
+An actual pinned WebView package and WebView2 runtime must then pass the same ordering checks:
+a fake cleanup callback validates the runtime seam, not WebView integration.
+
+### Initial internal runtime prototype
+
+The first implementation prototypes only the WinForms side, using internal
+`RegisterUiShutdown(Func<ValueTask>)` registration rather than adding an unreviewed public API.
+There is no WebView wrapper, copied upstream control, Hybrid template, or new package dependency.
+The WebView completion contract and eventual public API review remain external gates.
+
+Registration is deliberately restricted to normal UI message dispatch with the standard
+`ApplicationContext` and a nonmodal, non-MDI, non-owned main Form. Register before activating the
+resource in that dispatched operation; do not activate asynchronous UI resources in the context
+factory, Form constructor, or pre-loop started notification. This bounded prototype does not solve
+asynchronous cleanup for resources activated before normal dispatch, custom contexts, or all
+modal/multi-UI-thread exit combinations.
+
+Accepted main-Form close, application exit on the owning thread, standard-context/thread exit,
+runtime stop, host stop, and run cancellation defer destruction while callbacks execute on the
+existing UI synchronization context. Ordinary close cancellation occurs before commitment.
+Callbacks run once in registration order; failures are recorded without skipping later callbacks.
+Repeated stop requests join shutdown; canceling an individual wait does not cancel cleanup.
+The existing host/UI barrier is released only after the cleanup phase and synchronous UI disposal.
+
+The prototype does not treat arbitrary message-loop loss as successful cleanup. Direct disposal,
+posted WM_QUIT, or an exception escaping and terminating the pump can bypass graceful deferral;
+pending registrations then add an explicit run failure. This diagnostic is not a recovery protocol
+and does not prove asynchronous work completed. Application-owned resource-startup operations must
+route recoverable failure into the coordinated stop path while dispatch remains available.
+If cleanup never completes, graceful shutdown continues waiting; there is no invented timeout
+that permits unsafe provider disposal.
+
+Resource messages use the existing localization pipeline; generated translation entries require
+the normal localization review. Runtime tests use controlled asynchronous callbacks and the real
+Generic Host, not a WebView substitute presented as browser validation. Actual WebView integration,
+partial startup before dispatch, public API approval, and clean-machine/Designer/CI checks remain
+required before dotnet/winforms#14967 can be called complete.
+
+#### Local prototype validation
+
+The targeted Arcade build passed with zero warnings/errors. The selected unit runs passed
+199 cases with no failures or skips: 137 Application Builder cases (including 21 new shutdown
+cases), 27 legacy ApplicationContext cases, and 35 legacy Application.Exit cases. New cases cover
+eight graceful shutdown sources under both thread-context implementations, an application context
+without a main Form, synchronous/asynchronous cleanup failures with continued cleanup, user-close
+cancellation, canceled/repeated stop waits, registration guards, and explicit forced-quit failure.
+These are controlled runtime tests, not actual WebView/Hybrid acceptance.
+
+Validation used private C-drive artifacts because the repository drive was nearly full. Existing
+bin/obj outputs were copied to that test-owned directory before building; shared caches and source
+project settings were not changed. Reproduce the build and selected tests from the repository root:
+
+```powershell
+$artifacts = Join-Path $env:TEMP 'WinForms14967Artifacts'
+.\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj `
+    -verbosity minimal -binaryLogName "$artifacts\UiShutdown.binlog" "/p:ArtifactsDir=$artifacts"
+$env:DOTNET_ROOT = "$PWD\.dotnet"
+$env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
+$tests = Join-Path $artifacts 'bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe'
+& $tests --filter-class 'System.Windows.Forms.Tests.WinFormsApplication*' --parallel none --progress off
+& $tests --filter-class 'System.Windows.Forms.Tests.ApplicationContextTests' --parallel none --progress off
+& $tests --filter-method 'System.Windows.Forms.Tests.ApplicationTests.Application_Exit*' --parallel none --progress off
+```
+
+Each command passed locally. Test execution used process-specific watchdogs; logs and TRX results
+remain in the test-owned artifact directory. Remote CI was not run. No dependency package was
+changed, no new public API was added, and no completion claim is made for the full Hybrid issue.
+
 ## Research sources
 
 Local links above identify the inspected repository seams. External source links pin the reviewed
