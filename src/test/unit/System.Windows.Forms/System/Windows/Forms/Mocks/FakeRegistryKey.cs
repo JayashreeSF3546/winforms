@@ -37,7 +37,7 @@ internal sealed class FakeRegistryKey : IRegistryKey
     }
 
     public object? GetValue(string? name) =>
-        name is not null && _values.TryGetValue(name, out object? value) ? value : null;
+        _values.TryGetValue(name ?? string.Empty, out object? value) ? value : null;
 
     public IRegistryKey? OpenSubKey(string name) =>
         _subKeys.TryGetValue(name, out FakeRegistryKey? subKey) ? subKey : null;

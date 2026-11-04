@@ -22,21 +22,28 @@ namespace System.Windows.Forms.Tests;
 /// </remarks>
 public class FakeRegistryKeyTests
 {
-    [Fact]
-    public void GetValue_ReturnsConfiguredValue()
+    [Theory]
+    [InlineData("Layout Text", "Layout Text")]
+    [InlineData("Layout Text", "layout text")]
+    [InlineData("", "")]
+    [InlineData("", null)]
+    public void GetValue_ReturnsConfiguredValue(string storedName, string? lookupName)
     {
         FakeRegistryKey key = new();
-        key.SetValue("Layout Text", "English (United States)");
+        key.SetValue(storedName, "English (United States)");
 
-        Assert.Equal("English (United States)", key.GetValue("Layout Text"));
+        Assert.Equal("English (United States)", key.GetValue(lookupName));
     }
 
-    [Fact]
-    public void GetValue_WhenMissing_ReturnsNull()
+    [Theory]
+    [InlineData("DoesNotExist")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void GetValue_WhenMissing_ReturnsNull(string? name)
     {
         FakeRegistryKey key = new();
 
-        Assert.Null(key.GetValue("DoesNotExist"));
+        Assert.Null(key.GetValue(name));
     }
 
     [Fact]
