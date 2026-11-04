@@ -809,7 +809,7 @@ public class ContainerControl : ScrollableControl, IContainerControl
             && AutoScaleMode != AutoScaleMode.None && AutoScaleMode != AutoScaleMode.Inherit
             && _state[s_stateScalingNeededOnLayout]
             && (AutoScaleFactor.Width != 1.0F || AutoScaleFactor.Height != 1.0F)
-            && (AutoScaleMode != AutoScaleMode.Dpi || HasAutoSizeCheckBoxOrRadioButtonInSubtree(child)))
+            && (AutoScaleMode != AutoScaleMode.Dpi || ShouldScaleChildInDpiMode(child)))
         {
             _state[s_stateScalingChild] = true;
             try
@@ -2011,6 +2011,20 @@ public class ContainerControl : ScrollableControl, IContainerControl
         }
 
         base.WndProc(ref m);
+    }
+
+    private bool ShouldScaleChildInDpiMode(Control child)
+    {
+        // Layout notifications reach ancestors, but scaling must respect each container's policy.
+        for (Control? parent = child.ParentInternal; parent is not null && parent != this; parent = parent.ParentInternal)
+        {
+            if (parent is ContainerControl container && container.AutoScaleMode != AutoScaleMode.Inherit)
+            {
+                return false;
+            }
+        }
+
+        return HasAutoSizeCheckBoxOrRadioButtonInSubtree(child);
     }
 
     /// <summary>
