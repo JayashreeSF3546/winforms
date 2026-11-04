@@ -1,12 +1,86 @@
 # Basic Application Builder template validation
 
 These checks belong to dotnet/winforms#14966. They validate the nonshipping C#/VB prototypes,
-not compatibility with an unmodified public SDK. They do not implement the later template CI matrix.
+not compatibility with an unmodified public SDK. The automated lifecycle entry point below
+extends them for dotnet/winforms#14969.
 Use Windows x64, PowerShell 7, and an interactive desktop; do not interact with automated test windows.
 Run the following commands from the repository root.
 
 The [gated Hybrid scaffold checks](#gated-hybrid-scaffold) below also cover source-only isolation
 for dotnet/winforms#14967. They do not enable Hybrid template discovery or browser activation.
+
+## Automated lifecycle matrix
+
+`Test-TemplateLifecycle.ps1` runs creation/package checks, explicit restore, no-restore build,
+real default-entry-point execution, separate C#/VB smoke fixtures, and Release publishing.
+It uses only a unique test hive and private package cache; it never clears shared caches or
+changes the developer's template installation. The existing external prototype imports remain
+test-only and are not written into generated projects.
+
+After packing hosting and templates with Arcade, run:
+
+```powershell
+$artifacts = Join-Path $env:TEMP 'WinForms14967Artifacts'
+.\pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\tests\Test-TemplateLifecycle.ps1 `
+    -TemplatePackage "$artifacts\packages\Debug\NonShipping\Microsoft.Dotnet.WinForms.ProjectTemplates.12.0.0-dev.nupkg" `
+    -HostingPackageDirectory "$artifacts\packages\Debug\Shipping" `
+    -PrototypeWinFormsDirectory "$artifacts\bin\System.Windows.Forms\Debug\net12.0"
+```
+
+The script requires Windows, PowerShell 7, an interactive desktop, the matching SDK/Core/Desktop
+runtime train, and packed prototype dependencies. Defaults use the same explicit Core version as
+`PrototypeConsumer.props`; override `-PrototypeCoreVersion` when updating that train. Use
+`-OutputRoot` for a writable evidence directory and `-DotNet` for a different matching SDK.
+Every subprocess is bounded; hung processes started by the harness are stopped by their own PID.
+Do not interact with its automatically opened windows.
+
+- Creation covers C#/VB and names containing spaces/punctuation, exact file manifests, framework
+  rejection, unique settings IDs, unchanged classic payloads, and Hybrid exclusion.
+- Package lifecycle checks update availability without applying a remote update, replaces the
+  exact same local version with `--force`, and uninstalls in `finally`. It verifies stable discovery,
+  unchanged generated source, and removal from discovery. **This is not a two-version upgrade or
+  downgrade test**; that requires a separately versioned published artifact.
+- Restore covers a deliberate empty-source/empty-cache failure and a subsequent cached restore
+  with all feeds cleared. NuGet auditing is disabled only for those explicitly offline checks,
+  since advisory lookups would otherwise make them network-dependent.
+- All four generated projects build and run with their actual entry points. Native C#/VB
+  fixtures cover configuration/settings, invalid startup options, parameterless construction,
+  UI-origin stop, and host-origin stop, without modifying template payloads.
+- C#/VB publish as framework-dependent and self-contained for `win-x64`, `win-x86`, and
+  `win-arm64` by default. Apphost/runtime PE machine types, published manifests/runtime files,
+  and unchanged generated source are
+  checked. Only the native OS architecture executes; other architecture runs are explicitly
+  **NotRun**, never counted as passes. `-RuntimeIdentifiers win-x64` selects a smaller local matrix
+  on x64; the selected list must include the native architecture.
+- Executed publishes must display the configured real main-window title, accept normal close,
+  and exit zero. The test driver does not add shutdown switches to production startup.
+
+Each run retains `results.json`, JUnit `results.xml`, `environment.json`, per-command stdout/stderr,
+generated source, and deployment artifacts under a unique output directory. A short, unique
+`WFT-<guid>` restore cache under the temporary directory avoids legacy Windows path limits in
+ARM64 runtime resource paths; its exact location is recorded in `environment.json`. Failed cases
+throw and retain evidence.
+Cross-published execution and actual IDE/Designer/clean-machine checks remain separate evidence.
+
+### CI integration and gates
+
+`azure-pipelines-PR.yml` exposes the boolean `templateLifecycleTests` queue parameter. Enabling
+it adds a serial lifecycle task after package creation in the x64 Debug job, plus JUnit publication
+that fails on failing/missing results. Command logs live below the existing `artifacts\log` upload
+root. The task runs the same script and default architecture/deployment matrix as local validation.
+
+The queue parameter is **off by default** while matching prototype runtimes/API packs are not
+guaranteed on CI agents. Enabling it requires provisioning the runtime train described below and
+an interactive Windows agent; it must not be presented as an already executed remote CI result.
+There is no silent shipping-SDK fallback. A fully enabled PR gate, native x86/ARM64 execution,
+two-version updates, and runnable Hybrid coverage remain follow-up acceptance gates.
+
+Local validation of the default matrix passed: **34 cases passed, zero failed, eight explicitly
+not run** (native x86/ARM64 execution on the x64 machine). Both Arcade package commands passed
+with zero warnings/errors. The template package retains the six pre-existing classic-template
+metadata messages and readme informational message. Evidence is retained under
+`%TEMP%\WinForms14969\402e12d8975a4a7d8151d8fca8010948`; this is local prototype evidence,
+not an executed Azure pipeline.
 
 ## Build the actual packages
 
@@ -209,7 +283,7 @@ Keep useful logs; remove only explicitly identified, test-owned temporary artifa
 
 Actual Visual Studio discovery, supported IDE/SDK selection, out-of-process Designer edit/save/reopen,
 attached-debugger logging inspection, additional localization/architectures, clean-machine/offline
-deployment, remote CI, and shipping API/package/framework approval remain unverified. Full CI,
+deployment, remote CI, and shipping API/package/framework approval remain unverified. Enabled full CI,
 exploratory testing, and performance belong to later children. Hybrid and adoption samples are not
 part of these templates.
 

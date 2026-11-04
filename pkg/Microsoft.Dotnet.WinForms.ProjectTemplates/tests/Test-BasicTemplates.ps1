@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $TemplatePackage,
     [string] $DotNet,
-    [string] $OutputRoot
+    [string] $OutputRoot,
+    [string] $ResultPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -80,6 +81,7 @@ finally {
 }
 
 $installed = $false
+$generatedProjects = [Collections.Generic.List[string]]::new()
 try {
     Invoke-DotNet -Arguments (@('new', 'install', $TemplatePackage) + $hiveArguments)
     $installed = $true
@@ -139,16 +141,41 @@ try {
                 "Unexpanded source-name token in $($file.Name)."
         }
         Write-Output "PASS creation and manifest: $($case.Language), $($case.Name)"
+        $generatedProjects.Add((Join-Path $destination "$($case.Name).${extension}proj"))
     }
 
     $rejected = & $DotNet new winforms-builder --framework net10.0 --no-restore `
         --output (Join-Path $output 'unsupported') @hiveArguments 2>&1
     Assert-Condition ($LASTEXITCODE -ne 0) "Unsupported framework unexpectedly accepted: $rejected"
     Write-Output 'PASS unsupported framework rejection'
+
+    $snapshots = @{}
+    foreach ($projectPath in $generatedProjects) {
+        foreach ($file in Get-ChildItem (Split-Path $projectPath) -Recurse -File) {
+            $snapshots[$file.FullName] = (Get-FileHash $file.FullName -Algorithm SHA256).Hash
+        }
+    }
+    Invoke-DotNet -Arguments (@('new', 'update', '--check-only') + $hiveArguments)
+    Invoke-DotNet -Arguments (@('new', 'install', $TemplatePackage, '--force') + $hiveArguments)
+    $replacementCatalog = & $DotNet new list @hiveArguments 2>&1
+    Assert-Condition ($LASTEXITCODE -eq 0 -and ($replacementCatalog -join "`n") -ceq $initialCatalog) `
+        'Replacing the same package must preserve the template catalog.'
+    foreach ($file in $snapshots.Keys) {
+        Assert-Condition ((Get-FileHash $file -Algorithm SHA256).Hash -eq $snapshots[$file]) `
+            "Package replacement modified an existing generated file: $file"
+    }
+    Write-Output 'PASS update check and same-version replacement preserve existing applications'
 }
 finally {
     if ($installed) {
         Invoke-DotNet -Arguments (@('new', 'uninstall', 'Microsoft.Dotnet.WinForms.ProjectTemplates') + $hiveArguments)
+        $remaining = & $DotNet new list @hiveArguments 2>&1
+        Assert-Condition ($LASTEXITCODE -eq 0 -and ($remaining -join "`n") -notmatch '\bwinforms-builder\b') `
+            "Uninstall left the builder template discoverable: $remaining"
     }
+}
+if ($ResultPath) {
+    @{ Output = $output; Projects = $generatedProjects.ToArray() } |
+        ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $ResultPath -Encoding utf8
 }
 Write-Output "PASS basic-template checks. Generated projects retained at $output"

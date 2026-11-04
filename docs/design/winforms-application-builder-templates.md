@@ -365,6 +365,19 @@ product. Check names with spaces/non-identifier characters, namespace/resource s
 content manifests, no-restore creation, missing/cached packages, unsupported SDKs, install/update/
 uninstall, startup failure, and both UI- and host-origin shutdown.
 
+For dotnet/winforms#14969, `pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\tests\Test-TemplateLifecycle.ps1`
+automates the runnable basic C#/VB prototype subset using an isolated hive/cache, explicit restore,
+source hashes, bounded real-window runs, and framework-dependent/self-contained publishing for
+x64/x86/ARM64. Cross-published runs are explicitly not executed on a mismatched native architecture.
+The existing external consumer imports substitute repository prototype assemblies, not shipping
+framework support. JSON/JUnit and per-command logs retain failures and unexecuted cases.
+The Azure PR pipeline exposes an opt-in `templateLifecycleTests` parameter for x64 Debug validation
+and JUnit publication; matching preview runtime provisioning and an actual remote run remain gates.
+Same-version replacement/update checking is automated; a genuine two-version upgrade needs another
+versioned artifact. Hybrid remains excluded and non-discoverable until its public lifetime blockers
+are resolved. See the [validation guide](../../pkg/Microsoft.Dotnet.WinForms.ProjectTemplates/tests/README.md)
+for commands and the exact boundary between implemented checks and remaining acceptance.
+
 External-consumer compilation, execution, publishing, actual Designer work, and remote CI are
 separate gates. The inherited API/package reviews, service persistence stress/native-I/O findings,
 component-manager resource observations, and broader integration-test gaps remain tracked in the

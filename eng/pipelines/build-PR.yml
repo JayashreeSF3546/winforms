@@ -8,6 +8,8 @@ parameters:
   enablePublishTestResults: true
   enablePublishBuildAssets: true
   enablePublishUsingPipelines: true
+  # Opt in only on agents provisioned with the matching prototype Core/Desktop runtime train.
+  templateLifecycleTests: false
 
 jobs:
   - job: ${{ parameters.name }}
@@ -130,6 +132,31 @@ jobs:
         /bl:$(BUILD.SOURCESDIRECTORY)\artifacts\log\$(_BuildConfig)\PackSignPublish-${{ parameters.targetArchitecture }}.binlog
       displayName: Pack, Sign, and Publish
       condition: eq('${{ parameters.targetArchitecture }}', 'x64')
+
+    - ${{ if and(parameters.templateLifecycleTests, eq(parameters.targetArchitecture, 'x64')) }}:
+      - task: PowerShell@2
+        displayName: Validate Application Builder template lifecycle
+        condition: and(succeeded(), eq(variables['_BuildConfig'], 'Debug'), ne(variables['_SkipTests'], 'true'))
+        timeoutInMinutes: 45
+        inputs:
+          pwsh: true
+          targetType: inline
+          script: |
+            $packages = @(Get-ChildItem 'artifacts\packages\Debug\NonShipping' -Filter 'Microsoft.Dotnet.WinForms.ProjectTemplates.*.nupkg')
+            if ($packages.Count -ne 1) { throw 'Expected exactly one freshly packed template artifact.' }
+            & '.\pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\tests\Test-TemplateLifecycle.ps1' `
+              -TemplatePackage $packages[0].FullName `
+              -HostingPackageDirectory 'artifacts\packages\Debug\Shipping' `
+              -PrototypeWinFormsDirectory 'artifacts\bin\System.Windows.Forms\Debug\net12.0' `
+              -OutputRoot 'artifacts\log\Debug\TemplateLifecycle'
+      - task: PublishTestResults@2
+        displayName: Publish template lifecycle results
+        condition: and(succeededOrFailed(), eq(variables['_BuildConfig'], 'Debug'), ne(variables['_SkipTests'], 'true'))
+        inputs:
+          testResultsFormat: JUnit
+          testResultsFiles: 'artifacts/log/Debug/TemplateLifecycle/**/results.xml'
+          failTaskOnFailedTests: true
+          failTaskOnMissingResultsFile: true
 
     # Upload code coverage data
     - script: $(Build.SourcesDirectory)/.dotnet/dotnet msbuild -restore
