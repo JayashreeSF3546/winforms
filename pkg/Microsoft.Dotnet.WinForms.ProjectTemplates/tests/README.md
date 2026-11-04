@@ -5,6 +5,9 @@ not compatibility with an unmodified public SDK. They do not implement the later
 Use Windows x64, PowerShell 7, and an interactive desktop; do not interact with automated test windows.
 Run the following commands from the repository root.
 
+The [gated Hybrid scaffold checks](#gated-hybrid-scaffold) below also cover source-only isolation
+for dotnet/winforms#14967. They do not enable Hybrid template discovery or browser activation.
+
 ## Build the actual packages
 
 Use the repository's Arcade entry point, not a standalone product-project `dotnet build`:
@@ -209,3 +212,78 @@ attached-debugger logging inspection, additional localization/architectures, cle
 deployment, remote CI, and shipping API/package/framework approval remain unverified. Full CI,
 exploratory testing, and performance belong to later children. Hybrid and adoption samples are not
 part of these templates.
+
+## Gated Hybrid scaffold
+
+The source-only C# scaffold is outside the package's `content` glob and has pending, non-discoverable
+metadata. Its application and runtime-Form factories reject activation before creating a host or
+WebView. The checks below deliberately do not start a browser or exercise asynchronous WebView
+cleanup. The native Form check is not a Visual Studio Designer acceptance test.
+
+The actual package build and creation checks passed, including absence of scaffold files from the
+archive, unchanged discovery after scanning the source scaffold, four C#/VB basic creations,
+unsupported-framework rejection, and byte-for-byte classic-payload preservation:
+
+```powershell
+$artifacts = Join-Path $env:TEMP 'WinForms14967Artifacts'
+.\build.cmd -projects pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\Microsoft.Dotnet.Winforms.ProjectTemplates.csproj `
+    -pack -verbosity minimal -binaryLogName "$artifacts\HybridScaffoldPackage.binlog" "/p:ArtifactsDir=$artifacts"
+.\pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\tests\Test-BasicTemplates.ps1 `
+    -TemplatePackage "$artifacts\packages\Debug\NonShipping\Microsoft.Dotnet.WinForms.ProjectTemplates.12.0.0-dev.nupkg" `
+    -OutputRoot (Join-Path $env:TEMP 'HybridTemplateGeneration')
+```
+
+Arcade reported zero warnings/errors; the existing six classic-template metadata messages and
+package-readme informational message remain. No Hybrid files or WebView dependency enter the package.
+
+The scaffold and its separate smoke entry point also built with warnings treated as errors.
+These builds require the same explicit prototype consumer imports as the basic templates, plus
+the current product assemblies. They do not prove compatibility with an unmodified SDK.
+Use a short private package-cache path: the WebView package's long assembly name exceeded legacy
+Windows path limits in the first, longer test-owned cache. Do not clear shared caches.
+
+```powershell
+$dotnet = (Resolve-Path '.dotnet\dotnet.exe').Path
+$scaffold = (Resolve-Path 'pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\scaffolds\WinFormsApplicationBuilder-Hybrid-CSharp').Path
+$props = (Resolve-Path 'pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\tests\PrototypeConsumer.props').Path
+$targets = (Resolve-Path 'pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\tests\PrototypeConsumer.targets').Path
+$work = Join-Path $env:TEMP ('WFH-' + [Guid]::NewGuid().ToString('N'))
+$packages = Join-Path $env:TEMP ('WHp-' + [Guid]::NewGuid().ToString('N'))
+New-Item $work -ItemType Directory | Out-Null
+Copy-Item $scaffold (Join-Path $work 'source') -Recurse
+$project = Join-Path $work 'source\Company.WinFormsHybridApp1.csproj'
+$common = @(
+    "-p:DirectoryBuildPropsPath=$props",
+    "-p:DirectoryBuildTargetsPath=$targets",
+    "-p:PrototypeWinFormsDirectory=$artifacts\bin\System.Windows.Forms\Debug\net12.0",
+    '-p:ManagePackageVersionsCentrally=false',
+    "-p:RestorePackagesPath=$packages",
+    "-p:RestoreConfigFile=$PWD\NuGet.Config",
+    "-p:RestoreAdditionalProjectSources=$PWD\artifacts\packages\Debug\Shipping",
+    '-warnaserror', '-v', 'minimal'
+)
+& $dotnet build $project @common
+if ($LASTEXITCODE -ne 0) { throw 'Scaffold build failed.' }
+& $dotnet build $project @common -p:HybridScaffoldSmoke=true "-p:OutputPath=$work\smoke"
+if ($LASTEXITCODE -ne 0) { throw 'Scaffold smoke build failed.' }
+$env:DOTNET_ROOT = Split-Path $dotnet
+$env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
+& (Join-Path $work 'smoke\Company.WinFormsHybridApp1.exe')
+if ($LASTEXITCODE -ne 0) { throw 'Scaffold smoke failed.' }
+```
+
+Both builds passed with zero warnings/errors. Hosting/logging use the ASP.NET Core framework
+reference, not duplicate package references. The draft removes the unused WebView2 WPF reference
+instead of enabling WPF or suppressing WindowsBase conflicts. No prototype imports are in the
+scaffold project itself.
+
+The smoke executable passed under a process-specific watchdog: both activation factories reject
+execution, and parameterless Form construction creates native controls without a WebView.
+Its entry point is linked only by the external `HybridScaffoldSmoke` test switch, never by the
+scaffold project. The ordinary WinExe remains disabled and displays an explanatory error if run.
+
+Logs are retained as `HybridScaffoldPackage-build.log` and `HybridScaffoldPackage.binlog` under `$artifacts` and
+`Package-tests.log`, `Scaffold-build.log`, `Scaffold-smoke-build.log`, and `Scaffold-smoke.log`
+under the test-owned working directory. Real WebView initialization/disposal, deployment,
+Visual Studio, clean-machine acceptance, and remote CI remain pending; dotnet/winforms#14967
+is not complete.

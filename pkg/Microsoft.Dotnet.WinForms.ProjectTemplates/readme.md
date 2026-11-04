@@ -21,6 +21,11 @@ The C#/VB parity, package prerequisites, Hybrid lifetime gates, and sample bound
 [template and sample matrix](../../docs/design/winforms-application-builder-templates.md).
 Hybrid templates and adoption samples are not included in this child.
 
+The [gated C# Hybrid scaffold](./scaffolds/WinFormsApplicationBuilder-Hybrid-CSharp) stages source
+for dotnet/winforms#14967 outside the packed content. Its metadata is intentionally not discoverable,
+and runtime activation is disabled until the public lifecycle contracts are approved and integrated.
+It is not a runnable Hybrid template or a WebView support claim.
+
 Build the package with the repository's `build.cmd -projects` packaging workflow, then use PowerShell 7
 to run the
 focused creation/manifest checks against its actual `.nupkg`:

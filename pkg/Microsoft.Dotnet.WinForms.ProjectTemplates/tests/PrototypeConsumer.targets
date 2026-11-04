@@ -1,10 +1,12 @@
 <Project>
   <PropertyGroup>
     <PrototypeRepository>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..\'))</PrototypeRepository>
-    <PrototypeWinFormsDirectory>$(PrototypeRepository)artifacts\bin\System.Windows.Forms\Debug\net12.0</PrototypeWinFormsDirectory>
+    <PrototypeWinFormsDirectory Condition="'$(PrototypeWinFormsDirectory)' == ''">$(PrototypeRepository)artifacts\bin\System.Windows.Forms\Debug\net12.0</PrototypeWinFormsDirectory>
     <StartupObject Condition="'$(TemplateSmoke)' == 'true' and '$(MSBuildProjectExtension)' == '.csproj'">TemplateSmoke</StartupObject>
     <StartupObject Condition="'$(TemplateSmoke)' == 'true' and '$(MSBuildProjectExtension)' == '.vbproj'">$(RootNamespace).TemplateSmoke</StartupObject>
     <OutputType Condition="'$(TemplateSmoke)' == 'true'">Exe</OutputType>
+    <StartupObject Condition="'$(HybridScaffoldSmoke)' == 'true'">HybridScaffoldSmoke</StartupObject>
+    <OutputType Condition="'$(HybridScaffoldSmoke)' == 'true'">Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
     <!-- Match framework dependencies of the local product DLLs, not the older installed desktop pack. -->
@@ -22,6 +24,9 @@
     <Compile Include="$(MSBuildThisFileDirectory)TemplateSmoke.cs" Condition="'$(MSBuildProjectExtension)' == '.csproj'" />
     <Using Include="$(RootNamespace)" Condition="'$(MSBuildProjectExtension)' == '.csproj'" />
     <Compile Include="$(MSBuildThisFileDirectory)TemplateSmoke.vb" Condition="'$(MSBuildProjectExtension)' == '.vbproj'" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(HybridScaffoldSmoke)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)HybridScaffoldSmoke.cs" />
   </ItemGroup>
   <Target Name="UseExplicitPrototypeWinForms" AfterTargets="ResolveTargetingPackAssets">
     <Error Condition="!Exists('$(PrototypeWinFormsDirectory)\System.Windows.Forms.dll')"

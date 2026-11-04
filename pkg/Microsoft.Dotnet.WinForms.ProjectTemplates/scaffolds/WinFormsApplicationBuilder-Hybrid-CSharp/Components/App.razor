@@ -1,0 +1,12 @@
+<main>
+    <h1>WinForms Hybrid Application Builder</h1>
+    <p>This Razor content belongs to the gated Hybrid scaffold.</p>
+    <p role="status">Button clicks: @_count</p>
+    <button @onclick="Increment">Increment</button>
+</main>
+
+@code {
+    private int _count;
+
+    private void Increment() => _count++;
+}

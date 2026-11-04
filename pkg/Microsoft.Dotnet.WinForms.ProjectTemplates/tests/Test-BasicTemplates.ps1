@@ -50,6 +50,9 @@ try {
         'The package must advertise the Template package type.'
     Assert-Condition (@($archive.Entries | Where-Object FullName -Like 'lib/*').Count -eq 0) `
         'A template package must not contain compiled library output.'
+    Assert-Condition (@($archive.Entries | Where-Object {
+        $_.FullName -match '(^|/)(scaffolds|WinFormsApplicationBuilder-Hybrid-CSharp)(/|$)|(^|/)template\.pending\.json$'
+    }).Count -eq 0) 'The gated Hybrid scaffold must not be included in the template package.'
 
     $content = Join-Path $PSScriptRoot '..\content'
     $classicFolders = @(Get-ChildItem $content -Directory | Where-Object Name -NotLike 'WinFormsApplicationBuilder-*')
@@ -80,6 +83,18 @@ $installed = $false
 try {
     Invoke-DotNet -Arguments (@('new', 'install', $TemplatePackage) + $hiveArguments)
     $installed = $true
+    $catalog = & $DotNet new list @hiveArguments 2>&1
+    Assert-Condition ($LASTEXITCODE -eq 0) "Template discovery failed: $catalog"
+    Assert-Condition (($catalog -join "`n") -notmatch 'winforms-builder-hybrid') `
+        'The gated Hybrid scaffold must not be discoverable.'
+    $initialCatalog = $catalog -join "`n"
+    $scaffold = Join-Path $PSScriptRoot '..\scaffolds\WinFormsApplicationBuilder-Hybrid-CSharp'
+    Invoke-DotNet -Arguments (@('new', 'install', $scaffold) + $hiveArguments)
+    $catalog = & $DotNet new list @hiveArguments 2>&1
+    Assert-Condition ($LASTEXITCODE -eq 0) "Template discovery failed after scanning the scaffold: $catalog"
+    Assert-Condition (($catalog -join "`n") -ceq $initialCatalog) `
+        'Scanning the source scaffold must not change the installed template catalog.'
+    Write-Output 'PASS Hybrid scaffold package exclusion and discovery gates'
     $identities = [Collections.Generic.HashSet[string]]::new()
     foreach ($case in @(
         @{ Language = 'C#'; Extension = 'cs'; Name = 'BasicCSharp' },

@@ -430,14 +430,28 @@ also traced NuGet package `11.0.0-rc.2.26505.5` through its
 to [MAUI commit d32b799](https://github.com/dotnet/maui/blob/d32b79928709cf53b671336dabd0caef5a679fc2/src/BlazorWebView/src/WindowsForms/BlazorWebView.cs).
 That exact control source likewise discards the dispatcher task from `Dispose(bool)` and exposes
 no cleanup completion task. Unlike the reviewed main source, this revision does not attach
-`ObserveExceptionsAsync` at that call. The package has not been built or run here and is not selected
-as a validated Hybrid dependency.
+`ObserveExceptionsAsync` at that call. That package has not passed actual WebView initialization
+and cleanup integration here and is not selected as a validated Hybrid dependency.
 
-No discoverable Hybrid template or dependency is added while this gate is unresolved. Before
+No discoverable Hybrid template or shipping WebView dependency is added while this gate is unresolved. Before
 supported template implementation proceeds, WebView/lifetime owners must approve a public protocol that keeps UI
 dispatch and the host provider alive through successful asynchronous cleanup and reports cleanup
 failures. Any required foundation API change must be reviewed separately rather than hidden in
 template-generated code.
+
+A source-only [C# Hybrid scaffold](../../pkg/Microsoft.Dotnet.WinForms.ProjectTemplates/scaffolds/WinFormsApplicationBuilder-Hybrid-CSharp)
+now stages the project, host composition, native shell, Razor component, and local content.
+It is outside the package's `content` glob and has `template.pending.json`, not discoverable
+template metadata. Both application creation and runtime Form creation reject activation before
+creating a host or WebView. The pinned preview package in that isolated draft is a compile-time
+candidate only, not a shipping selection or proof of browser compatibility. The runtime activation
+code is unfinished: constructor-time WebView creation must be replaced with the approved paired
+initialization/awaitable-cleanup protocol before either gate is removed. No internal framework
+API is called from the scaffold, and no new public API or template-owned lifetime engine is added.
+The [local scaffold validation](../../pkg/Microsoft.Dotnet.WinForms.ProjectTemplates/tests/README.md#gated-hybrid-scaffold)
+checks compilation using the external prototype harness, both activation gates, native-only
+parameterless Form construction, and actual package/discovery isolation. It is not a real
+WebView initialization, asynchronous disposal, Visual Studio Designer, or shipping SDK validation.
 
 The next focused validation must use a component and renderer-scoped service whose asynchronous
 disposal can be deliberately held and released. For user close, host stop, and partial startup
