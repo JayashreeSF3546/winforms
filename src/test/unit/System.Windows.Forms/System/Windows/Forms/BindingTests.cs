@@ -682,6 +682,62 @@ public class BindingTests
         Assert.IsType<InvalidOperationException>(exception.InnerException);
     }
 
+    [WinFormsTheory]
+    [InlineData(nameof(DescriptorNotificationAxHost.Text))]
+    [InlineData(nameof(DescriptorNotificationAxHost.Value))]
+    public void Binding_PropertyChanged_AxPropertyDescriptor_UpdatesSourceAndUnhooks(string propertyName)
+    {
+        using DescriptorNotificationAxHost control = new()
+        {
+            BindingContext = new BindingContext()
+        };
+        NotificationSource source = new();
+        Binding binding = control.DataBindings.Add(
+            propertyName,
+            source,
+            nameof(NotificationSource.Value),
+            formattingEnabled: true,
+            DataSourceUpdateMode.OnPropertyChanged);
+
+        Assert.True(binding.IsBinding);
+        var property = Assert.IsType<AxHost.AxPropertyDescriptor>(TypeDescriptor.GetProperties(control)[propertyName]);
+
+        control.Text = "42";
+        control.Value = 42;
+        property.OnValueChanged(control);
+        Assert.Equal(42, source.Value);
+
+        control.DataBindings.Remove(binding);
+        control.Text = "43";
+        control.Value = 43;
+        property.OnValueChanged(control);
+        Assert.Equal(42, source.Value);
+        Assert.False(control.IsHandleCreated);
+    }
+
+    /// <summary>
+    ///  Exercises ActiveX property notifications without creating an ActiveX instance.
+    /// </summary>
+    private sealed class DescriptorNotificationAxHost : AxHost
+    {
+        public DescriptorNotificationAxHost() : base("00000000-0000-0000-0000-000000000000")
+        {
+            SetState(States.Created, true);
+        }
+
+        internal override bool CanAccessProperties => true;
+
+        public override string Text { get; set; } = "0";
+
+        public int Value { get; set; }
+
+        public event EventHandler<CancelEventArgs> ValueChanged
+        {
+            add => throw new NotSupportedException();
+            remove { }
+        }
+    }
+
     private delegate void CustomChangedHandler(object sender, CancelEventArgs e);
 
     /// <summary>

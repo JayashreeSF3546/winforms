@@ -445,22 +445,29 @@ public partial class Binding
             {
                 if (_propInfo is not null)
                 {
-                    // Try to attach to a strongly-typed "{PropertyName}Changed" event if present.
                     string changeEventName = _propInfo.Name + "Changed";
                     EventDescriptor? ed = TypeDescriptor.GetEvents(BindableComponent).Find(changeEventName, true);
-                    if (ed is not null)
+                    if (ed is not null && ed.EventType != typeof(EventHandler))
                     {
-                        _propChangeDelegate = CreateDelegateForPropertyChange(ed.EventType);
-                        if (_propChangeDelegate is not null)
+                        // Custom descriptors own their notifications; only adapt reflected properties.
+                        PropertyDescriptor reflectedProperty = TypeDescriptor.CreateProperty(
+                            _propInfo.ComponentType,
+                            _propInfo.Name,
+                            _propInfo.PropertyType);
+                        if (_propInfo.GetType() == reflectedProperty.GetType())
                         {
-                            ed.AddEventHandler(BindableComponent, _propChangeDelegate);
-                            _propChangeEvent = ed;
+                            Delegate? handler = CreateDelegateForPropertyChange(ed.EventType);
+                            if (handler is not null)
+                            {
+                                ed.AddEventHandler(BindableComponent, handler);
+                                _propChangeEvent = ed;
+                                _propChangeDelegate = handler;
+                            }
                         }
                     }
 
                     if (_propChangeDelegate is null)
                     {
-                        // Original code path
                         _valueChangedHandler ??= new EventHandler(Target_PropertyChanged);
                         _propInfo.AddValueChanged(BindableComponent, _valueChangedHandler);
                     }
