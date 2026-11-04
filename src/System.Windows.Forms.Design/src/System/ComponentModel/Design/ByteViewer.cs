@@ -86,10 +86,8 @@ public class ByteViewer : TableLayoutPanel
         SetStyle(ControlStyles.ResizeRedraw, true);
     }
 
-    private void UpdateScaling()
+    private void UpdateScaling(int dpi)
     {
-        int dpi = DeviceDpi;
-
         _borderGap = ScaleHelper.ScaleToDpi(BASE_BORDER_GAP, dpi);
         _insetGap = ScaleHelper.ScaleToDpi(BASE_INSET_GAP, dpi);
         _cellHeight = ScaleHelper.ScaleToDpi(BASE_CELL_HEIGHT, dpi);
@@ -475,7 +473,7 @@ public class ByteViewer : TableLayoutPanel
     private void InitUI()
     {
         // Computes DPI-scaled layout metrics, including the scrollbar dimensions.
-        UpdateScaling();
+        UpdateScaling(DeviceDpi);
 
         // For backwards compatibility
         Size = new Size(
@@ -548,6 +546,17 @@ public class ByteViewer : TableLayoutPanel
         _scrollBar.Select();
     }
 
+    /// <inheritdoc/>
+    protected override void RescaleConstantsForDpi(int deviceDpiOld, int deviceDpiNew)
+    {
+        base.RescaleConstantsForDpi(deviceDpiOld, deviceDpiNew);
+
+        // Handle creation can discover a different DPI without an after-parent notification.
+        UpdateScaling(deviceDpiNew);
+        PerformLayout();
+        Invalidate();
+    }
+
     /// <summary>
     ///  Handles DPI changes (PerMonitorV2) by recomputing layout.
     ///  <see cref="ByteViewer"/> is always hosted as a child control (see
@@ -560,7 +569,7 @@ public class ByteViewer : TableLayoutPanel
         base.OnDpiChangedAfterParent(e);
 
         // Recompute DPI-scaled metrics and any state that depends on DPI, then repaint.
-        UpdateScaling();
+        UpdateScaling(DeviceDpi);
         PerformLayout();
         Invalidate();
     }
