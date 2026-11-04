@@ -586,17 +586,55 @@ that permits unsafe provider disposal.
 Resource messages use the existing localization pipeline; generated translation entries require
 the normal localization review. Runtime tests use controlled asynchronous callbacks and the real
 Generic Host, not a WebView substitute presented as browser validation. Actual WebView integration,
-partial startup before dispatch, public API approval, and clean-machine/Designer/CI checks remain
+cleanup of resources activated before dispatch, public API approval, and clean-machine/Designer/CI checks remain
 required before dotnet/winforms#14967 can be called complete.
+
+#### Deferred initialization and partial-startup cleanup
+
+The internal prototype now also accepts one
+`RegisterUiInitialization(Func<CancellationToken, ValueTask>, Func<ValueTask>)` pair per run.
+Registration is allowed in the startup context factory, the pre-loop started notification, or
+normal UI dispatch, but **resource activation belongs inside the initialization callback**.
+The runner posts that callback to its existing dispatcher. Registration alone does not create
+the resource, and stopping or failing before its dispatched activation skips both callbacks.
+Custom contexts and modal, MDI, or owned main Forms remain outside this prototype.
+
+Once activation begins, its cleanup participant is installed before invoking application code.
+Initialization and cleanup retain the owning UI synchronization context. A committed stop
+cancels the initialization token, but cancellation never substitutes for joining the operation:
+even initialization that ignores cancellation must finish before partial-resource cleanup begins.
+An individual stop wait can be canceled without releasing this barrier. Reentrant stop during
+the initializer's synchronous portion also waits for the actual initialization task.
+
+Recoverable synchronous and asynchronous initialization failures are recorded and request
+coordinated shutdown while dispatch remains available. Cleanup runs once even after partial
+activation, and cleanup failures are reported alongside the original initialization failure
+without skipping remaining shutdown callbacks. Cancellation carrying the runner's canceled
+initialization token is expected shutdown; cancellation from an unrelated token is a failure.
+UI and host teardown still follow initialization completion and resource cleanup.
+This routing covers the registered initialization callback, not arbitrary native-window events:
+for example, an exception crossing the native callback boundary from Form.Load can terminate
+the process and is not converted into recoverable startup failure by this prototype.
+
+This is not a new public API or a WebView adapter. It does not repair resources activated
+before dispatch, forced loop termination, or a component that never completes initialization
+or cleanup. It supplies local startup/failure coordination without duplicating a lifetime
+engine in a template; the upstream WebView contract and actual Hybrid integration remain gated.
 
 #### Local prototype validation
 
 The targeted Arcade build passed with zero warnings/errors. The selected unit runs passed
-199 cases with no failures or skips: 137 Application Builder cases (including 21 new shutdown
-cases), 27 legacy ApplicationContext cases, and 35 legacy Application.Exit cases. New cases cover
+233 cases with no failures or skips: 171 Application Builder cases (including the 21 shutdown
+cases and 34 deferred-initialization cases), 27 legacy ApplicationContext cases, and 35 legacy
+Application.Exit cases. Shutdown cases cover
 eight graceful shutdown sources under both thread-context implementations, an application context
 without a main Form, synchronous/asynchronous cleanup failures with continued cleanup, user-close
 cancellation, canceled/repeated stop waits, registration guards, and explicit forced-quit failure.
+Initialization cases cover all three registration phases, stop while activation is pending with
+and without cooperative cancellation, direct host stop, partial-activation and cleanup failures,
+unrelated cancellation, pre-dispatch factory/started failure and stop, stop after queuing but
+before activation, reentrant stop, registration guards, custom-context rejection, and no-main-Form
+operation. The principal initialization scenarios run under both thread-context implementations.
 These are controlled runtime tests, not actual WebView/Hybrid acceptance.
 
 Validation used private C-drive artifacts because the repository drive was nearly full. Existing
@@ -606,13 +644,16 @@ project settings were not changed. Reproduce the build and selected tests from t
 ```powershell
 $artifacts = Join-Path $env:TEMP 'WinForms14967Artifacts'
 .\build.cmd -projects src\test\unit\System.Windows.Forms\System.Windows.Forms.Tests.csproj `
-    -verbosity minimal -binaryLogName "$artifacts\UiShutdown.binlog" "/p:ArtifactsDir=$artifacts"
+    -verbosity minimal -binaryLogName "$artifacts\UiInitialization.binlog" "/p:ArtifactsDir=$artifacts"
 $env:DOTNET_ROOT = "$PWD\.dotnet"
 $env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
 $tests = Join-Path $artifacts 'bin\System.Windows.Forms.Tests\Debug\net12.0-windows7.0\System.Windows.Forms.Tests.exe'
-& $tests --filter-class 'System.Windows.Forms.Tests.WinFormsApplication*' --parallel none --progress off
-& $tests --filter-class 'System.Windows.Forms.Tests.ApplicationContextTests' --parallel none --progress off
-& $tests --filter-method 'System.Windows.Forms.Tests.ApplicationTests.Application_Exit*' --parallel none --progress off
+& $tests --filter-class 'System.Windows.Forms.Tests.WinFormsApplication*' --parallel none --progress off `
+    --report-trx --report-trx-filename UiInitialization.trx
+& $tests --filter-class 'System.Windows.Forms.Tests.ApplicationContextTests' --parallel none --progress off `
+    --report-trx --report-trx-filename UiInitialization-LegacyContext.trx
+& $tests --filter-method 'System.Windows.Forms.Tests.ApplicationTests.Application_Exit*' --parallel none --progress off `
+    --report-trx --report-trx-filename UiInitialization-LegacyExit.trx
 ```
 
 Each command passed locally. Test execution used process-specific watchdogs; logs and TRX results

@@ -34,6 +34,10 @@ public sealed class WinFormsApplication : IDisposable
     private Application.ThreadContext? _threadContext;
     private Control? _dispatcher;
     private Task _startupCancellationTask = Task.CompletedTask;
+    private Func<CancellationToken, ValueTask>? _uiInitialize;
+    private Func<ValueTask>? _uiInitializationShutdown;
+    private Task? _uiInitializationTask;
+    private bool _uiInitializationPosted;
     private List<Func<ValueTask>>? _uiShutdownCallbacks;
     private Task? _uiShutdownTask;
     private ExceptionDispatchInfo? _runFailure;
@@ -192,6 +196,7 @@ public sealed class WinFormsApplication : IDisposable
 
                         if (_loopEntered)
                         {
+                            PostUiInitialization();
                             Application.Run(_context!);
                         }
                     }
@@ -283,6 +288,42 @@ public sealed class WinFormsApplication : IDisposable
     }
 
     /// <summary>
+    ///  Prototypes one deferred UI initialization operation paired with cleanup of partial or complete activation.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   Register during startup activation, the started notification, or UI dispatch. Do not activate the
+    ///   resource before the initialization callback. Initialization begins only during message dispatch;
+    ///   committed shutdown cancels its token and joins it before invoking cleanup on the owning UI thread.
+    ///  </para>
+    ///  <para>
+    ///   Only the standard root context is supported. This internal prototype neither recovers forced
+    ///   message-loop loss nor supplies the missing public WebView cleanup-completion contract.
+    ///  </para>
+    /// </remarks>
+    internal void RegisterUiInitialization(
+        Func<CancellationToken, ValueTask> initialize,
+        Func<ValueTask> shutdown)
+    {
+        ArgumentNullException.ThrowIfNull(initialize);
+        ArgumentNullException.ThrowIfNull(shutdown);
+        VerifyAccess();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_running || _uiInitialize is not null || StopRequested
+            || (!_activating && !SupportsUiShutdownContext))
+        {
+            throw new InvalidOperationException(SR.WinFormsApplication_UiInitializationRegistration);
+        }
+
+        _uiInitialize = initialize;
+        _uiInitializationShutdown = shutdown;
+        if (_loopEntered)
+        {
+            PostUiInitialization();
+        }
+    }
+
+    /// <summary>
     ///  Prototypes asynchronous cleanup registered before resource activation during normal UI dispatch.
     /// </summary>
     /// <remarks>
@@ -296,9 +337,7 @@ public sealed class WinFormsApplication : IDisposable
         ArgumentNullException.ThrowIfNull(shutdown);
         VerifyAccess();
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_running || !_loopEntered || !Application.MessageLoop || _context?.GetType() != typeof(ApplicationContext)
-            || _context.MainForm is { Modal: true } or { IsMdiContainer: true } or { Owner: not null }
-            || StopRequested)
+        if (!_running || !_loopEntered || !Application.MessageLoop || !SupportsUiShutdownContext || StopRequested)
         {
             throw new InvalidOperationException(SR.WinFormsApplication_UiShutdownRegistration);
         }
@@ -322,6 +361,11 @@ public sealed class WinFormsApplication : IDisposable
     internal ApplicationContext? StartupContext => _context;
 
     internal Task UiCompletion => _uiStopped.Task;
+
+    private bool SupportsUiShutdownContext
+        => _context is { } context
+            && context.GetType() == typeof(ApplicationContext)
+            && context.MainForm is not ({ Modal: true } or { IsMdiContainer: true } or { Owner: not null });
 
     private bool StopRequested
     {
@@ -377,6 +421,11 @@ public sealed class WinFormsApplication : IDisposable
                 }
 
                 _context = context;
+            }
+
+            if (_uiInitialize is not null && !SupportsUiShutdownContext)
+            {
+                throw new InvalidOperationException(SR.WinFormsApplication_UiInitializationRegistration);
             }
 
             _options = null;
@@ -576,6 +625,78 @@ public sealed class WinFormsApplication : IDisposable
         }
     }
 
+    private void PostUiInitialization()
+    {
+        if (_uiInitialize is null || _uiInitializationPosted)
+        {
+            return;
+        }
+
+        _uiInitializationPosted = true;
+        _dispatcher!.BeginInvoke(() =>
+        {
+            TaskCompletionSource initialized = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                lock (_stateLock)
+                {
+                    if (!_running || _disposed || _cleanupStarted || _stopRequested)
+                    {
+                        return;
+                    }
+
+                    RegisterUiShutdown(() => ShutdownUiInitializationAsync(initialized.Task));
+                }
+
+                _uiInitializationTask = InitializeUiAsync(_uiInitialize!, initialized);
+            }
+            catch (Exception exception) when (!exception.IsCriticalException())
+            {
+                RecordException(exception);
+                RequestStop();
+            }
+        });
+    }
+
+    private async Task InitializeUiAsync(
+        Func<CancellationToken, ValueTask> initialize,
+        TaskCompletionSource initialized)
+    {
+        CancellationToken cancellationToken = _startupCancellation.Token;
+        try
+        {
+            await initialize(cancellationToken).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException exception) when (
+            cancellationToken.IsCancellationRequested && exception.CancellationToken == cancellationToken)
+        {
+            // Committed shutdown cancels initialization, but still joins it before partial-resource cleanup.
+        }
+        catch (Exception exception)
+        {
+            if (exception.IsCriticalException())
+            {
+                RequestStop();
+                throw;
+            }
+
+            RecordException(exception);
+            RequestStop();
+        }
+        finally
+        {
+            initialized.TrySetResult();
+        }
+    }
+
+    private async ValueTask ShutdownUiInitializationAsync(Task initialized)
+    {
+        // Initialization can reenter dispatch before its Task has been assigned.
+        await initialized.ConfigureAwait(true);
+        await _uiInitializationTask!.ConfigureAwait(true);
+        await _uiInitializationShutdown!().ConfigureAwait(true);
+    }
+
     private void StopOnUiThread()
     {
         lock (_stateLock)
@@ -690,6 +811,9 @@ public sealed class WinFormsApplication : IDisposable
         {
             _running = false;
             _disposed = true;
+            _uiInitialize = null;
+            _uiInitializationShutdown = null;
+            _uiInitializationTask = null;
             _startupCancellation.Dispose();
             _runFailure = _exceptions.Count switch
             {
