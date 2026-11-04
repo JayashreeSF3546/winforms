@@ -325,6 +325,17 @@ deployment, and policy. Reuse the existing services-stream examples where approp
 which helpers are illustrative. Do not turn samples into a required framework or ship secrets,
 external endpoints, automatic cloud enrollment, or background telemetry in a basic template.
 
+The focused [adoption samples](../../src/test/integration/ApplicationBuilderAdoption/README.md)
+implement dotnet/winforms#14968 as four separate executable families, with C#/VB STA entry points.
+Migration preserves a native-language legacy Form through classic, builder-only, and hosted startup.
+Enterprise uses a separate UI-free service project and per-operation scopes returning detached data.
+Tray owns its icon/menu/optional window in a context with no main Form. Backend defaults to an offline
+adapter and joins UI-free background work; HTTP is explicit opt-in. Enterprise, tray, and backend VB
+entry points share C# presentation/composition and services, not an all-VB implementation.
+Process checks are wired into the existing UI integration-test graph; the README provides actual
+GUI interaction steps and distinguishes local checks from unperformed IDE/deployment/remote-CI gates.
+No new template family, public API, second provider, or Hybrid cleanup dependency is introduced.
+
 | Rejected default | Reason / trade-off |
 |---|---|
 | Replace `winforms` with hosted startup | Changes existing onboarding and baseline costs; opt-in families make adoption explicit |
