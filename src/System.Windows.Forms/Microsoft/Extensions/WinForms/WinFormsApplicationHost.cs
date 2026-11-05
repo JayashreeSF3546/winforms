@@ -97,6 +97,7 @@ internal sealed class WinFormsApplicationHost(IHost inner, WinFormsApplication a
     {
         System.ServiceExtensions.GetRequiredService<IHostApplicationLifetime>(Services).StopApplication();
         await application.UiCompletion.ConfigureAwait(false);
+        await application.CompleteSettingsSaveAsync().ConfigureAwait(false);
 
         Task? startTask;
         lock (_gate)

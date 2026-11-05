@@ -25,10 +25,30 @@ public sealed class WinFormsApplicationBuilder
     private Func<IServiceProvider, Form>? _serviceFormFactory;
     private Func<IServiceProvider, WinFormsUiScope, ApplicationContext>? _scopedContextFactory;
     private IHostBuilder? _hostBuilder;
+    private WinFormsApplicationFeatures? _features;
     private bool _built;
 
     internal WinFormsApplicationBuilder()
     {
+    }
+
+    /// <summary>
+    ///  Selects the internal shared lifecycle prototype without changing default builder behavior.
+    /// </summary>
+    internal WinFormsApplicationBuilder ConfigureApplicationFeatures(Action<WinFormsApplicationFeatures> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        VerifyCanConfigure();
+        if (_features is not null)
+        {
+            throw new InvalidOperationException(SR.WinFormsApplication_FeaturesAlreadyConfigured);
+        }
+
+        WinFormsApplicationFeatures features = new();
+        configure(features);
+        _features = features;
+
+        return this;
     }
 
     /// <summary>
@@ -191,7 +211,7 @@ public sealed class WinFormsApplicationBuilder
         }
 
         WinFormsApplicationOptions options = new(_ownerThread, _startupForm, _contextFactory, _serviceFormFactory, _scopedContextFactory);
-        WinFormsApplication application = new(options, host);
+        WinFormsApplication application = new(options, host, _features?.Snapshot());
         if (_hostBuilder is not null)
         {
             // Generic Host build is single-use, including when its build operation fails.
@@ -214,6 +234,7 @@ public sealed class WinFormsApplicationBuilder
         _serviceFormFactory = null;
         _scopedContextFactory = null;
         _hostBuilder = null;
+        _features = null;
 
         return application;
     }
