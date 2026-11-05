@@ -15,6 +15,11 @@ It provides Designer, keyboard/screen-reader, appearance, session and deployment
 with manual results explicitly NotRun until a tester performs them. It does not replace actual
 Visual Studio or clean-machine testing with a compilation/parameterless-construction proxy.
 
+For dotnet/winforms#14971, the [performance guide](PERFORMANCE.md) compares actual generated
+basic apps against current SDK template payloads on a matched Release prototype stack. It covers
+startup/shutdown, process resources, FDD/SCD file/assembly/size inventories, and opt-in JSON watcher
+cost. Hybrid and remote execution remain explicit acceptance gaps, not synthetic measurements.
+
 ## Automated lifecycle matrix
 
 `Test-TemplateLifecycle.ps1` runs creation/package checks, explicit restore, no-restore build,

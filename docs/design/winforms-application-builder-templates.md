@@ -391,6 +391,17 @@ packaged/restricted/clean-machine checks have explicit hands-on procedures and r
 The initial template is intentionally empty; meaningful control navigation is tested after
 adding representative controls in the actual Designer, not by adding test UI to the payload.
 
+For dotnet/winforms#14971, `Measure-TemplatePerformance.ps1` and its independent OS-level
+observer compare unmodified basic C#/VB entry points with isolated current SDK template payloads.
+Both sides publish in Release against the same prototype framework/Core/RID, with FDD and SCD
+measured separately. File hashes/PE assembly inventories establish footprint; process-cold
+visible-responsive-window and normal-close-to-process-exit timings accompany external resource
+snapshots. The same basic binaries also measure opt-in JSON watcher cost. Classic payloads are
+retargeted through test-only MSBuild properties, not source edits, to avoid comparing runtime
+trains. This is prototype evidence, not a shipping-SDK or first-painted-frame benchmark.
+See the [performance guide](../../pkg/Microsoft.Dotnet.WinForms.ProjectTemplates/tests/PERFORMANCE.md)
+for exact boundaries, commands and remaining Hybrid/native/remote/budget gates.
+
 External-consumer compilation, execution, publishing, actual Designer work, and remote CI are
 separate gates. The inherited API/package reviews, service persistence stress/native-I/O findings,
 component-manager resource observations, and broader integration-test gaps remain tracked in the

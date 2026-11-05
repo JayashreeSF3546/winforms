@@ -6,6 +6,10 @@ parameters:
     displayName: Run prototype template lifecycle tests (matching runtimes required)
     type: boolean
     default: false
+  - name: templatePerformanceTests
+    displayName: Measure Release template performance (matching runtimes required)
+    type: boolean
+    default: false
 
 # trigger ci builds for completed checkins into main and any release branches
 trigger:
@@ -106,6 +110,7 @@ stages:
       targetArchitecture: x64
       skipTests: $(SkipTests)
       templateLifecycleTests: ${{ parameters.templateLifecycleTests }}
+      templatePerformanceTests: ${{ parameters.templatePerformanceTests }}
 
   # Windows x86
   - template: /eng/pipelines/build-PR.yml

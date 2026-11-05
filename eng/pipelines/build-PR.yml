@@ -10,6 +10,7 @@ parameters:
   enablePublishUsingPipelines: true
   # Opt in only on agents provisioned with the matching prototype Core/Desktop runtime train.
   templateLifecycleTests: false
+  templatePerformanceTests: false
 
 jobs:
   - job: ${{ parameters.name }}
@@ -157,6 +158,35 @@ jobs:
           testResultsFiles: 'artifacts/log/Debug/TemplateLifecycle/**/results.xml'
           failTaskOnFailedTests: true
           failTaskOnMissingResultsFile: true
+
+    - ${{ if and(parameters.templatePerformanceTests, eq(parameters.targetArchitecture, 'x64')) }}:
+      - task: PowerShell@2
+        displayName: Measure Release Application Builder template performance
+        condition: and(succeeded(), eq(variables['_BuildConfig'], 'Release'), ne(variables['_SkipTests'], 'true'))
+        timeoutInMinutes: 60
+        inputs:
+          pwsh: true
+          targetType: inline
+          script: |
+            & '.\build.cmd' -projects 'pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\tests\PerformanceDriver\TemplatePerformanceDriver.csproj' `
+              -configuration Release -verbosity minimal
+            if ($LASTEXITCODE -ne 0) { throw 'Performance observer build failed.' }
+            $packages = @(Get-ChildItem 'artifacts\packages\Release\NonShipping' -Filter 'Microsoft.Dotnet.WinForms.ProjectTemplates.*.nupkg')
+            if ($packages.Count -ne 1) { throw 'Expected exactly one freshly packed template artifact.' }
+            $root = Join-Path $PWD 'artifacts\log\Release\TemplatePerformance'
+            & '.\pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\tests\Test-TemplateLifecycle.ps1' `
+              -TemplatePackage $packages[0].FullName `
+              -HostingPackageDirectory 'artifacts\packages\Release\Shipping' `
+              -PrototypeWinFormsDirectory 'artifacts\bin\System.Windows.Forms\Release\net12.0' `
+              -RuntimeIdentifiers win-x64 -OutputRoot (Join-Path $root 'lifecycle')
+            $runs = @(Get-ChildItem (Join-Path $root 'lifecycle') -Directory)
+            if ($runs.Count -ne 1) { throw 'Expected one successful lifecycle source run.' }
+            & '.\pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\tests\Measure-TemplatePerformance.ps1' `
+              -LifecycleOutput $runs[0].FullName `
+              -HostingPackageDirectory 'artifacts\packages\Release\Shipping' `
+              -PrototypeWinFormsDirectory 'artifacts\bin\System.Windows.Forms\Release\net12.0' `
+              -Driver 'artifacts\bin\TemplatePerformanceDriver\Release\net12.0\TemplatePerformanceDriver.exe' `
+              -OutputRoot $root -Repeats 2 -Warmup 1
 
     # Upload code coverage data
     - script: $(Build.SourcesDirectory)/.dotnet/dotnet msbuild -restore
