@@ -1207,6 +1207,12 @@ public sealed partial class Application
                     }
 
                     processedForms.Clear();
+                    if (ThreadContext.CurrentApplicationRunner?.TryDeferUiShutdown() == true)
+                    {
+                        e?.Cancel = true;
+                        return;
+                    }
+
                     while (s_forms.Count > 0)
                     {
                         // We need to iterate in backward order to not violate MDI closing events rules
@@ -1221,6 +1227,12 @@ public sealed partial class Application
                             s_forms.RemoveAt(s_forms.Count - 1);
                         }
                     }
+                }
+
+                if (ThreadContext.CurrentApplicationRunner?.TryDeferUiShutdown() == true)
+                {
+                    e?.Cancel = true;
+                    return;
                 }
 
                 ThreadContext.ExitApplication();
