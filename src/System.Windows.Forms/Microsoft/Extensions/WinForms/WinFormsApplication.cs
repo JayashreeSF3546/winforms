@@ -1,6 +1,7 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.ExceptionServices;
 using System.Windows.Forms;
@@ -28,6 +29,11 @@ public sealed class WinFormsApplication : IDisposable
     private readonly TaskCompletionSource _runCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _startupCancellation = new();
     private readonly List<Exception> _exceptions = [];
+    private readonly WinFormsApplicationFeatures? _features;
+    private WinFormsShutdownReason? _shutdownReason;
+    private Func<Task>? _saveSettings;
+    private Task? _settingsSaveTask;
+    private bool _featureShutdown;
     private WinFormsApplicationOptions? _options;
     private ApplicationContext? _context;
     private WinFormsUiScope? _uiScopes;
@@ -35,6 +41,7 @@ public sealed class WinFormsApplication : IDisposable
     private Control? _dispatcher;
     private Task _startupCancellationTask = Task.CompletedTask;
     private ExceptionDispatchInfo? _runFailure;
+    private Exception? _messageLoopFailure;
     private bool _activationAttempted;
     private bool _activating;
     private bool _running;
@@ -45,11 +52,15 @@ public sealed class WinFormsApplication : IDisposable
     private bool _cleanupStarted;
     private bool _disposed;
 
-    internal WinFormsApplication(WinFormsApplicationOptions options, IHost? host = null)
+    internal WinFormsApplication(
+        WinFormsApplicationOptions options,
+        IHost? host = null,
+        WinFormsApplicationFeatures? features = null)
     {
         _ownerThread = options.OwnerThread;
         _options = options;
         _host = host;
+        _features = features;
         _hostLifetime = host?.Services.GetRequiredService<IHostApplicationLifetime>();
         Lifetime = new WinFormsApplicationLifetime();
     }
@@ -146,7 +157,7 @@ public sealed class WinFormsApplication : IDisposable
         WindowsFormsSynchronizationContext? installedContext = null;
         Task? hostTask = null;
         using CancellationTokenRegistration registration = cancellationToken.Register(
-            static state => ((WinFormsApplication)state!).RequestStop(), this);
+            static state => ((WinFormsApplication)state!).RequestStop(WinFormsShutdownReason.RunTokenCancellation), this);
 
         try
         {
@@ -179,6 +190,19 @@ public sealed class WinFormsApplication : IDisposable
 
                 if (!StopRequested)
                 {
+                    if (_features is not null)
+                    {
+                        WinFormsStartingEventArgs starting = new((ReadOnlyCollection<string>)_features.CommandLine!);
+                        _features.Starting?.Invoke(this, starting);
+                        if (starting.Cancel)
+                        {
+                            RequestStop();
+                        }
+                    }
+                }
+
+                if (!StopRequested)
+                {
                     ActivateStartup();
                     if (!StopRequested)
                     {
@@ -198,7 +222,10 @@ public sealed class WinFormsApplication : IDisposable
         }
         catch (Exception exception) when (!exception.IsCriticalException())
         {
-            RecordException(exception);
+            if (!ReferenceEquals(exception, _messageLoopFailure))
+            {
+                RecordLifecycleFailure(exception, WinFormsLifecyclePhase.Startup);
+            }
         }
         finally
         {
@@ -221,6 +248,7 @@ public sealed class WinFormsApplication : IDisposable
 
             SynchronizationContext.SetSynchronizationContext(previousContext);
             _uiStopped.TrySetResult();
+            CaptureFailure(() => CompleteSettingsSaveAsync().GetAwaiter().GetResult());
             if (hostTask is not null)
             {
                 CaptureFailure(() => hostTask.GetAwaiter().GetResult());
@@ -273,6 +301,105 @@ public sealed class WinFormsApplication : IDisposable
     internal ApplicationContext? StartupContext => _context;
 
     internal Task UiCompletion => _uiStopped.Task;
+
+    // Both message-loop engines can see WM_QUIT and release windows before returning.
+    // Opt-in callbacks must run at normal root-pump return, not during message dispatch.
+    internal bool DeferThreadWindowDisposal
+        => _features is not null && _loopEntered && !_featureShutdown
+            && _messageLoopFailure is null && !_cleanupStarted;
+
+    /// <summary>
+    ///  Retains an escaping root-loop failure before the engine records teardown failures.
+    /// </summary>
+    internal void RecordMessageLoopFailure(Exception exception, bool pumpStarted)
+    {
+        if (_features is not null)
+        {
+            _messageLoopFailure = exception;
+            RecordLifecycleFailure(exception, pumpStarted ? WinFormsLifecyclePhase.MessageLoop : WinFormsLifecyclePhase.Startup);
+        }
+    }
+
+    /// <summary>
+    ///  Participates at normal root-pump return, before the existing engine releases UI resources.
+    /// </summary>
+    internal void CompleteFeatureShutdown()
+    {
+        if (_features is null || _featureShutdown)
+        {
+            return;
+        }
+
+        _featureShutdown = true;
+        NotifyStopping();
+        WinFormsShutdownReason reason;
+        lock (_stateLock)
+        {
+            if (_exceptions.Count != 0)
+            {
+                return;
+            }
+
+            reason = _shutdownReason ?? WinFormsShutdownReason.UserExit;
+        }
+
+        try
+        {
+            _features.Shutdown?.Invoke(this, new WinFormsShutdownEventArgs(reason));
+            if (_features.PrepareSettingsSave is { } prepare)
+            {
+                _saveSettings = prepare(this);
+                ArgumentNullException.ThrowIfNull(_saveSettings);
+            }
+        }
+        catch (Exception exception) when (!exception.IsCriticalException())
+        {
+            RecordLifecycleFailure(exception, WinFormsLifecyclePhase.Shutdown);
+        }
+    }
+
+    /// <summary>
+    ///  Joins one UI-free persistence operation before coordinated host stop and provider disposal.
+    /// </summary>
+    internal async Task CompleteSettingsSaveAsync()
+    {
+        await _uiStopped.Task.ConfigureAwait(false);
+        if (_saveSettings is null)
+        {
+            return;
+        }
+
+        Task save;
+        lock (_stateLock)
+        {
+            save = _settingsSaveTask ??= Task.Run(async () =>
+            {
+                try
+                {
+                    if (_saveSettings is { } persist)
+                    {
+                        await persist().ConfigureAwait(false);
+                    }
+                }
+                catch (Exception exception) when (!exception.IsCriticalException())
+                {
+                    RecordException(exception);
+                }
+            });
+        }
+
+        await save.ConfigureAwait(false);
+    }
+
+    private void RecordLifecycleFailure(Exception exception, WinFormsLifecyclePhase phase)
+    {
+        RecordException(exception);
+        if (_features?.ReportFailure is { } report)
+        {
+            // Report once, on the owner thread. A reporting failure must not replace the original.
+            CaptureFailure(() => report(exception, phase));
+        }
+    }
 
     private bool StopRequested
     {
@@ -496,7 +623,18 @@ public sealed class WinFormsApplication : IDisposable
     }
 
     internal void RequestStop()
+        => RequestStop(WinFormsShutdownReason.RequestedStop);
+
+    private void RequestStop(WinFormsShutdownReason reason)
     {
+        lock (_stateLock)
+        {
+            if (!_uiStopping && !_cleanupStarted && !_disposed)
+            {
+                _shutdownReason ??= reason;
+            }
+        }
+
         SignalStopRequest();
         Control? dispatcher;
         lock (_stateLock)

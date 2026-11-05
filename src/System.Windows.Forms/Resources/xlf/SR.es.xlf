@@ -11524,6 +11524,11 @@ El seguimiento de la pila donde tuvo lugar la operación no válida fue:
         <target state="new">Runtime service activation cannot be used for design-time components.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_FeaturesAlreadyConfigured">
+        <source>Application features have already been configured for this builder.</source>
+        <target state="new">Application features have already been configured for this builder.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_HostAlreadySelected">
         <source>A host builder has already been selected for this Windows Forms application.</source>
         <target state="new">A host builder has already been selected for this Windows Forms application.</target>
