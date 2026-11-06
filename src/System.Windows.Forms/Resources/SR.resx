@@ -7156,4 +7156,7 @@ Stack trace where the illegal operation occurred was:
   <data name="WinFormsApplication_FeaturesAlreadyConfigured" xml:space="preserve">
     <value>Application features have already been configured for this builder.</value>
   </data>
+  <data name="WinFormsApplication_SingleInstanceAlreadyClaimed" xml:space="preserve">
+    <value>The single-instance primary lease has already been selected, transferred, or stopped.</value>
+  </data>
 </root>

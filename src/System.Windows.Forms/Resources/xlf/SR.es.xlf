@@ -11559,6 +11559,11 @@ El seguimiento de la pila donde tuvo lugar la operación no válida fue:
         <target state="new">The runtime service startup factory requires a host. Select a host builder with UseHost before building the application.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_SingleInstanceAlreadyClaimed">
+        <source>The single-instance primary lease has already been selected, transferred, or stopped.</source>
+        <target state="new">The single-instance primary lease has already been selected, transferred, or stopped.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_StartupAlreadyActivated">
         <source>Startup activation has already been attempted for this Windows Forms application.</source>
         <target state="new">Startup activation has already been attempted for this Windows Forms application.</target>

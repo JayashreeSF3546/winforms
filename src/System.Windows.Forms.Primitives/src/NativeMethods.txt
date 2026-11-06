@@ -117,6 +117,7 @@ ExpandCollapseState
 EXTLOGFONTW
 ExtTextOut
 FDAP
+FILE_FLAGS_AND_ATTRIBUTES
 FillRect
 FindExecutable
 FINDREPLACE_FLAGS
@@ -179,6 +180,8 @@ GetMessageTime
 GetModuleFileName
 GetModuleHandle
 GetNearestColor
+GetNamedPipeClientProcessId
+GetNamedPipeServerProcessId
 GetParent
 GetPhysicalCursorPos
 GetProcAddress
@@ -462,6 +465,7 @@ MOUSEHOOKSTRUCT
 MoveToEx
 MSFTEDIT_CLASS
 MsgWaitForMultipleObjectsEx
+NAMED_PIPE_MODE
 NavigateDirection
 NFR_*
 NIN_*
