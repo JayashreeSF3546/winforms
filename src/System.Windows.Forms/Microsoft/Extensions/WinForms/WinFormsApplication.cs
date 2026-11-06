@@ -57,6 +57,113 @@ public sealed class WinFormsApplication : IDisposable
     private bool _uiStopping;
     private bool _cleanupStarted;
     private bool _disposed;
+    private WinFormsSingleInstance? _singleInstance;
+    private EventHandler<WinFormsNextInstanceRequest>? _nextInstance;
+    private CancellationTokenSource? _activationStopping;
+
+    internal void AttachSingleInstance(
+        WinFormsSingleInstance? primary, EventHandler<WinFormsNextInstanceRequest>? nextInstance)
+    {
+        primary?.Claim(this);
+        _singleInstance = primary;
+        _nextInstance = nextInstance;
+        if (primary is not null)
+        {
+            _activationStopping = new();
+        }
+    }
+
+    /// <summary>
+    ///  Marshals one bounded activation to the existing owner dispatcher, or rejects unavailable UI.
+    /// </summary>
+    internal async Task<WinFormsSingleInstanceResult> DispatchNextInstanceAsync(
+        WinFormsNextInstanceRequest request, CancellationToken cancellationToken)
+    {
+        Control dispatcher;
+        lock (_stateLock)
+        {
+            if (_stopRequested || _uiStopping || _cleanupStarted || _disposed)
+            {
+                return WinFormsSingleInstanceResult.Stopping;
+            }
+
+            if (!_loopEntered || _dispatcher is null)
+            {
+                return WinFormsSingleInstanceResult.NotReady;
+            }
+
+            dispatcher = _dispatcher;
+        }
+
+        TaskCompletionSource<WinFormsSingleInstanceResult> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int state = 0;
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _activationStopping!.Token);
+        using CancellationTokenRegistration registration = deadline.Token.Register(() =>
+        {
+            // Cancel a queued callback, never replay or interrupt a callback which has begun.
+            int previous = Interlocked.CompareExchange(ref state, 2, 0);
+            completion.TrySetResult(previous != 0
+                ? WinFormsSingleInstanceResult.Unknown
+                : _activationStopping.IsCancellationRequested
+                    ? WinFormsSingleInstanceResult.Stopping
+                    : WinFormsSingleInstanceResult.Unavailable);
+        });
+        try
+        {
+            dispatcher.BeginInvoke(() =>
+            {
+                if (Interlocked.CompareExchange(ref state, 1, 0) != 0)
+                {
+                    return;
+                }
+
+                lock (_stateLock)
+                {
+                    if (_stopRequested || _uiStopping || _cleanupStarted || _disposed)
+                    {
+                        completion.TrySetResult(WinFormsSingleInstanceResult.Stopping);
+                        return;
+                    }
+                }
+
+                try
+                {
+                    _nextInstance!.Invoke(this, request);
+                }
+                catch (Exception exception) when (!exception.IsCriticalException())
+                {
+                    completion.TrySetResult(WinFormsSingleInstanceResult.HandlerFailed);
+                    return;
+                }
+
+                try
+                {
+                    // Only the selected context's live Form; no global OpenForms search or forced foreground.
+                    if (request.BringToForeground && !StopRequested && _context?.MainForm is { IsDisposed: false, Visible: true } form)
+                    {
+                        if (form.WindowState == FormWindowState.Minimized)
+                        {
+                            form.WindowState = FormWindowState.Normal;
+                        }
+
+                        form.Activate();
+                    }
+
+                    completion.TrySetResult(WinFormsSingleInstanceResult.Handled);
+                }
+                catch (Exception exception) when (!exception.IsCriticalException())
+                {
+                    completion.TrySetResult(WinFormsSingleInstanceResult.HandledFocusFailed);
+                }
+            });
+        }
+        catch (Exception exception) when (!exception.IsCriticalException())
+        {
+            completion.TrySetResult(WinFormsSingleInstanceResult.Stopping);
+        }
+
+        return await completion.Task.ConfigureAwait(false);
+    }
 
     internal WinFormsApplication(
         WinFormsApplicationOptions options,
@@ -237,6 +344,7 @@ public sealed class WinFormsApplication : IDisposable
         finally
         {
             NotifyStopping();
+            CaptureFailure(() => _singleInstance?.StopForApplicationAsync(this).GetAwaiter().GetResult());
             if (_uiShutdownCallbacks is not null)
             {
                 RecordException(new InvalidOperationException(SR.WinFormsApplication_UiShutdownInterrupted));
@@ -585,6 +693,7 @@ public sealed class WinFormsApplication : IDisposable
 
         try
         {
+            CaptureFailure(() => _singleInstance?.StopForApplicationAsync(this).GetAwaiter().GetResult());
             CaptureFailure(DisposeStartupResources);
             _uiStopped.TrySetResult();
             if (_host is WinFormsApplicationHost stoppedHost)
@@ -681,6 +790,7 @@ public sealed class WinFormsApplication : IDisposable
         }
 
         SignalStopRequest();
+        _activationStopping?.Cancel();
         _uiScopes?.BeginStopping();
         CaptureFailure(Lifetime.NotifyStopping);
     }
@@ -715,6 +825,7 @@ public sealed class WinFormsApplication : IDisposable
             }
 
             _stopRequested = true;
+            _activationStopping?.Cancel();
             _startupCancellationTask = _startupCancellation.CancelAsync();
             _stopRequest.TrySetResult();
         }
@@ -953,6 +1064,9 @@ public sealed class WinFormsApplication : IDisposable
             _uiInitializationShutdown = null;
             _uiInitializationTask = null;
             _startupCancellation.Dispose();
+            _activationStopping?.Dispose();
+            _singleInstance = null;
+            _nextInstance = null;
             _runFailure = _exceptions.Count switch
             {
                 0 => null,
