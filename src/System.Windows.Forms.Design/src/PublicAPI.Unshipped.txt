@@ -1,0 +1,2 @@
+override System.ComponentModel.Design.ByteViewer.OnDpiChangedAfterParent(System.EventArgs! e) -> void
+override System.ComponentModel.Design.ByteViewer.RescaleConstantsForDpi(int deviceDpiOld, int deviceDpiNew) -> void
