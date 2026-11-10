@@ -27,6 +27,9 @@ internal sealed partial class FontCache
             Quality = quality;
             HFONT = FromFont(font, quality);
             _tmHeight = null;
+
+            // Populate the cached height before callers receive copies of this struct.
+            _ = Height;
         }
 
         public unsafe int Height
