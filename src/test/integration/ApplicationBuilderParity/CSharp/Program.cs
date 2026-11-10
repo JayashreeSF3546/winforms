@@ -23,6 +23,12 @@ internal static class Program
             Probe probe = new();
             string scenario = args[0];
             string[] tokens = args.Skip(1).ToArray();
+            if (scenario.StartsWith("measure", StringComparison.Ordinal))
+            {
+                PerformanceWorkload.Run(scenario, tokens);
+                return 0;
+            }
+
             if (scenario.StartsWith("legacy-", StringComparison.Ordinal))
             {
                 new LegacyApplication(probe, scenario).Run(tokens);

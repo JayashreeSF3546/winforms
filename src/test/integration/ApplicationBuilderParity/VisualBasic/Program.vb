@@ -21,6 +21,11 @@ Namespace ApplicationBuilderParity.VisualBasic
                 Dim probe As New Probe()
                 Dim scenario As String = args(0)
                 Dim tokens As String() = args.Skip(1).ToArray()
+                If scenario.StartsWith("measure", StringComparison.Ordinal) Then
+                    PerformanceWorkload.Run(scenario, tokens)
+                    Return 0
+                End If
+
                 If scenario.StartsWith("legacy-", StringComparison.Ordinal) Then
                     Dim app As New LegacyApplication(probe, scenario)
                     app.Run(tokens)
