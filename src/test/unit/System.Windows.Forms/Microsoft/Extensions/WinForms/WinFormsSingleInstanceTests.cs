@@ -247,6 +247,41 @@ public class WinFormsSingleInstanceTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Pipe_MissingResponseReceiptIsBoundedAndDoesNotLoseElection(bool stop)
+    {
+        WinFormsSingleInstanceIdentity identity = WinFormsSingleInstanceIdentity.Create(Guid.NewGuid().ToString(), "test");
+        using WinFormsSingleInstance leader = (await WinFormsSingleInstance.SelectAsync(
+            identity, [], false, TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken)).Primary!;
+        using CancellationTokenSource watchdog = new(TimeSpan.FromSeconds(10));
+        using NamedPipeClientStream client = CreateClient(identity);
+        await client.ConnectAsync(watchdog.Token);
+        WinFormsNextInstanceRequest request = new(Guid.NewGuid(), ["receipt probe"], false);
+        await WinFormsSingleInstance.WriteFrameAsync(client, WinFormsSingleInstanceProtocol.Encode(request), watchdog.Token);
+        byte[] response = new byte[17];
+        await client.ReadExactlyAsync(response, watchdog.Token);
+        new Guid(response.AsSpan(0, 16)).Should().Be(request.Id);
+        response[16].Should().Be((byte)WinFormsSingleInstanceResult.NotReady);
+
+        // Deliberately omit the consumption receipt. No elapsed-time assertion or scheduling sleep.
+        if (stop)
+        {
+            await leader.StopAsync(watchdog.Token);
+            leader.Completion.IsCompletedSuccessfully.Should().BeTrue();
+        }
+        else
+        {
+            (await client.ReadAsync(new byte[1], watchdog.Token)).Should().Be(0);
+        }
+
+        WinFormsSingleInstanceSelection next = await WinFormsSingleInstance.SelectAsync(
+            identity, [], false, Timeout, watchdog.Token);
+        using WinFormsSingleInstance? reopened = next.Primary;
+        next.Result.Should().Be(stop ? WinFormsSingleInstanceResult.Primary : WinFormsSingleInstanceResult.NotReady);
+    }
+
     [Fact]
     public async Task Pipe_RealSecondaryProcessDoesNotBuildHostOrUi()
     {

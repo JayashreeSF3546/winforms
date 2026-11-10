@@ -23,6 +23,7 @@ internal sealed record WinFormsSingleInstanceSelection(WinFormsSingleInstanceRes
 /// </remarks>
 internal sealed class WinFormsSingleInstance : IDisposable
 {
+    private const byte ResponseReceipt = 1;
     private readonly NamedPipeServerStream _pipe;
     private readonly WinFormsSingleInstanceIdentity _identity;
     private readonly TimeSpan _timeout;
@@ -91,6 +92,17 @@ internal sealed class WinFormsSingleInstance : IDisposable
                 || response[16] is < (byte)WinFormsSingleInstanceResult.Handled or > (byte)WinFormsSingleInstanceResult.Unknown)
             {
                 return new(WinFormsSingleInstanceResult.Unknown, null);
+            }
+
+            // A completed pipe write does not mean the peer read the reply. Let the server
+            // retain the connection until consumption, rather than discarding an unread reply
+            // at DisconnectNamedPipe. Receipt failure cannot undo an already validated result.
+            try
+            {
+                await client.WriteAsync(new byte[] { ResponseReceipt }, deadline.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or OperationCanceledException)
+            {
             }
 
             return new((WinFormsSingleInstanceResult)response[16], null);
@@ -166,6 +178,14 @@ internal sealed class WinFormsSingleInstance : IDisposable
                     request.Id.TryWriteBytes(response);
                     response[16] = (byte)result;
                     await _pipe.WriteAsync(response, deadline.Token).ConfigureAwait(false);
+                    // Disconnect discards unread buffered data. A bounded asynchronous receipt
+                    // avoids both that race and an unbounded synchronous WaitForPipeDrain.
+                    byte[] receipt = new byte[1];
+                    await _pipe.ReadExactlyAsync(receipt, deadline.Token).ConfigureAwait(false);
+                    if (receipt[0] != ResponseReceipt)
+                    {
+                        throw new InvalidDataException();
+                    }
                 }
                 catch (Exception exception) when (exception is IOException or InvalidDataException or OperationCanceledException or UnauthorizedAccessException)
                 {
