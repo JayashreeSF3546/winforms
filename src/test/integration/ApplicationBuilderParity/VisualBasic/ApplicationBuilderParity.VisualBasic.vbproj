@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>$(NetCurrent)-windows7.0</TargetFramework>
+    <DisableTransitiveFrameworkReferences>true</DisableTransitiveFrameworkReferences>
+    <OutputType>Exe</OutputType>
+    <RootNamespace></RootNamespace>
+    <StartupObject>ApplicationBuilderParity.VisualBasic.Program</StartupObject>
+    <MyType>Empty</MyType>
+    <OptionStrict>On</OptionStrict>
+    <OptionExplicit>On</OptionExplicit>
+    <OptionInfer>On</OptionInfer>
+    <LangVersion>latest</LangVersion>
+    <IsTestUtilityProject>true</IsTestUtilityProject>
+    <IsPackable>false</IsPackable>
+    <EnableXlfLocalization>false</EnableXlfLocalization>
+    <UpdateXlfOnBuild>false</UpdateXlfOnBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Only test probes are reused; application composition and callbacks are native VB. -->
+    <ProjectReference Include="..\CSharp\ApplicationBuilderParity.CSharp.csproj" />
+  </ItemGroup>
+</Project>

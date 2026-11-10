@@ -10,6 +10,8 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo($"System.Windows.Forms.Primitives.TestUtilities, PublicKey={PublicKeys.Ecma}")]
 [assembly: InternalsVisibleTo($"System.Windows.Forms.Interop.Tests, PublicKey={PublicKeys.MicrosoftShared}")]
 [assembly: InternalsVisibleTo($"System.Windows.Forms.UI.IntegrationTests, PublicKey={PublicKeys.MicrosoftShared}")]
+[assembly: InternalsVisibleTo($"ApplicationBuilderParity.CSharp, PublicKey={PublicKeys.MicrosoftShared}")]
+[assembly: InternalsVisibleTo($"ApplicationBuilderParity.VisualBasic, PublicKey={PublicKeys.MicrosoftShared}")]
 [assembly: InternalsVisibleTo($"ScratchProjectWithInternals, PublicKey={PublicKeys.Ecma}")]
 [assembly: InternalsVisibleTo($"ApplicationBuilderScopes.CSharp, PublicKey={PublicKeys.MicrosoftShared}")]
 [assembly: InternalsVisibleTo($"ApplicationBuilderScopes.VisualBasic, PublicKey={PublicKeys.MicrosoftShared}")]
