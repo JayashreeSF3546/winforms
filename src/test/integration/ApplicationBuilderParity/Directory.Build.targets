@@ -1,0 +1,15 @@
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.targets', '$(MSBuildThisFileDirectory)..\'))" />
+
+  <!-- Copy the actual resolved payload, not a guessed bin/configuration/TFM path. -->
+  <Target Name="GetParityPayload" Returns="@(_ParityPayload)">
+    <ItemGroup>
+      <_ParityPayload Include="$(TargetDir)**\*" />
+    </ItemGroup>
+    <ItemGroup>
+      <_ParityPayload>
+        <RelativeDestination>Parity\$(MSBuildProjectName)\%(_ParityPayload.RecursiveDir)%(_ParityPayload.Filename)%(_ParityPayload.Extension)</RelativeDestination>
+      </_ParityPayload>
+    </ItemGroup>
+  </Target>
+</Project>
