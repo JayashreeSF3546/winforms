@@ -825,7 +825,7 @@ public sealed partial class Application
 
                 if (builderMainLoop)
                 {
-                    ApplicationContext!.MainForm?.Visible = true;
+                    ApplicationRunner!.ShowStartupUi();
                 }
 
                 // Need to do this in a try/finally. Also good to do after we installed the synch context.
