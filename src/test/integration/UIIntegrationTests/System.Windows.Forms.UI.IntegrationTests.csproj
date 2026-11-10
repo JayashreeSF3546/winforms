@@ -17,6 +17,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <MigrationSampleProject Include="..\ApplicationBuilderMigration\CSharp\ApplicationBuilderMigration.CSharp.csproj" />
+    <MigrationSampleProject Include="..\ApplicationBuilderMigration\VisualBasic\ApplicationBuilderMigration.VisualBasic.vbproj" />
+    <ProjectReference Include="@(MigrationSampleProject)" ReferenceOutputAssembly="false" Private="false" />
     <ParityWorkerProject Include="..\ApplicationBuilderParity\CSharp\ApplicationBuilderParity.CSharp.csproj" />
     <ParityWorkerProject Include="..\ApplicationBuilderParity\VisualBasic\ApplicationBuilderParity.VisualBasic.vbproj" />
     <ProjectReference Include="@(ParityWorkerProject)" ReferenceOutputAssembly="false" Private="false" />
@@ -70,6 +73,17 @@
     </MSBuild>
     <Copy SourceFiles="@(_ParityWorkerPayload)"
           DestinationFiles="@(_ParityWorkerPayload->'$(TargetDir)%(RelativeDestination)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyMigrationSamples" AfterTargets="Build">
+    <MSBuild Projects="@(MigrationSampleProject)"
+             Targets="GetMigrationPayload"
+             BuildInParallel="false">
+      <Output TaskParameter="TargetOutputs" ItemName="_MigrationSamplePayload" />
+    </MSBuild>
+    <Copy SourceFiles="@(_MigrationSamplePayload)"
+          DestinationFiles="@(_MigrationSamplePayload->'$(TargetDir)%(RelativeDestination)')"
           SkipUnchangedFiles="true" />
   </Target>
 

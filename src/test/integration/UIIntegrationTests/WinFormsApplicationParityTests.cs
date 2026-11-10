@@ -143,7 +143,7 @@ public sealed class WinFormsApplicationParityTests(ITestOutputHelper output)
         }
         finally
         {
-            await KillOwnedAsync(primary);
+            await ApplicationProcess.KillOwnedAsync(primary);
         }
     }
 
@@ -168,7 +168,7 @@ public sealed class WinFormsApplicationParityTests(ITestOutputHelper output)
         }
         finally
         {
-            await KillOwnedAsync(primary);
+            await ApplicationProcess.KillOwnedAsync(primary);
         }
     }
 
@@ -176,22 +176,7 @@ public sealed class WinFormsApplicationParityTests(ITestOutputHelper output)
     {
         string project = $"ApplicationBuilderParity.{language}";
         string executable = Path.Combine(AppContext.BaseDirectory, "Parity", project, $"{project}.exe");
-        Assert.True(File.Exists(executable), $"Missing built worker: {executable}");
-        ProcessStartInfo info = new(executable)
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            WorkingDirectory = Path.GetDirectoryName(executable)!
-        };
-        info.ArgumentList.Add(scenario);
-        foreach (string argument in arguments)
-        {
-            info.ArgumentList.Add(argument);
-        }
-
-        return Process.Start(info)!;
+        return ApplicationProcess.Start(executable, [scenario, .. arguments]);
     }
 
     private static void RequireSupportedIdentity()
@@ -207,22 +192,9 @@ public sealed class WinFormsApplicationParityTests(ITestOutputHelper output)
 
     private async Task<Evidence> CompleteAsync(Process process, Task<string>? errors = null)
     {
-        Task<string> transcript = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
-        errors ??= process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
-        try
-        {
-            using CancellationTokenSource watchdog =
-                CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-            watchdog.CancelAfter(TimeSpan.FromSeconds(45));
-            await process.WaitForExitAsync(watchdog.Token);
-        }
-        finally
-        {
-            await KillOwnedAsync(process);
-        }
-
-        string text = await transcript;
-        string errorText = await errors;
+#pragma warning disable VSTHRD003 // Redirected child stderr was started by this test; it has no UI/JTF dependency.
+        (string text, string errorText) = await ApplicationProcess.CompleteAsync(process, errors);
+#pragma warning restore VSTHRD003
         output.WriteLine($"{process.StartInfo.FileName}: {text}{errorText}");
         Assert.Equal(0, process.ExitCode);
         Assert.Empty(errorText);
@@ -233,15 +205,6 @@ public sealed class WinFormsApplicationParityTests(ITestOutputHelper output)
         Assert.Equal(Path.GetDirectoryName(process.StartInfo.FileName), Path.GetDirectoryName(evidence.VisualBasicPath));
 
         return evidence;
-    }
-
-    private static async Task KillOwnedAsync(Process process)
-    {
-        if (!process.HasExited)
-        {
-            process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync(CancellationToken.None);
-        }
     }
 
     private static void AssertOrdered(string[] events, params string[] expected)
