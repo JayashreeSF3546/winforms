@@ -11564,6 +11564,11 @@ Analisi dello stack dove si è verificata l'operazione non valida:
         <target state="new">The single-instance primary lease has already been selected, transferred, or stopped.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_SplashRequiresHiddenMainForm">
+        <source>Splash-screen startup requires a separate, initially hidden main form.</source>
+        <target state="new">Splash-screen startup requires a separate, initially hidden main form.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_StartupAlreadyActivated">
         <source>Startup activation has already been attempted for this Windows Forms application.</source>
         <target state="new">Startup activation has already been attempted for this Windows Forms application.</target>

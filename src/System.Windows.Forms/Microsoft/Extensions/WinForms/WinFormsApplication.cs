@@ -60,6 +60,11 @@ public sealed class WinFormsApplication : IDisposable
     private WinFormsSingleInstance? _singleInstance;
     private EventHandler<WinFormsNextInstanceRequest>? _nextInstance;
     private CancellationTokenSource? _activationStopping;
+    private WinFormsSplashLifetime? _splash;
+    private WinFormsNetworkAvailability? _network;
+    private bool _startupUiReady;
+
+    internal WinFormsApplicationInformation? Information { get; }
 
     internal void AttachSingleInstance(
         WinFormsSingleInstance? primary, EventHandler<WinFormsNextInstanceRequest>? nextInstance)
@@ -87,7 +92,7 @@ public sealed class WinFormsApplication : IDisposable
                 return WinFormsSingleInstanceResult.Stopping;
             }
 
-            if (!_loopEntered || _dispatcher is null)
+            if (!_loopEntered || _dispatcher is null || (_splash is not null && !_startupUiReady))
             {
                 return WinFormsSingleInstanceResult.NotReady;
             }
@@ -174,6 +179,9 @@ public sealed class WinFormsApplication : IDisposable
         _options = options;
         _host = host;
         _features = features;
+        Information = features?.ApplicationAssembly is { } assembly
+            ? new WinFormsApplicationInformation(assembly)
+            : null;
         _hostLifetime = host?.Services.GetRequiredService<IHostApplicationLifetime>();
         Lifetime = new WinFormsApplicationLifetime();
     }
@@ -316,7 +324,29 @@ public sealed class WinFormsApplication : IDisposable
 
                 if (!StopRequested)
                 {
+                    if (_features?.SplashScreenFactory is { } splashFactory
+                        && !_features.CommandLine!.Contains("/nosplash", StringComparer.Ordinal)
+                        && !_features.CommandLine!.Contains("-nosplash", StringComparer.Ordinal))
+                    {
+                        WinFormsSplashScreen screen = splashFactory();
+                        ArgumentNullException.ThrowIfNull(screen);
+                        WinFormsApplicationOptions.ValidateStartupForm(screen);
+                        _splash = new WinFormsSplashLifetime(
+                            screen, _features.SplashTimeProvider, _features.MinimumSplashDisplayTime,
+                            _dispatcher!, RecordServiceFailure, RecordPostedServiceFailure, RequestStop);
+                        _splash.Show();
+                    }
+                }
+
+                if (!StopRequested)
+                {
                     ActivateStartup();
+                    if (_splash is not null && _context!.MainForm is { } mainForm
+                        && (ReferenceEquals(_splash.Screen, mainForm) || mainForm.Visible))
+                    {
+                        throw new InvalidOperationException(SR.WinFormsApplication_SplashRequiresHiddenMainForm);
+                    }
+
                     if (!StopRequested)
                     {
                         Lifetime.NotifyStarted();
@@ -528,6 +558,11 @@ public sealed class WinFormsApplication : IDisposable
 
         _featureShutdown = true;
         NotifyStopping();
+        if (_splash is not null && !_startupUiReady)
+        {
+            return;
+        }
+
         WinFormsShutdownReason reason;
         lock (_stateLock)
         {
@@ -595,6 +630,91 @@ public sealed class WinFormsApplication : IDisposable
             // Report once, on the owner thread. A reporting failure must not replace the original.
             CaptureFailure(() => report(exception, phase));
         }
+    }
+
+    /// <summary>
+    ///  Uses the existing root engine's visibility seam; a splash delays visibility, never the pump.
+    /// </summary>
+    internal void ShowStartupUi()
+    {
+        if (_splash is null && _features?.NetworkAvailabilityChanged is null)
+        {
+            // Preserve the existing visibility path when neither desktop feature is selected.
+            _context!.MainForm?.Visible = true;
+            return;
+        }
+
+        if (_splash is null)
+        {
+            ShowReadyUi();
+        }
+        else
+        {
+            _splash.WhenMinimumElapsed(() =>
+            {
+                try
+                {
+                    ShowReadyUi();
+                }
+                catch (Exception exception) when (!exception.IsCriticalException())
+                {
+                    RecordServiceFailure(exception);
+                }
+            });
+        }
+    }
+
+    private void ShowReadyUi()
+    {
+        if (StopRequested)
+        {
+            return;
+        }
+
+        _splash?.Dispose();
+        if (StopRequested)
+        {
+            return;
+        }
+
+        _context!.MainForm?.Visible = true;
+        if (StopRequested)
+        {
+            return;
+        }
+
+        lock (_stateLock)
+        {
+            _startupUiReady = true;
+        }
+
+        if (_features?.NetworkAvailabilityChanged is { } changed)
+        {
+            _network = new WinFormsNetworkAvailability(
+                _features.NetworkSource ?? new WinFormsNetworkSource(), _dispatcher!,
+                () => StopRequested, changed, RecordServiceFailure, RecordPostedServiceFailure);
+            try
+            {
+                _network.Start();
+            }
+            catch (Exception exception) when (!exception.IsCriticalException())
+            {
+                RecordServiceFailure(exception);
+            }
+        }
+    }
+
+    private void RecordServiceFailure(Exception exception)
+    {
+        RecordLifecycleFailure(exception, WinFormsLifecyclePhase.ApplicationService);
+        RequestStop();
+    }
+
+    private void RecordPostedServiceFailure(Exception exception)
+    {
+        // A dead dispatcher cannot run an owner-thread reporter. Retain the failure and stop.
+        RecordException(exception);
+        RequestStop();
     }
 
     private bool SupportsUiShutdownContext
@@ -791,6 +911,8 @@ public sealed class WinFormsApplication : IDisposable
 
         SignalStopRequest();
         _activationStopping?.Cancel();
+        CaptureFailure(() => _network?.Dispose());
+        CaptureFailure(() => _splash?.Dispose());
         _uiScopes?.BeginStopping();
         CaptureFailure(Lifetime.NotifyStopping);
     }

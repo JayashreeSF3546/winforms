@@ -8,6 +8,10 @@ The [#14973 inventory](winforms-application-builder-vb-parity.md) and
 [#14974 contract proposal](winforms-application-builder-vb-csharp-contracts.md) remain the
 compatibility/design references. Their proposed public names are not shipping contracts.
 
+Subsequent internal splash/application-service work is documented in
+[#14977's implementation guide](winforms-application-builder-splash-services.md).
+The scope/results below describe #14975, not later child-issue acceptance.
+
 ## Requirement in simple terms
 
 VB already allows an application to inspect its arguments and cancel startup, perform shutdown

@@ -3,6 +3,7 @@
 
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Reflection;
 
 namespace Microsoft.Extensions.WinForms;
 
@@ -28,8 +29,23 @@ internal sealed class WinFormsApplicationFeatures
 
     internal Func<WinFormsApplication, Func<Task>>? PrepareSettingsSave { get; set; }
 
+    internal Func<WinFormsSplashScreen>? SplashScreenFactory { get; set; }
+
+    internal TimeSpan MinimumSplashDisplayTime { get; set; } = TimeSpan.FromSeconds(2);
+
+    internal TimeProvider SplashTimeProvider { get; set; } = TimeProvider.System;
+
+    internal Assembly? ApplicationAssembly { get; set; }
+
+    internal IWinFormsNetworkSource? NetworkSource { get; set; }
+
+    internal Action<bool>? NetworkAvailabilityChanged { get; set; }
+
     internal WinFormsApplicationFeatures Snapshot()
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(MinimumSplashDisplayTime, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(MinimumSplashDisplayTime.TotalMilliseconds, uint.MaxValue - 1);
+        ArgumentNullException.ThrowIfNull(SplashTimeProvider);
         string[] arguments = [.. CommandLine ?? Environment.GetCommandLineArgs().Skip(1)];
         foreach (string argument in arguments)
         {
@@ -42,7 +58,13 @@ internal sealed class WinFormsApplicationFeatures
             Starting = Starting,
             Shutdown = Shutdown,
             ReportFailure = ReportFailure,
-            PrepareSettingsSave = PrepareSettingsSave
+            PrepareSettingsSave = PrepareSettingsSave,
+            SplashScreenFactory = SplashScreenFactory,
+            MinimumSplashDisplayTime = MinimumSplashDisplayTime,
+            SplashTimeProvider = SplashTimeProvider,
+            ApplicationAssembly = ApplicationAssembly,
+            NetworkSource = NetworkSource,
+            NetworkAvailabilityChanged = NetworkAvailabilityChanged
         };
     }
 }
@@ -80,5 +102,6 @@ internal enum WinFormsLifecyclePhase
 {
     Startup,
     MessageLoop,
-    Shutdown
+    Shutdown,
+    ApplicationService
 }
