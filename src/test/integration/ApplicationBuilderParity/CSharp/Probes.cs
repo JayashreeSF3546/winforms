@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Net.NetworkInformation;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows.Forms;
 using Microsoft.Extensions.Hosting;
@@ -21,6 +22,8 @@ public sealed class Probe
     private Exception? _callbackFailure;
 
     public string[] Arguments { get; set; } = [];
+
+    public List<string[]> Requests { get; } = [];
 
     public InvalidOperationException Failure { get; } = new("controlled parity failure");
 
@@ -89,6 +92,13 @@ public sealed class Probe
         {
             Events = _events.ToArray(),
             Arguments,
+            Requests,
+            ProcessArchitecture = RuntimeInformation.ProcessArchitecture.ToString(),
+            OSArchitecture = RuntimeInformation.OSArchitecture.ToString(),
+            Runtime = RuntimeInformation.FrameworkDescription,
+            OS = Environment.OSVersion.VersionString,
+            RemoteSession = SystemInformation.TerminalServerSession,
+            WorkerModule = System.Reflection.Assembly.GetEntryAssembly()!.ManifestModule.ModuleVersionId,
             FormsModule = typeof(Form).Module.ModuleVersionId,
             VisualBasicModule = typeof(WindowsFormsApplicationBase).Module.ModuleVersionId,
             FormsPath = typeof(Form).Assembly.Location,

@@ -215,7 +215,16 @@ internal static class Program
 
     private static void RunIpc(Probe probe, string scenario, string[] tokens)
     {
-        WinFormsSingleInstanceIdentity identity = WinFormsSingleInstanceIdentity.Create(tokens[0], "14978");
+        bool validation = scenario.StartsWith("ipc-validate", StringComparison.Ordinal);
+        if (validation)
+        {
+            // Parent-owned redirected stdin is the barrier; no global event or polling delay.
+            Console.WriteLine("ARMED");
+            Probe.Require(Console.ReadLine() == "go", "Missing election release.");
+        }
+
+        WinFormsSingleInstanceIdentity identity = WinFormsSingleInstanceIdentity.Create(
+            tokens[0], scenario == "ipc-validate-version" ? "14980-other" : "14978");
         WinFormsSingleInstanceSelection selection = WinFormsSingleInstance.SelectAsync(
             identity, tokens.Skip(1), false, TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
         probe.Add(selection.Result.ToString());
@@ -237,11 +246,30 @@ internal static class Program
         }
 
         WinFormsApplication? app = null;
-        using (app = WinFormsApplication.CreateBuilder().UseStartupForm<Form>()
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder();
+        if (validation)
+        {
+            builder.UseHost(new HostBuilder().ConfigureServices(
+                services => services.AddSingleton<IHostedService>(_ => new DrainService(probe))))
+                .UseApplicationContext(() =>
+                {
+                    probe.Ui("activate");
+                    Form form = new() { ShowInTaskbar = false };
+                    form.Disposed += (_, _) => probe.Ui("form-dispose");
+                    return new ApplicationContext(form);
+                });
+        }
+        else
+        {
+            builder.UseStartupForm<Form>();
+        }
+
+        using (app = builder
             .UseSingleInstance(primary, (_, request) =>
             {
                 probe.Ui("next");
                 probe.Tokens(request.CommandLine);
+                probe.Requests.Add(request.CommandLine.ToArray());
                 request.BringToForeground = false;
                 if (scenario == "ipc-failure")
                 {
@@ -251,6 +279,11 @@ internal static class Program
         {
             app.Lifetime.ApplicationStarted += (_, _) => probe.Post(() =>
             {
+                if (validation)
+                {
+                    probe.Ui("started");
+                }
+
                 Console.WriteLine("READY");
                 _ = Task.Run(async () =>
                 {

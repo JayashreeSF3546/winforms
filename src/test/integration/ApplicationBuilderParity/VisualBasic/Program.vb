@@ -193,7 +193,15 @@ Namespace ApplicationBuilderParity.VisualBasic
         End Sub
 
         Private Sub RunIpc(probe As Probe, scenario As String, tokens As String())
-            Dim identity = WinFormsSingleInstanceIdentity.Create(tokens(0), "14978")
+            Dim validation As Boolean = scenario.StartsWith("ipc-validate", StringComparison.Ordinal)
+            If validation Then
+                ' Parent-owned redirected stdin is the barrier; no global event or polling delay.
+                Console.WriteLine("ARMED")
+                Check.Require(Console.ReadLine() = "go", "Missing election release.")
+            End If
+
+            Dim identity = WinFormsSingleInstanceIdentity.Create(
+                tokens(0), If(scenario = "ipc-validate-version", "14980-other", "14978"))
             Dim selection = WinFormsSingleInstance.SelectAsync(
                 identity, tokens.Skip(1), False, TimeSpan.FromSeconds(10)).GetAwaiter().GetResult()
             probe.Add(selection.Result.ToString())
@@ -212,12 +220,30 @@ Namespace ApplicationBuilderParity.VisualBasic
                 End If
 
                 Dim app As WinFormsApplication = Nothing
-                Using owned = WinFormsApplication.CreateBuilder().UseStartupForm(Of Form)().
+                Dim builder = WinFormsApplication.CreateBuilder()
+                If validation Then
+                    builder.UseHost(New HostBuilder().ConfigureServices(
+                        Sub(services)
+                            services.AddSingleton(Of IHostedService)(Function(provider) New DrainService(probe))
+                        End Sub)).
+                        UseApplicationContext(
+                            Function()
+                                probe.Ui("activate")
+                                Dim form As New Form With {.ShowInTaskbar = False}
+                                AddHandler form.Disposed, Sub(sender, e) probe.Ui("form-dispose")
+                                Return New ApplicationContext(form)
+                            End Function)
+                Else
+                    builder.UseStartupForm(Of Form)()
+                End If
+
+                Using owned = builder.
                     UseSingleInstance(
                         primary,
                         Sub(sender, request)
                             probe.Ui("next")
                             probe.Tokens(request.CommandLine)
+                            probe.Requests.Add(request.CommandLine.ToArray())
                             request.BringToForeground = False
                             If scenario = "ipc-failure" Then
                                 Throw probe.Failure
@@ -228,6 +254,10 @@ Namespace ApplicationBuilderParity.VisualBasic
                         Sub(sender, e)
                             probe.Post(
                                 Sub()
+                                    If validation Then
+                                        probe.Ui("started")
+                                    End If
+
                                     Console.WriteLine("READY")
                                     Dim listener As Task = Task.Run(
                                         Async Function()

@@ -100,6 +100,15 @@ Package/API placement, supported Windows minimum, AOT/trimming and deployment pr
 
 ## Transport, outcomes and resource ownership
 
+The #14980 [environment validation](winforms-application-builder-environment-validation.md)
+exposed unread replies being discarded by immediate Windows pipe disconnect during rapid
+activations. After receiving and validating a correlated reply, the client now sends a one-byte
+consumption receipt. The listener waits under its existing connection deadline/stop token before
+disconnecting; no unbounded synchronous pipe drain or resend is introduced. Receipt-write failure
+does not undo a result already validated by the client. A missing receipt is bounded and does not
+prevent stop. This internal framing change requires protocol/deployment compatibility review;
+it does not remove `Unknown` after real lost replies or add an exactly-once guarantee.
+
 Request payload: version integer, request GUID, foreground Boolean, argument count, and each
 strict UTF-8 token with a byte length. Outer frame length is validated before allocation.
 Limit: **64 KiB payload, 256 arguments**, bounded enumeration, strict decoding, no trailing bytes.

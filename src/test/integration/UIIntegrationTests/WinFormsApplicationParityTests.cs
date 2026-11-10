@@ -12,7 +12,7 @@ namespace System.Windows.Forms.UITests;
 /// </summary>
 [Collection(nameof(WinFormsApplicationParityTests))]
 [CollectionDefinition(nameof(WinFormsApplicationParityTests), DisableParallelization = true)]
-public sealed class WinFormsApplicationParityTests(ITestOutputHelper output)
+public sealed partial class WinFormsApplicationParityTests(ITestOutputHelper output)
 {
     private static readonly string[] s_tokens = ["日本語", "", "two words", "literal \"quotes\"", @"C:\space path\"];
 
@@ -172,10 +172,10 @@ public sealed class WinFormsApplicationParityTests(ITestOutputHelper output)
         }
     }
 
-    private static Process Start(string language, string scenario, string[] arguments)
+    private static Process Start(string language, string scenario, string[] arguments, string? directory = null)
     {
         string project = $"ApplicationBuilderParity.{language}";
-        string executable = Path.Combine(AppContext.BaseDirectory, "Parity", project, $"{project}.exe");
+        string executable = Path.Combine(directory ?? Path.Combine(AppContext.BaseDirectory, "Parity", project), $"{project}.exe");
         return ApplicationProcess.Start(executable, [scenario, .. arguments]);
     }
 
@@ -190,11 +190,12 @@ public sealed class WinFormsApplicationParityTests(ITestOutputHelper output)
         }
     }
 
-    private async Task<Evidence> CompleteAsync(Process process, Task<string>? errors = null)
+    private async Task<Evidence> CompleteAsync(Process process, Task<string>? errors = null, string? firstLine = null)
     {
 #pragma warning disable VSTHRD003 // Redirected child stderr was started by this test; it has no UI/JTF dependency.
         (string text, string errorText) = await ApplicationProcess.CompleteAsync(process, errors);
 #pragma warning restore VSTHRD003
+        text = firstLine + text;
         output.WriteLine($"{process.StartInfo.FileName}: {text}{errorText}");
         Assert.Equal(0, process.ExitCode);
         Assert.Empty(errorText);
@@ -223,5 +224,5 @@ public sealed class WinFormsApplicationParityTests(ITestOutputHelper output)
     /// </summary>
     private sealed record Evidence(
         string[] Events, string[] Arguments, Guid FormsModule, Guid VisualBasicModule,
-        string FormsPath, string VisualBasicPath);
+        string FormsPath, string VisualBasicPath, string[][] Requests, string ProcessArchitecture);
 }
