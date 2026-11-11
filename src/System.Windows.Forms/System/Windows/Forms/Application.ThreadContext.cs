@@ -377,6 +377,11 @@ public sealed partial class Application
         {
             if (ApplicationRunner is { } runner)
             {
+                if (runner.DeferThreadWindowDisposal)
+                {
+                    return;
+                }
+
                 runner.NotifyStopping();
                 ApplicationContext? context = ApplicationContext;
                 ApplicationContext = null;
@@ -804,6 +809,7 @@ public sealed partial class Application
                 }
             }
 
+            bool pumpStarted = false;
             try
             {
                 bool result;
@@ -819,7 +825,7 @@ public sealed partial class Application
 
                 if (builderMainLoop)
                 {
-                    ApplicationContext!.MainForm?.Visible = true;
+                    ApplicationRunner!.ShowStartupUi();
                 }
 
                 // Need to do this in a try/finally. Also good to do after we installed the synch context.
@@ -828,7 +834,17 @@ public sealed partial class Application
                     CurrentForm.Visible = true;
                 }
 
+                pumpStarted = true;
                 result = RunMessageLoop(reason, fullModal);
+                if (builderMainLoop)
+                {
+                    ApplicationRunner!.CompleteFeatureShutdown();
+                }
+            }
+            catch (Exception exception) when (builderMainLoop && !exception.IsCriticalException())
+            {
+                ApplicationRunner!.RecordMessageLoopFailure(exception, pumpStarted);
+                throw;
             }
             finally
             {

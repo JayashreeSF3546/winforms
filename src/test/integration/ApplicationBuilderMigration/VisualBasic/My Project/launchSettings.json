@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "Shared builder": {
+      "commandName": "Project",
+      "commandLineArgs": "shared -- invoice-100.pdf"
+    },
+    "Legacy VB framework": {
+      "commandName": "Project",
+      "commandLineArgs": "legacy -- invoice-100.pdf"
+    }
+  }
+}

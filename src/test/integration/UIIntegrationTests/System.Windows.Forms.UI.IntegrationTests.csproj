@@ -17,6 +17,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <MigrationSampleProject Include="..\ApplicationBuilderMigration\CSharp\ApplicationBuilderMigration.CSharp.csproj" />
+    <MigrationSampleProject Include="..\ApplicationBuilderMigration\VisualBasic\ApplicationBuilderMigration.VisualBasic.vbproj" />
+    <ProjectReference Include="@(MigrationSampleProject)" ReferenceOutputAssembly="false" Private="false" />
+    <ParityWorkerProject Include="..\ApplicationBuilderParity\CSharp\ApplicationBuilderParity.CSharp.csproj" />
+    <ParityWorkerProject Include="..\ApplicationBuilderParity\VisualBasic\ApplicationBuilderParity.VisualBasic.vbproj" />
+    <ProjectReference Include="@(ParityWorkerProject)" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\..\..\Microsoft.VisualBasic.Forms\src\Microsoft.VisualBasic.Forms.vbproj" />
     <ProjectReference Include="..\..\..\Common\tests\TestUtilities\System.Private.Windows.Core.TestUtilities.csproj" />
     <ProjectReference Include="..\..\..\System.Design\src\System.Design.Facade.csproj" />
     <ProjectReference Include="..\..\..\System.Drawing.Design\src\System.Drawing.Design.Facade.csproj" />
@@ -57,5 +64,27 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
+
+  <Target Name="CopyParityWorkers" AfterTargets="Build">
+    <MSBuild Projects="@(ParityWorkerProject)"
+             Targets="GetParityPayload"
+             BuildInParallel="false">
+      <Output TaskParameter="TargetOutputs" ItemName="_ParityWorkerPayload" />
+    </MSBuild>
+    <Copy SourceFiles="@(_ParityWorkerPayload)"
+          DestinationFiles="@(_ParityWorkerPayload->'$(TargetDir)%(RelativeDestination)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyMigrationSamples" AfterTargets="Build">
+    <MSBuild Projects="@(MigrationSampleProject)"
+             Targets="GetMigrationPayload"
+             BuildInParallel="false">
+      <Output TaskParameter="TargetOutputs" ItemName="_MigrationSamplePayload" />
+    </MSBuild>
+    <Copy SourceFiles="@(_MigrationSamplePayload)"
+          DestinationFiles="@(_MigrationSamplePayload->'$(TargetDir)%(RelativeDestination)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

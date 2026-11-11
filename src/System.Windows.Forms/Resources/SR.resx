@@ -7153,4 +7153,13 @@ Stack trace where the illegal operation occurred was:
   <data name="FormScreenCaptureModeRequiresTopLevel" xml:space="preserve">
     <value>The FormScreenCaptureMode property can only be changed on top-level Forms with their TopLevel property set to true.</value>
   </data>
+  <data name="WinFormsApplication_FeaturesAlreadyConfigured" xml:space="preserve">
+    <value>Application features have already been configured for this builder.</value>
+  </data>
+  <data name="WinFormsApplication_SingleInstanceAlreadyClaimed" xml:space="preserve">
+    <value>The single-instance primary lease has already been selected, transferred, or stopped.</value>
+  </data>
+  <data name="WinFormsApplication_SplashRequiresHiddenMainForm" xml:space="preserve">
+    <value>Splash-screen startup requires a separate, initially hidden main form.</value>
+  </data>
 </root>

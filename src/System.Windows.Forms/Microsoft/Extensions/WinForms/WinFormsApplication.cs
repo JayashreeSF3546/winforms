@@ -1,6 +1,7 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.ExceptionServices;
 using System.Windows.Forms;
@@ -28,6 +29,11 @@ public sealed class WinFormsApplication : IDisposable
     private readonly TaskCompletionSource _runCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _startupCancellation = new();
     private readonly List<Exception> _exceptions = [];
+    private readonly WinFormsApplicationFeatures? _features;
+    private WinFormsShutdownReason? _shutdownReason;
+    private Func<Task>? _saveSettings;
+    private Task? _settingsSaveTask;
+    private bool _featureShutdown;
     private WinFormsApplicationOptions? _options;
     private ApplicationContext? _context;
     private WinFormsUiScope? _uiScopes;
@@ -35,6 +41,7 @@ public sealed class WinFormsApplication : IDisposable
     private Control? _dispatcher;
     private Task _startupCancellationTask = Task.CompletedTask;
     private ExceptionDispatchInfo? _runFailure;
+    private Exception? _messageLoopFailure;
     private bool _activationAttempted;
     private bool _activating;
     private bool _running;
@@ -44,12 +51,131 @@ public sealed class WinFormsApplication : IDisposable
     private bool _uiStopping;
     private bool _cleanupStarted;
     private bool _disposed;
+    private WinFormsSingleInstance? _singleInstance;
+    private EventHandler<WinFormsNextInstanceRequest>? _nextInstance;
+    private CancellationTokenSource? _activationStopping;
+    private WinFormsSplashLifetime? _splash;
+    private WinFormsNetworkAvailability? _network;
+    private bool _startupUiReady;
 
-    internal WinFormsApplication(WinFormsApplicationOptions options, IHost? host = null)
+    internal WinFormsApplicationInformation? Information { get; }
+
+    internal void AttachSingleInstance(
+        WinFormsSingleInstance? primary, EventHandler<WinFormsNextInstanceRequest>? nextInstance)
+    {
+        primary?.Claim(this);
+        _singleInstance = primary;
+        _nextInstance = nextInstance;
+        if (primary is not null)
+        {
+            _activationStopping = new();
+        }
+    }
+
+    /// <summary>
+    ///  Marshals one bounded activation to the existing owner dispatcher, or rejects unavailable UI.
+    /// </summary>
+    internal async Task<WinFormsSingleInstanceResult> DispatchNextInstanceAsync(
+        WinFormsNextInstanceRequest request, CancellationToken cancellationToken)
+    {
+        Control dispatcher;
+        lock (_stateLock)
+        {
+            if (_stopRequested || _uiStopping || _cleanupStarted || _disposed)
+            {
+                return WinFormsSingleInstanceResult.Stopping;
+            }
+
+            if (!_loopEntered || _dispatcher is null || (_splash is not null && !_startupUiReady))
+            {
+                return WinFormsSingleInstanceResult.NotReady;
+            }
+
+            dispatcher = _dispatcher;
+        }
+
+        TaskCompletionSource<WinFormsSingleInstanceResult> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int state = 0;
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _activationStopping!.Token);
+        using CancellationTokenRegistration registration = deadline.Token.Register(() =>
+        {
+            // Cancel a queued callback, never replay or interrupt a callback which has begun.
+            int previous = Interlocked.CompareExchange(ref state, 2, 0);
+            completion.TrySetResult(previous != 0
+                ? WinFormsSingleInstanceResult.Unknown
+                : _activationStopping.IsCancellationRequested
+                    ? WinFormsSingleInstanceResult.Stopping
+                    : WinFormsSingleInstanceResult.Unavailable);
+        });
+        try
+        {
+            dispatcher.BeginInvoke(() =>
+            {
+                if (Interlocked.CompareExchange(ref state, 1, 0) != 0)
+                {
+                    return;
+                }
+
+                lock (_stateLock)
+                {
+                    if (_stopRequested || _uiStopping || _cleanupStarted || _disposed)
+                    {
+                        completion.TrySetResult(WinFormsSingleInstanceResult.Stopping);
+                        return;
+                    }
+                }
+
+                try
+                {
+                    _nextInstance!.Invoke(this, request);
+                }
+                catch (Exception exception) when (!exception.IsCriticalException())
+                {
+                    completion.TrySetResult(WinFormsSingleInstanceResult.HandlerFailed);
+                    return;
+                }
+
+                try
+                {
+                    // Only the selected context's live Form; no global OpenForms search or forced foreground.
+                    if (request.BringToForeground && !StopRequested && _context?.MainForm is { IsDisposed: false, Visible: true } form)
+                    {
+                        if (form.WindowState == FormWindowState.Minimized)
+                        {
+                            form.WindowState = FormWindowState.Normal;
+                        }
+
+                        form.Activate();
+                    }
+
+                    completion.TrySetResult(WinFormsSingleInstanceResult.Handled);
+                }
+                catch (Exception exception) when (!exception.IsCriticalException())
+                {
+                    completion.TrySetResult(WinFormsSingleInstanceResult.HandledFocusFailed);
+                }
+            });
+        }
+        catch (Exception exception) when (!exception.IsCriticalException())
+        {
+            completion.TrySetResult(WinFormsSingleInstanceResult.Stopping);
+        }
+
+        return await completion.Task.ConfigureAwait(false);
+    }
+
+    internal WinFormsApplication(
+        WinFormsApplicationOptions options,
+        IHost? host = null,
+        WinFormsApplicationFeatures? features = null)
     {
         _ownerThread = options.OwnerThread;
         _options = options;
         _host = host;
+        _features = features;
+        Information = features?.ApplicationAssembly is { } assembly
+            ? new WinFormsApplicationInformation(assembly)
+            : null;
         _hostLifetime = host?.Services.GetRequiredService<IHostApplicationLifetime>();
         Lifetime = new WinFormsApplicationLifetime();
     }
@@ -146,7 +272,7 @@ public sealed class WinFormsApplication : IDisposable
         WindowsFormsSynchronizationContext? installedContext = null;
         Task? hostTask = null;
         using CancellationTokenRegistration registration = cancellationToken.Register(
-            static state => ((WinFormsApplication)state!).RequestStop(), this);
+            static state => ((WinFormsApplication)state!).RequestStop(WinFormsShutdownReason.RunTokenCancellation), this);
 
         try
         {
@@ -179,7 +305,42 @@ public sealed class WinFormsApplication : IDisposable
 
                 if (!StopRequested)
                 {
+                    if (_features is not null)
+                    {
+                        WinFormsStartingEventArgs starting = new((ReadOnlyCollection<string>)_features.CommandLine!);
+                        _features.Starting?.Invoke(this, starting);
+                        if (starting.Cancel)
+                        {
+                            RequestStop();
+                        }
+                    }
+                }
+
+                if (!StopRequested)
+                {
+                    if (_features?.SplashScreenFactory is { } splashFactory
+                        && !_features.CommandLine!.Contains("/nosplash", StringComparer.Ordinal)
+                        && !_features.CommandLine!.Contains("-nosplash", StringComparer.Ordinal))
+                    {
+                        WinFormsSplashScreen screen = splashFactory();
+                        ArgumentNullException.ThrowIfNull(screen);
+                        WinFormsApplicationOptions.ValidateStartupForm(screen);
+                        _splash = new WinFormsSplashLifetime(
+                            screen, _features.SplashTimeProvider, _features.MinimumSplashDisplayTime,
+                            _dispatcher!, RecordServiceFailure, RecordPostedServiceFailure, RequestStop);
+                        _splash.Show();
+                    }
+                }
+
+                if (!StopRequested)
+                {
                     ActivateStartup();
+                    if (_splash is not null && _context!.MainForm is { } mainForm
+                        && (ReferenceEquals(_splash.Screen, mainForm) || mainForm.Visible))
+                    {
+                        throw new InvalidOperationException(SR.WinFormsApplication_SplashRequiresHiddenMainForm);
+                    }
+
                     if (!StopRequested)
                     {
                         Lifetime.NotifyStarted();
@@ -198,11 +359,15 @@ public sealed class WinFormsApplication : IDisposable
         }
         catch (Exception exception) when (!exception.IsCriticalException())
         {
-            RecordException(exception);
+            if (!ReferenceEquals(exception, _messageLoopFailure))
+            {
+                RecordLifecycleFailure(exception, WinFormsLifecyclePhase.Startup);
+            }
         }
         finally
         {
             NotifyStopping();
+            CaptureFailure(() => _singleInstance?.StopForApplicationAsync(this).GetAwaiter().GetResult());
             lock (_stateLock)
             {
                 _cleanupStarted = true;
@@ -221,6 +386,7 @@ public sealed class WinFormsApplication : IDisposable
 
             SynchronizationContext.SetSynchronizationContext(previousContext);
             _uiStopped.TrySetResult();
+            CaptureFailure(() => CompleteSettingsSaveAsync().GetAwaiter().GetResult());
             if (hostTask is not null)
             {
                 CaptureFailure(() => hostTask.GetAwaiter().GetResult());
@@ -273,6 +439,195 @@ public sealed class WinFormsApplication : IDisposable
     internal ApplicationContext? StartupContext => _context;
 
     internal Task UiCompletion => _uiStopped.Task;
+
+    // Both message-loop engines can see WM_QUIT and release windows before returning.
+    // Opt-in callbacks must run at normal root-pump return, not during message dispatch.
+    internal bool DeferThreadWindowDisposal
+        => _features is not null && _loopEntered && !_featureShutdown
+            && _messageLoopFailure is null && !_cleanupStarted;
+
+    /// <summary>
+    ///  Retains an escaping root-loop failure before the engine records teardown failures.
+    /// </summary>
+    internal void RecordMessageLoopFailure(Exception exception, bool pumpStarted)
+    {
+        if (_features is not null)
+        {
+            _messageLoopFailure = exception;
+            RecordLifecycleFailure(exception, pumpStarted ? WinFormsLifecyclePhase.MessageLoop : WinFormsLifecyclePhase.Startup);
+        }
+    }
+
+    /// <summary>
+    ///  Participates at normal root-pump return, before the existing engine releases UI resources.
+    /// </summary>
+    internal void CompleteFeatureShutdown()
+    {
+        if (_features is null || _featureShutdown)
+        {
+            return;
+        }
+
+        _featureShutdown = true;
+        NotifyStopping();
+        if (_splash is not null && !_startupUiReady)
+        {
+            return;
+        }
+
+        WinFormsShutdownReason reason;
+        lock (_stateLock)
+        {
+            if (_exceptions.Count != 0)
+            {
+                return;
+            }
+
+            reason = _shutdownReason ?? WinFormsShutdownReason.UserExit;
+        }
+
+        try
+        {
+            _features.Shutdown?.Invoke(this, new WinFormsShutdownEventArgs(reason));
+            if (_features.PrepareSettingsSave is { } prepare)
+            {
+                _saveSettings = prepare(this);
+                ArgumentNullException.ThrowIfNull(_saveSettings);
+            }
+        }
+        catch (Exception exception) when (!exception.IsCriticalException())
+        {
+            RecordLifecycleFailure(exception, WinFormsLifecyclePhase.Shutdown);
+        }
+    }
+
+    /// <summary>
+    ///  Joins one UI-free persistence operation before coordinated host stop and provider disposal.
+    /// </summary>
+    internal async Task CompleteSettingsSaveAsync()
+    {
+        await _uiStopped.Task.ConfigureAwait(false);
+        if (_saveSettings is null)
+        {
+            return;
+        }
+
+        Task save;
+        lock (_stateLock)
+        {
+            save = _settingsSaveTask ??= Task.Run(async () =>
+            {
+                try
+                {
+                    if (_saveSettings is { } persist)
+                    {
+                        await persist().ConfigureAwait(false);
+                    }
+                }
+                catch (Exception exception) when (!exception.IsCriticalException())
+                {
+                    RecordException(exception);
+                }
+            });
+        }
+
+        await save.ConfigureAwait(false);
+    }
+
+    private void RecordLifecycleFailure(Exception exception, WinFormsLifecyclePhase phase)
+    {
+        RecordException(exception);
+        if (_features?.ReportFailure is { } report)
+        {
+            // Report once, on the owner thread. A reporting failure must not replace the original.
+            CaptureFailure(() => report(exception, phase));
+        }
+    }
+
+    /// <summary>
+    ///  Uses the existing root engine's visibility seam; a splash delays visibility, never the pump.
+    /// </summary>
+    internal void ShowStartupUi()
+    {
+        if (_splash is null && _features?.NetworkAvailabilityChanged is null)
+        {
+            // Preserve the existing visibility path when neither desktop feature is selected.
+            _context!.MainForm?.Visible = true;
+            return;
+        }
+
+        if (_splash is null)
+        {
+            ShowReadyUi();
+        }
+        else
+        {
+            _splash.WhenMinimumElapsed(() =>
+            {
+                try
+                {
+                    ShowReadyUi();
+                }
+                catch (Exception exception) when (!exception.IsCriticalException())
+                {
+                    RecordServiceFailure(exception);
+                }
+            });
+        }
+    }
+
+    private void ShowReadyUi()
+    {
+        if (StopRequested)
+        {
+            return;
+        }
+
+        _splash?.Dispose();
+        if (StopRequested)
+        {
+            return;
+        }
+
+        _context!.MainForm?.Visible = true;
+        if (StopRequested)
+        {
+            return;
+        }
+
+        lock (_stateLock)
+        {
+            _startupUiReady = true;
+        }
+
+        if (_features?.NetworkAvailabilityChanged is { } changed)
+        {
+            _network = new WinFormsNetworkAvailability(
+                _features.NetworkSource ?? new WinFormsNetworkSource(), _dispatcher!,
+                () => StopRequested, changed, RecordServiceFailure, RecordPostedServiceFailure);
+            try
+            {
+                _network.Start();
+            }
+            catch (Exception exception) when (!exception.IsCriticalException())
+            {
+                RecordServiceFailure(exception);
+            }
+        }
+    }
+
+    private void RecordServiceFailure(Exception exception)
+    {
+        RecordLifecycleFailure(exception, WinFormsLifecyclePhase.ApplicationService);
+        RequestStop();
+    }
+
+    private void RecordPostedServiceFailure(Exception exception)
+    {
+        // A dead dispatcher cannot run an owner-thread reporter. Retain the failure and stop.
+        RecordException(exception);
+        RequestStop();
+    }
 
     private bool StopRequested
     {
@@ -360,6 +715,7 @@ public sealed class WinFormsApplication : IDisposable
 
         try
         {
+            CaptureFailure(() => _singleInstance?.StopForApplicationAsync(this).GetAwaiter().GetResult());
             CaptureFailure(DisposeStartupResources);
             _uiStopped.TrySetResult();
             if (_host is WinFormsApplicationHost stoppedHost)
@@ -456,6 +812,9 @@ public sealed class WinFormsApplication : IDisposable
         }
 
         SignalStopRequest();
+        _activationStopping?.Cancel();
+        CaptureFailure(() => _network?.Dispose());
+        CaptureFailure(() => _splash?.Dispose());
         _uiScopes?.BeginStopping();
         CaptureFailure(Lifetime.NotifyStopping);
     }
@@ -490,13 +849,25 @@ public sealed class WinFormsApplication : IDisposable
             }
 
             _stopRequested = true;
+            _activationStopping?.Cancel();
             _startupCancellationTask = _startupCancellation.CancelAsync();
             _stopRequest.TrySetResult();
         }
     }
 
     internal void RequestStop()
+        => RequestStop(WinFormsShutdownReason.RequestedStop);
+
+    private void RequestStop(WinFormsShutdownReason reason)
     {
+        lock (_stateLock)
+        {
+            if (!_uiStopping && !_cleanupStarted && !_disposed)
+            {
+                _shutdownReason ??= reason;
+            }
+        }
+
         SignalStopRequest();
         Control? dispatcher;
         lock (_stateLock)
@@ -607,6 +978,9 @@ public sealed class WinFormsApplication : IDisposable
             _running = false;
             _disposed = true;
             _startupCancellation.Dispose();
+            _activationStopping?.Dispose();
+            _singleInstance = null;
+            _nextInstance = null;
             _runFailure = _exceptions.Count switch
             {
                 0 => null,
