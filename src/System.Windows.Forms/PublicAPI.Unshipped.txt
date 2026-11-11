@@ -18,6 +18,7 @@ Microsoft.Extensions.WinForms.WinFormsApplicationLifetime.ApplicationStopped -> 
 Microsoft.Extensions.WinForms.WinFormsApplicationLifetime.ApplicationStopping -> System.EventHandler?
 static Microsoft.Extensions.WinForms.WinFormsApplication.CreateBuilder() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 override System.Windows.Forms.GroupBox.OnPaintBackground(System.Windows.Forms.PaintEventArgs! pevent) -> void
+override System.Windows.Forms.UpDownBase.OnParentFontChanged(System.EventArgs! e) -> void
 static System.Windows.Forms.Application.SystemVisualSettings.get -> System.Windows.Forms.SystemVisualSettings!
 static System.Windows.Forms.Application.SystemVisualSettingsChanged -> System.Windows.Forms.SystemVisualSettingsChangedEventHandler?
 System.Windows.Forms.PropertyGrid.VisualStylesModeChanged -> System.EventHandler?
