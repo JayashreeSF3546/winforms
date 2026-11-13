@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "ApplicationBuilderAdoption.Migration.CSharp": {
+      "commandName": "Project",
+      "commandLineArgs": "--Migration:Stage=builder"
+    }
+  }
+}

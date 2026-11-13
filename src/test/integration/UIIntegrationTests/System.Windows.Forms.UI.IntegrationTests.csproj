@@ -30,6 +30,14 @@
     <ProjectReference Include="..\ApplicationBuilderScopes\VisualBasic\ApplicationBuilderScopes.VisualBasic.vbproj" />
     <ProjectReference Include="..\ApplicationBuilderInfrastructure\CSharp\ApplicationBuilderInfrastructure.CSharp.csproj" ReferenceOutputAssembly="false" Private="false" />
     <ProjectReference Include="..\ApplicationBuilderInfrastructure\VisualBasic\ApplicationBuilderInfrastructure.VisualBasic.vbproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\ApplicationBuilderAdoption\Migration\CSharp\ApplicationBuilderAdoption.Migration.CSharp.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\ApplicationBuilderAdoption\Migration\VisualBasic\ApplicationBuilderAdoption.Migration.VisualBasic.vbproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\ApplicationBuilderAdoption\Enterprise\CSharp\ApplicationBuilderAdoption.Enterprise.CSharp.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\ApplicationBuilderAdoption\Enterprise\VisualBasic\ApplicationBuilderAdoption.Enterprise.VisualBasic.vbproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\ApplicationBuilderAdoption\Tray\CSharp\ApplicationBuilderAdoption.Tray.CSharp.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\ApplicationBuilderAdoption\Tray\VisualBasic\ApplicationBuilderAdoption.Tray.VisualBasic.vbproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\ApplicationBuilderAdoption\Backend\CSharp\ApplicationBuilderAdoption.Backend.CSharp.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\ApplicationBuilderAdoption\Backend\VisualBasic\ApplicationBuilderAdoption.Backend.VisualBasic.vbproj" ReferenceOutputAssembly="false" Private="false" />
     <ProjectReference Include="..\WinFormsApplicationLifetimePerformance\WinFormsApplicationLifetimePerformance.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\WinFormsInfrastructurePerformance\WinFormsInfrastructurePerformance.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>

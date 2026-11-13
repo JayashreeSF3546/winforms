@@ -1,0 +1,14 @@
+{
+  "author": "Microsoft",
+  "name": "Windows Forms App (Application Builder)",
+  "description": "A prototype Application Builder app. Requires matching in-development .NET 12 WindowsDesktop APIs and Microsoft.Extensions.WinForms.Hosting.",
+  "symbols/Framework/description": "The prototype framework. An SDK version alone does not provide the required builder APIs.",
+  "symbols/Framework/choices/net12.0/description": ".NET 12 prototype with matching WindowsDesktop APIs",
+  "symbols/Framework/displayName": "Framework",
+  "symbols/skipRestore/description": "Skip automatic package restore. Prototype dependencies must be provisioned separately.",
+  "symbols/skipRestore/displayName": "Skip restore",
+  "postActions/restore/description": "Restore packages. This prototype requires matching framework APIs and the development hosting package; see README.md.",
+  "postActions/restore/manualInstructions/default/text": "Provision the documented prototype prerequisites, then run 'dotnet restore'.",
+  "postActions/open-file/description": "Opens Form1.vb in the editor",
+  "postActions/open-file/manualInstructions/default/text": "Open Form1.vb in your editor."
+}

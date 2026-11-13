@@ -115,7 +115,16 @@ public class ApplicationContext : IDisposable
     /// <summary>
     ///  Causes the thread's message loop to be terminated.
     /// </summary>
-    protected virtual void ExitThreadCore() => ThreadExit?.Invoke(this, EventArgs.Empty);
+    protected virtual void ExitThreadCore()
+    {
+        if (Application.ThreadContext.CurrentApplicationRunner is { } runner
+            && ReferenceEquals(runner.StartupContext, this) && runner.TryDeferUiShutdown())
+        {
+            return;
+        }
+
+        ThreadExit?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>
     ///  Called when the mainForm is closed. The default implementation
