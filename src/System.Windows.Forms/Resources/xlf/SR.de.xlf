@@ -11524,6 +11524,11 @@ Stapelüberwachung, in der der unzulässige Vorgang auftrat:
         <target state="new">Runtime service activation cannot be used for design-time components.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_FeaturesAlreadyConfigured">
+        <source>Application features have already been configured for this builder.</source>
+        <target state="new">Application features have already been configured for this builder.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_HostAlreadySelected">
         <source>A host builder has already been selected for this Windows Forms application.</source>
         <target state="new">A host builder has already been selected for this Windows Forms application.</target>
@@ -11552,6 +11557,16 @@ Stapelüberwachung, in der der unzulässige Vorgang auftrat:
       <trans-unit id="WinFormsApplication_ServiceActivationRequiresHost">
         <source>The runtime service startup factory requires a host. Select a host builder with UseHost before building the application.</source>
         <target state="new">The runtime service startup factory requires a host. Select a host builder with UseHost before building the application.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_SingleInstanceAlreadyClaimed">
+        <source>The single-instance primary lease has already been selected, transferred, or stopped.</source>
+        <target state="new">The single-instance primary lease has already been selected, transferred, or stopped.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_SplashRequiresHiddenMainForm">
+        <source>Splash-screen startup requires a separate, initially hidden main form.</source>
+        <target state="new">Splash-screen startup requires a separate, initially hidden main form.</target>
         <note />
       </trans-unit>
       <trans-unit id="WinFormsApplication_StartupAlreadyActivated">
