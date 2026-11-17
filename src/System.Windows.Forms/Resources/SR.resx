@@ -171,6 +171,15 @@
   <data name="WinFormsApplication_WrongThread" xml:space="preserve">
     <value>This operation must be performed on the thread that owns the Windows Forms application and its startup UI.</value>
   </data>
+  <data name="WinFormsApplication_UiShutdownRegistration" xml:space="preserve">
+    <value>UI shutdown callbacks must be registered during normal message dispatch, before stopping and before activating their resources, using a standard application context without a modal, MDI, or owned main form.</value>
+  </data>
+  <data name="WinFormsApplication_UiInitializationRegistration" xml:space="preserve">
+    <value>One UI initialization and cleanup pair may be registered during startup activation, the started notification, or UI dispatch, before stopping, using a standard application context without a modal, MDI, or owned main form.</value>
+  </data>
+  <data name="WinFormsApplication_UiShutdownInterrupted" xml:space="preserve">
+    <value>The message loop terminated before registered asynchronous UI cleanup completed. Direct disposal and forced message-loop termination do not support graceful asynchronous cleanup.</value>
+  </data>
   <data name="AboutBoxDesc" xml:space="preserve">
     <value>Displays the 'About' box for this component</value>
   </data>

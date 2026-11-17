@@ -11579,6 +11579,21 @@ O rastreamento de pilha em que a operação ilegal ocorreu foi:
         <target state="new">The form already belongs to a UI service scope. Factories must create a fresh form.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_UiInitializationRegistration">
+        <source>One UI initialization and cleanup pair may be registered during startup activation, the started notification, or UI dispatch, before stopping, using a standard application context without a modal, MDI, or owned main form.</source>
+        <target state="new">One UI initialization and cleanup pair may be registered during startup activation, the started notification, or UI dispatch, before stopping, using a standard application context without a modal, MDI, or owned main form.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_UiShutdownInterrupted">
+        <source>The message loop terminated before registered asynchronous UI cleanup completed. Direct disposal and forced message-loop termination do not support graceful asynchronous cleanup.</source>
+        <target state="new">The message loop terminated before registered asynchronous UI cleanup completed. Direct disposal and forced message-loop termination do not support graceful asynchronous cleanup.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_UiShutdownRegistration">
+        <source>UI shutdown callbacks must be registered during normal message dispatch, before stopping and before activating their resources, using a standard application context without a modal, MDI, or owned main form.</source>
+        <target state="new">UI shutdown callbacks must be registered during normal message dispatch, before stopping and before activating their resources, using a standard application context without a modal, MDI, or owned main form.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_UiStopping">
         <source>New UI activation is not permitted after stopping begins.</source>
         <target state="new">New UI activation is not permitted after stopping begins.</target>

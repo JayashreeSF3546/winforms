@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Microsoft",
+  "classifications": [ "WinForms", "Application Builder", "Hybrid", "Draft" ],
+  "name": "Windows Forms Hybrid App (Application Builder, gated draft)",
+  "generatorVersions": "[1.0.0.0-*)",
+  "description": "Source-only scaffold. Not installable or runnable until public WinForms and WebView lifetime contracts are approved.",
+  "groupIdentity": "Microsoft.Common.WinForms.ApplicationBuilder.Hybrid",
+  "identity": "Microsoft.Common.WinForms.ApplicationBuilder.Hybrid.CSharp.12.0",
+  "shortName": "winforms-builder-hybrid",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "Company.WinFormsHybridApp1",
+  "preferNameDirectory": true,
+  "sources": [
+    {
+      "exclude": [ "**/[Bb]in/**", "**/[Oo]bj/**", ".template.config/**/*", "**/*.filelist", "**/*.lock.json", "**/*.user" ]
+    }
+  ],
+  "primaryOutputs": [
+    { "path": "Company.WinFormsHybridApp1.csproj" }
+  ],
+  "defaultName": "WinFormsHybridApp1"
+}

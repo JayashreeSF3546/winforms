@@ -6840,6 +6840,12 @@ public partial class Form : ContainerControl
                 OnFormClosing(e);
             }
 
+            if (!e.Cancel && !Modal && m.MsgInternal == PInvokeCore.WM_CLOSE
+                && Application.ThreadContext.CurrentApplicationRunner?.TryDeferUiShutdown(this) == true)
+            {
+                e.Cancel = true;
+            }
+
             if (m.MsgInternal == PInvokeCore.WM_QUERYENDSESSION)
             {
                 m.ResultInternal = (LRESULT)(BOOL)!e.Cancel;

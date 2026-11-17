@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Microsoft",
+  "classifications": [ "Common", "WinForms", "Application Builder", "Preview" ],
+  "name": "Windows Forms App (Application Builder)",
+  "generatorVersions": "[1.0.0.0-*)",
+  "description": "A prototype Application Builder app. Requires matching in-development .NET 12 WindowsDesktop APIs and Microsoft.Extensions.WinForms.Hosting.",
+  "groupIdentity": "Microsoft.Common.WinForms.ApplicationBuilder",
+  "precedence": "12000",
+  "identity": "Microsoft.Common.WinForms.ApplicationBuilder.VisualBasic.12.0",
+  "shortName": "winforms-builder",
+  "tags": {
+    "language": "VB",
+    "type": "project"
+  },
+  "sourceName": "Company.WinFormsBuilderApp1",
+  "preferNameDirectory": true,
+  "guids": [ "9e5e07e6-0d1b-4661-9395-454a2335f647" ],
+  "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "datatype": "choice",
+      "description": "The prototype framework. An SDK version alone does not provide the required builder APIs.",
+      "choices": [
+        { "choice": "net12.0", "description": ".NET 12 prototype with matching WindowsDesktop APIs" }
+      ],
+      "defaultValue": "net12.0",
+      "replaces": "FrameworkParameter",
+      "displayName": "Framework"
+    },
+    "HostIdentifier": {
+      "type": "bind",
+      "binding": "HostIdentifier"
+    },
+    "skipRestore": {
+      "type": "parameter",
+      "datatype": "bool",
+      "description": "Skip automatic package restore. Prototype dependencies must be provisioned separately.",
+      "defaultValue": "false",
+      "displayName": "Skip restore"
+    }
+  },
+  "sources": [
+    {
+      "exclude": [ "**/[Bb]in/**", "**/[Oo]bj/**", ".template.config/**/*", "**/*.filelist", "**/*.lock.json", "**/*.user" ]
+    }
+  ],
+  "primaryOutputs": [
+    { "path": "Company.WinFormsBuilderApp1.vbproj" },
+    {
+      "condition": "(HostIdentifier != \"dotnetcli\" && HostIdentifier != \"dotnetcli-preview\")",
+      "path": "Form1.vb"
+    }
+  ],
+  "defaultName": "WinFormsBuilderApp1",
+  "postActions": [
+    {
+      "id": "restore",
+      "condition": "(!skipRestore)",
+      "description": "Restore packages. This prototype requires matching framework APIs and the development hosting package; see README.md.",
+      "manualInstructions": [ { "text": "Provision the documented prototype prerequisites, then run 'dotnet restore'." } ],
+      "actionId": "210D431B-A78B-4D2F-B762-4ED3E3EA9025",
+      "continueOnError": true
+    },
+    {
+      "id": "open-file",
+      "condition": "(HostIdentifier != \"dotnetcli\" && HostIdentifier != \"dotnetcli-preview\")",
+      "description": "Opens Form1.vb in the editor",
+      "manualInstructions": [ { "text": "Open Form1.vb in your editor." } ],
+      "actionId": "84C0DA21-51C8-4541-9940-6CA19AF04EE6",
+      "args": { "files": "1" },
+      "continueOnError": true
+    }
+  ]
+}

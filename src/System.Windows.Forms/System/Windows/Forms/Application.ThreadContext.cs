@@ -94,6 +94,8 @@ public sealed partial class Application
 
         internal WinFormsApplication? ApplicationRunner { get; set; }
 
+        internal static WinFormsApplication? CurrentApplicationRunner => t_currentThreadContext?.ApplicationRunner;
+
         public virtual void EnsureReadyForIdle() { }
 
         internal bool CustomThreadExceptionHandlerAttached => _threadExceptionHandler is not null;

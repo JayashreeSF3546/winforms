@@ -8,6 +8,40 @@ We provide the following templates:
 * [Windows Forms control library (C#)](./content/WinFormsControlLibrary-CSharp)
 * [Windows Forms control library (VB)](./content/WinFormsControlLibrary-VisualBasic)
 
+## Application Builder prototype templates
+
+* [Application Builder app (C#)](./content/WinFormsApplicationBuilder-CSharp)
+* [Application Builder app (VB)](./content/WinFormsApplicationBuilder-VisualBasic)
+
+The basic `winforms-builder` family is a prototype requiring the matching in-development
+WindowsDesktop APIs and hosting package. It is not supported by installing this package on an
+unmodified public SDK. Read the generated README before restoring or running it.
+
+The C#/VB parity, package prerequisites, Hybrid lifetime gates, and sample boundaries are defined in the
+[template and sample matrix](../../docs/design/winforms-application-builder-templates.md).
+Hybrid templates and adoption samples are not included in this child.
+
+The [gated C# Hybrid scaffold](./scaffolds/WinFormsApplicationBuilder-Hybrid-CSharp) stages source
+for dotnet/winforms#14967 outside the packed content. Its metadata is intentionally not discoverable,
+and runtime activation is disabled until the public lifecycle contracts are approved and integrated.
+It is not a runnable Hybrid template or a WebView support claim.
+
+Build the package with the repository's `build.cmd -projects` packaging workflow, then use PowerShell 7
+to run the
+focused creation/manifest checks against its actual `.nupkg`:
+
+```powershell
+.\pkg\Microsoft.Dotnet.WinForms.ProjectTemplates\tests\Test-BasicTemplates.ps1 -TemplatePackage <built-package-path>
+```
+
+The checks use an isolated template-engine hive, preserve classic payloads byte-for-byte, generate
+native C#/VB projects (including names with spaces/dots), reject unsupported frameworks, and
+uninstall from that hive. They do not claim installed-framework compatibility or replace the
+later build/run/publish CI matrix.
+
+The [local validation guide](./tests/README.md) documents the separate prototype consumer harness,
+native-language runtime checks, publish checks, results, and remaining acceptance gates.
+
 # Item templates are located in the VSProject repo
 * [VB](https://devdiv.visualstudio.com/DevDiv/_git/VS?path=/src/vsproject/Templates/Windows/VisualBasic/ItemTemplates/WindowsForms&version=GBmain&_a=contents)
 * [C#](https://devdiv.visualstudio.com/DevDiv/_git/VS?path=/src/vsproject/Templates/Windows/CSharp/ItemTemplates&version=GBmain&_a=contents)
