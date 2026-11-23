@@ -48,6 +48,9 @@ The local source references below describe this branch's behavior, not hypotheti
 
 ### Synchronization context and configuration
 
+The [fluent startup configuration proposal](winforms-application-builder-startup-configuration.md)
+adds opt-in builder setters applied during Build, before host construction and deferred UI activation.
+
 [WindowsFormsSynchronizationContext.cs](../../src/System.Windows.Forms/System/Windows/Forms/WindowsFormsSynchronizationContext.cs)
 installs automatically during control creation or loop entry, subject to `AutoInstall`.
 `InstallIfNeeded` preserves a non-default synchronization context; it does not forcibly replace it.
@@ -58,17 +61,20 @@ The public parameterless `Uninstall` instead disables future automatic installat
 
 Consequently, configuration must precede synchronization-context installation and any startup instance:
 
-1. The entry point calls generated `ApplicationConfiguration.Initialize()` or equivalent explicit settings.
+1. The entry point chooses generated `ApplicationConfiguration.Initialize()`, equivalent explicit
+   settings, or the opt-in fluent builder configuration.
 2. The builder records configuration and startup selection without creating controls or handles.
-3. `Build` validates and snapshots that selection, without activating a form or context.
+3. `Build` validates and snapshots that selection and applies any explicit fluent settings before
+   host construction, without activating a form or context.
 4. The runner establishes the UI synchronization context before invoking a startup factory.
 
 `SetCompatibleTextRenderingDefault` and `SetDefaultFont` reject changes after a native window has been
 created; `SetHighDpiMode` checks whether a parking window has been created and can return `false`.
 Do not defer these settings until after host construction that might activate UI dependencies.
 Do not call generated `ApplicationConfiguration.Initialize` from framework code: it belongs to the application.
-If the builder offers explicit configuration, apply it before accepting a pre-created startup instance,
-and report settings that cannot be applied rather than claiming success.
+Explicit fluent startup configuration requires deferred UI and rejects a pre-created startup Form.
+An unconfigured builder continues to accept an existing Form. Report settings that cannot be applied
+rather than claiming success.
 
 ## Generic Host contracts and reconciliation
 

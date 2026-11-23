@@ -9,15 +9,19 @@ using Microsoft.Extensions.Hosting;
 namespace Microsoft.Extensions.WinForms;
 
 /// <summary>
-///  Selects the startup UI for a Windows Forms application.
+///  Selects startup UI and optional startup defaults for a Windows Forms application.
 /// </summary>
 /// <remarks>
 ///  <para>
 ///   Configure the application before creating startup controls. Building does not activate the UI.
 ///   The builder must be configured and built on the thread that will own the application.
 ///  </para>
+///  <para>
+///   Explicit startup defaults are applied during Build before host construction. They require deferred
+///   UI, an owning STA without previously created windows, and are not restored on disposal.
+///  </para>
 /// </remarks>
-public sealed class WinFormsApplicationBuilder
+public sealed partial class WinFormsApplicationBuilder
 {
     private readonly Thread _ownerThread = Thread.CurrentThread;
     private Form? _startupForm;
@@ -210,7 +214,16 @@ public sealed class WinFormsApplicationBuilder
     /// <exception cref="ObjectDisposedException">The selected startup form is disposed.</exception>
     /// <exception cref="InvalidOperationException">
     ///  No startup UI is selected, the builder has been built, or the builder or startup form belongs to another thread.
+    ///  Explicit startup configuration also requires an STA without previously created windows, deferred startup UI,
+    ///  and application defaults that can still be changed.
     /// </exception>
+    /// <remarks>
+    ///  <para>
+    ///   Selected startup defaults affect process or thread state before the optional host is built.
+    ///   Once applying them begins, the builder is consumed even if a setter or host construction fails.
+    ///   Partial settings are not rolled back.
+    ///  </para>
+    /// </remarks>
     public WinFormsApplication Build()
         => Build(host: null);
 
@@ -232,8 +245,10 @@ public sealed class WinFormsApplicationBuilder
             WinFormsApplicationOptions.ValidateStartupForm(_startupForm);
         }
 
+        WinFormsApplicationFeatures? features = _features?.Snapshot();
+        ApplyStartupConfiguration();
         WinFormsApplicationOptions options = new(_ownerThread, _startupForm, _contextFactory, _serviceFormFactory, _scopedContextFactory);
-        WinFormsApplication application = new(options, host, _features?.Snapshot());
+        WinFormsApplication application = new(options, host, features);
         if (_hostBuilder is not null)
         {
             // Generic Host build is single-use, including when its build operation fails.

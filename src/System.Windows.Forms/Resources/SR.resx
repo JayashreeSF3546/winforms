@@ -132,6 +132,12 @@
   <data name="WinFormsApplication_AlreadyBuilt" xml:space="preserve">
     <value>This Windows Forms application builder has already been built.</value>
   </data>
+  <data name="WinFormsApplication_StartupConfigurationTooLate" xml:space="preserve">
+    <value>Configure application startup defaults before creating windows and select a deferred startup Form or application context factory.</value>
+  </data>
+  <data name="WinFormsApplication_HighDpiConfigurationFailed" xml:space="preserve">
+    <value>The requested process DPI awareness could not be set. Configure DPI only once, before creating UI, and check the application manifest.</value>
+  </data>
   <data name="WinFormsApplication_MissingStartup" xml:space="preserve">
     <value>Select a startup form or application context before building the application.</value>
   </data>

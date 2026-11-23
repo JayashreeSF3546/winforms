@@ -11529,6 +11529,11 @@ Cette opération non conforme s'est produite sur la trace de la pile :
         <target state="new">Application features have already been configured for this builder.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_HighDpiConfigurationFailed">
+        <source>The requested process DPI awareness could not be set. Configure DPI only once, before creating UI, and check the application manifest.</source>
+        <target state="new">The requested process DPI awareness could not be set. Configure DPI only once, before creating UI, and check the application manifest.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_HostAlreadySelected">
         <source>A host builder has already been selected for this Windows Forms application.</source>
         <target state="new">A host builder has already been selected for this Windows Forms application.</target>
@@ -11577,6 +11582,11 @@ Cette opération non conforme s'est produite sur la trace de la pile :
       <trans-unit id="WinFormsApplication_StartupAlreadySelected">
         <source>A startup form or application context has already been selected.</source>
         <target state="new">A startup form or application context has already been selected.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_StartupConfigurationTooLate">
+        <source>Configure application startup defaults before creating windows and select a deferred startup Form or application context factory.</source>
+        <target state="new">Configure application startup defaults before creating windows and select a deferred startup Form or application context factory.</target>
         <note />
       </trans-unit>
       <trans-unit id="WinFormsApplication_SynchronizationContextUnavailable">
