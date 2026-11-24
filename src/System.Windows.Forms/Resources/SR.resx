@@ -168,6 +168,12 @@
   <data name="WinFormsApplication_ServiceRegistrationRequiresHost" xml:space="preserve">
     <value>Service registrations require a host. Select an unbuilt host builder with UseHost before building the application.</value>
   </data>
+  <data name="WinFormsApplication_ConfigurationAlreadySelected" xml:space="preserve">
+    <value>A configuration builder has already been selected for this Windows Forms application.</value>
+  </data>
+  <data name="WinFormsApplication_ConfigurationRequiresHost" xml:space="preserve">
+    <value>Configuration sources and properties require a host. Select an unbuilt host builder with UseHost before building the application.</value>
+  </data>
   <data name="WinFormsApplication_UiScopeUnavailable" xml:space="preserve">
     <value>The UI scope is not available. Select UseScopedStartupForm or UseScopedApplicationContext and wait for scoped startup activation before creating UI.</value>
   </data>

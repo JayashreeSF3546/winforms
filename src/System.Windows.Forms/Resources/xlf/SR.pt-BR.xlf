@@ -11519,6 +11519,16 @@ O rastreamento de pilha em que a operação ilegal ocorreu foi:
         <target state="new">This Windows Forms application builder has already been built.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_ConfigurationAlreadySelected">
+        <source>A configuration builder has already been selected for this Windows Forms application.</source>
+        <target state="translated">Um construtor de configuração já foi selecionado para este aplicativo Windows Forms.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_ConfigurationRequiresHost">
+        <source>Configuration sources and properties require a host. Select an unbuilt host builder with UseHost before building the application.</source>
+        <target state="translated">As fontes e as propriedades de configuração exigem um host. Antes de compilar o aplicativo, selecione com UseHost um construtor de host que ainda não foi compilado.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_DesignTimeServices">
         <source>Runtime service activation cannot be used for design-time components.</source>
         <target state="new">Runtime service activation cannot be used for design-time components.</target>

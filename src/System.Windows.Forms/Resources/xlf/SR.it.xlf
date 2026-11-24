@@ -11519,6 +11519,16 @@ Analisi dello stack dove si è verificata l'operazione non valida:
         <target state="new">This Windows Forms application builder has already been built.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_ConfigurationAlreadySelected">
+        <source>A configuration builder has already been selected for this Windows Forms application.</source>
+        <target state="translated">È già stato selezionato un generatore di configurazione per questa applicazione Windows Forms.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_ConfigurationRequiresHost">
+        <source>Configuration sources and properties require a host. Select an unbuilt host builder with UseHost before building the application.</source>
+        <target state="translated">Le origini e le proprietà di configurazione richiedono un host. Prima di compilare l'applicazione, selezionare con UseHost un generatore di host non ancora compilato.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_DesignTimeServices">
         <source>Runtime service activation cannot be used for design-time components.</source>
         <target state="new">Runtime service activation cannot be used for design-time components.</target>

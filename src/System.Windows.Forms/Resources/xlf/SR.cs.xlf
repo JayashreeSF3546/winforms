@@ -11519,6 +11519,16 @@ Trasování zásobníku, kde došlo k neplatné operaci:
         <target state="new">This Windows Forms application builder has already been built.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_ConfigurationAlreadySelected">
+        <source>A configuration builder has already been selected for this Windows Forms application.</source>
+        <target state="translated">Pro tuto aplikaci Windows Forms už byl vybrán tvůrce konfigurace.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_ConfigurationRequiresHost">
+        <source>Configuration sources and properties require a host. Select an unbuilt host builder with UseHost before building the application.</source>
+        <target state="translated">Zdroje a vlastnosti konfigurace vyžadují hostitele. Před sestavením aplikace vyberte pomocí UseHost tvůrce hostitele, který ještě nebyl sestaven.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_DesignTimeServices">
         <source>Runtime service activation cannot be used for design-time components.</source>
         <target state="new">Runtime service activation cannot be used for design-time components.</target>

@@ -11519,6 +11519,16 @@ Stack trace where the illegal operation occurred was:
         <target state="new">This Windows Forms application builder has already been built.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_ConfigurationAlreadySelected">
+        <source>A configuration builder has already been selected for this Windows Forms application.</source>
+        <target state="translated">이 Windows Forms 애플리케이션의 구성 작성기가 이미 선택되었습니다.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_ConfigurationRequiresHost">
+        <source>Configuration sources and properties require a host. Select an unbuilt host builder with UseHost before building the application.</source>
+        <target state="translated">구성 소스와 속성에는 호스트가 필요합니다. 애플리케이션을 빌드하기 전에 UseHost를 사용하여 아직 빌드되지 않은 호스트 작성기를 선택하세요.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_DesignTimeServices">
         <source>Runtime service activation cannot be used for design-time components.</source>
         <target state="new">Runtime service activation cannot be used for design-time components.</target>

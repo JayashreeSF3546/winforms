@@ -42,8 +42,6 @@ public class WinFormsServiceIntegrationTests
                         ["--hostBuilder:reloadConfigOnChange=false", "--WinForms14961:Value=20"])
                     .UseContentRoot(directory.FullName)
                     .UseEnvironment(Environments.Production)
-                    .ConfigureAppConfiguration(configuration => configuration.AddInMemoryCollection(
-                        [new("WinForms14961:Value", valid ? "30" : "0")]))
                     .ConfigureServices((context, services) => services
                         .AddOptions<WinFormsConfigurationTests.ConfigurationOptions>()
                         .Bind(context.Configuration.GetSection("WinForms14961"))
@@ -53,6 +51,8 @@ public class WinFormsServiceIntegrationTests
                         builder.Services.AddSingleton<OwnedDependency>());
                 using (application = WinFormsApplication.CreateBuilder()
                     .UseHost(hostBuilder)
+                    .ConfigureConfiguration(configuration => configuration.AddInMemoryCollection(
+                        [new("WinForms14961:Value", valid ? "30" : "0")]))
                     .UseApplicationContext(() =>
                     {
                         application!.Host!.Services.GetRequiredService<IHost>().Should().BeSameAs(application.Host);

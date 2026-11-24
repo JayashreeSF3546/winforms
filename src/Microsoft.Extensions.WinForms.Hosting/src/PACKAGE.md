@@ -178,6 +178,79 @@ retains its separate diagnostic fallback. `ILogger` has no universal async flush
 Buffered providers must finish their documented flush operation through an application-owned
 shutdown participant before host disposal; process termination cannot guarantee delivery.
 
+### Stage application configuration through the WinForms builder
+
+The optional package supplies `builder.Configuration` as a C# 14 extension property returning an
+`IConfigurationBuilder`, **not** a live `ConfigurationManager`. Import
+`Microsoft.Extensions.Configuration` and `Microsoft.Extensions.WinForms`.
+Reading the property alone creates an empty recipe without loading files or starting watchers.
+It preserves hostless behavior; adding sources or properties requires an explicit `UseHost` at Build.
+
+```csharp
+IHostBuilder hostBuilder = new HostBuilder()
+    .ConfigureWinFormsConfiguration(args)
+    .ConfigureServices((context, services) => services.AddOptions<DisplayOptions>()
+        .Bind(context.Configuration.GetSection("Display"))
+        .Validate(options => options.RefreshSeconds > 0, "RefreshSeconds must be positive.")
+        .ValidateOnStart());
+
+WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder().UseHost(hostBuilder);
+builder.Configuration.AddJsonFile("desktop-overrides.json", optional: true, reloadOnChange: false);
+builder.UseStartupForm<MainForm>();
+
+using WinFormsApplication application = builder.Build();
+IConfiguration effective = application.Host!.Services.GetRequiredService<IConfiguration>();
+application.Run();
+```
+
+`DisplayOptions` and `MainForm` are application-defined. Relative JSON paths use the selected host's
+content-root file provider unless explicitly overridden. JSON, environment-variable, command-line,
+in-memory, and third-party providers use their standard configuration extension methods.
+Providers are loaded once by the host, before service registration, options validation, and UI
+activation. Standard provider errors propagate; a consumed builder cannot retry a failed host Build.
+
+VB uses the callback over the same staged recipe:
+
+```vb
+builder.ConfigureConfiguration(
+    Sub(configuration)
+        configuration.AddJsonFile("desktop-overrides.json", optional:=True, reloadOnChange:=False)
+    End Sub)
+```
+
+The callback runs immediately; source loading remains deferred until application Build. Callback
+failures do not consume the application builder or undo prior recipe edits. Configure through the
+owning thread before Build. The core abstraction-only `UseConfiguration(IConfigurationBuilder)`
+method also accepts an externally assembled recipe without adding full configuration packages to
+WinForms. Select either that explicit recipe or the optional property/callback; a second selection
+is rejected, rather than silently replacing the first.
+
+**Precedence:** Build snapshots the recipe's source list and property entries, then appends them
+after all application configuration registered on the supplied host, even callbacks registered
+after `UseHost`. Later sources win, so an explicit desktop override can outrank the host's default
+command-line provider. `builder.Configuration.Sources.Clear()` clears only the staged recipe;
+clear host providers on the supplied host if that is the intended policy. Builder properties are
+forwarded before source construction; explicit file-provider/base-path changes can affect host
+sources too. Source objects and property values are borrowed, not deeply cloned.
+
+The host builds and owns the effective root used by `IConfiguration`, logging configuration,
+and options. Read effective values in host service callbacks or through host DI after Build.
+Do not call `builder.Configuration.Build()` to obtain them: that standard method creates a
+separate caller-owned root which does not include the supplied host's sources. Retained recipes
+remain ordinary mutable configuration builders; later recipe edits do not update a built host.
+Do not mutate shared source objects during or after application Build.
+
+Reload remains provider-controlled. Reload the effective host `IConfigurationRoot`, not the recipe,
+and use standard `IOptionsMonitor<T>`/`IOptionsSnapshot<T>` semantics. Notifications are not dispatched
+to the UI thread automatically. Invalid reloads retain standard error/validation behavior, not an
+implicit last-known-good policy. The JSON example disables automatic watchers deliberately.
+
+Staged sources are **application** configuration, not host configuration: adding `environment`,
+`applicationName`, or `contentRoot` keys does not reselect host identity. Configure those on the
+supplied `IHostBuilder` before Build. `ConfigureWinFormsConfiguration(args)` remains the explicit
+desktop-defaults helper; the new property does not install defaults, bind logging, persist settings,
+or start a host by itself. These additions remain prototypes pending API review.
+
 ### Configure the selected host
 
 Call `ConfigureWinFormsConfiguration` once on a fresh `HostBuilder`, before customizations. Do not

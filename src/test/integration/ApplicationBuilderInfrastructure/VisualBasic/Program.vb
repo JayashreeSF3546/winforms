@@ -4,6 +4,7 @@
 Imports System
 Imports System.Threading.Tasks
 Imports System.Windows.Forms
+Imports Microsoft.Extensions.Configuration
 Imports Microsoft.Extensions.Logging
 Imports Microsoft.Extensions.WinForms
 
@@ -15,6 +16,10 @@ Public Module Program
     Public Function Main(args As String()) As Integer
         Return SampleApplication.Run(args, Function(session) New InfrastructureForm(session),
             Sub(builder)
+                builder.ConfigureConfiguration(
+                    Sub(configuration)
+                        configuration.AddJsonFile("sample-overrides.json", optional:=True, reloadOnChange:=False)
+                    End Sub)
                 builder.ConfigureLogging(
                     Sub(logging)
                         logging.UseWinFormsLogging()

@@ -75,11 +75,22 @@ These API additions are prototypes under dotnet/winforms#14082 and remain subjec
 `HostApplicationBuilder`/`IHostApplicationBuilder` offer the broader property-based configuration
 experience, but `HostApplicationBuilder` does not publicly implement `IHostBuilder`; its adapter is
 internal in the inspected Hosting source. Do not use reflection to obtain it, accept an already-built
-host that bypasses coordination, or build a second provider. Configuration, Environment,
-and Properties on the WinForms builder remain separate future API decisions. The optional package
+host that bypasses coordination, or build a second provider. Environment and Properties on the
+WinForms builder remain separate future API decisions. The optional package
 now supplies the `Logging` C# 14 extension property and VB-compatible `ConfigureLogging` callback,
 both backed by the existing staged service collection. This does not add `ILoggingBuilder` or a full
 logging dependency to the WinForms framework.
+
+The optional `Configuration` C# 14 property and `ConfigureConfiguration` callback similarly stage
+standard provider definitions, not a live configuration root. The abstraction-only core
+`UseConfiguration(IConfigurationBuilder)` seam snapshots sources and metadata at Build and appends
+them after the supplied host's application configuration, before its service callbacks. The host
+builds/owns the sole effective root. Empty recipe access preserves hostless behavior; nonempty
+sources or properties require `UseHost`. This adds no full configuration implementation to WinForms.
+Effective values come from the host after Build; host identity must still be configured on
+`IHostBuilder`. Retained recipes retain standard mutability, but later edits do not update a built
+root. `Sources.Clear()` affects staged sources only, and staged providers can intentionally override
+the host's command-line configuration. See the package readme for the C#/VB usage and ownership contract.
 
 ## Ownership and extension boundaries
 

@@ -36,6 +36,13 @@ the same service collection. Both retain the explicit health-category filter and
 factory used to report failures after `Run`; neither adds exception subscriptions or file logging
 through provider configuration.
 
+The C# entry point also stages an optional `sample-overrides.json` using `builder.Configuration`.
+VB uses `builder.ConfigureConfiguration(...)` for the same provider. This recipe is appended after
+the host's defaults and loaded by that host before service registration. If deployed, this explicit
+override file has higher precedence than the host's command-line provider. It uses the executable
+content root and disables automatic watchers. The sample's existing Reload operation reloads the
+effective host root, including this provider; no second configuration root is constructed.
+
 ## Configuration and preferences
 
 - `appsettings.json` supplies the caption, bounded worker interval, and explicit offline mode.

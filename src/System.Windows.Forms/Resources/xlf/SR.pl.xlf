@@ -11519,6 +11519,16 @@ Stos śledzenia, w którym wystąpiła zabroniona operacja:
         <target state="new">This Windows Forms application builder has already been built.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_ConfigurationAlreadySelected">
+        <source>A configuration builder has already been selected for this Windows Forms application.</source>
+        <target state="translated">Dla tej aplikacji Windows Forms wybrano już konstruktora konfiguracji.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_ConfigurationRequiresHost">
+        <source>Configuration sources and properties require a host. Select an unbuilt host builder with UseHost before building the application.</source>
+        <target state="translated">Źródła i właściwości konfiguracji wymagają hosta. Przed skompilowaniem aplikacji wybierz za pomocą UseHost konstruktora hosta, który nie został jeszcze skompilowany.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_DesignTimeServices">
         <source>Runtime service activation cannot be used for design-time components.</source>
         <target state="new">Runtime service activation cannot be used for design-time components.</target>

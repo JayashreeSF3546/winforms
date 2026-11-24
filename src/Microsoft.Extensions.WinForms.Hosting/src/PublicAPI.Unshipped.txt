@@ -1,4 +1,9 @@
 #nullable enable
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilderConfigurationExtensions
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilderConfigurationExtensions.extension(Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!)
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilderConfigurationExtensions.extension(Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!).Configuration.get -> Microsoft.Extensions.Configuration.IConfigurationBuilder!
+static Microsoft.Extensions.WinForms.WinFormsApplicationBuilderConfigurationExtensions.ConfigureConfiguration(this Microsoft.Extensions.WinForms.WinFormsApplicationBuilder! builder, System.Action<Microsoft.Extensions.Configuration.IConfigurationBuilder!>! configure) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+static Microsoft.Extensions.WinForms.WinFormsApplicationBuilderConfigurationExtensions.get_Configuration(Microsoft.Extensions.WinForms.WinFormsApplicationBuilder! builder) -> Microsoft.Extensions.Configuration.IConfigurationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilderLoggingExtensions
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilderLoggingExtensions.extension(Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!)
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilderLoggingExtensions.extension(Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!).Logging.get -> Microsoft.Extensions.Logging.ILoggingBuilder!

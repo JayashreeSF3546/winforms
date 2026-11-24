@@ -12,6 +12,7 @@ Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Build() -> Microsoft.Ex
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Services.get -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseApplicationContext(System.Func<System.Windows.Forms.ApplicationContext!>! contextFactory) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseColorMode(System.Windows.Forms.SystemColorMode colorMode) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseConfiguration(Microsoft.Extensions.Configuration.IConfigurationBuilder! configuration) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseDefaultFont(System.Drawing.Font! font) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseFormRevealMode(System.Windows.Forms.FormRevealMode formRevealMode) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseHighDpiMode(System.Windows.Forms.HighDpiMode highDpiMode) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!

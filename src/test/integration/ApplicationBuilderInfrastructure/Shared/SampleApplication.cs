@@ -18,10 +18,10 @@ public static class SampleApplication
     public static int Run(
         string[] args,
         Func<SampleSession, Form> createForm,
-        Action<WinFormsApplicationBuilder> configureLogging)
+        Action<WinFormsApplicationBuilder> configureBuilder)
     {
         ArgumentNullException.ThrowIfNull(createForm);
-        ArgumentNullException.ThrowIfNull(configureLogging);
+        ArgumentNullException.ThrowIfNull(configureBuilder);
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -55,7 +55,7 @@ public static class SampleApplication
                     services.Configure<HostOptions>(options => options.ShutdownTimeout = Timeout.InfiniteTimeSpan);
                 });
             WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder().UseHost(hostBuilder);
-            configureLogging(builder);
+            configureBuilder(builder);
             WinFormsApplication? application = null;
             using (application = builder
                 .UseApplicationContext(() =>

@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Windows.Forms;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.WinForms;
 
@@ -16,6 +17,7 @@ internal static class Program
     private static int Main(string[] args)
         => SampleApplication.Run(args, session => new InfrastructureForm(session), builder =>
         {
+            builder.Configuration.AddJsonFile("sample-overrides.json", optional: true, reloadOnChange: false);
             builder.Logging.UseWinFormsLogging();
             builder.Logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks", LogLevel.None);
         });
