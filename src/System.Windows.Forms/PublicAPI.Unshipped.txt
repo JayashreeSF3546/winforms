@@ -17,6 +17,7 @@ Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseDefaultFont(System.D
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseFormRevealMode(System.Windows.Forms.FormRevealMode formRevealMode) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseHighDpiMode(System.Windows.Forms.HighDpiMode highDpiMode) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseHost(Microsoft.Extensions.Hosting.IHostBuilder! hostBuilder) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseHostConfiguration(Microsoft.Extensions.Configuration.IConfigurationBuilder! configuration) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseLegacyVisualStyles() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseScopedApplicationContext(System.Func<System.IServiceProvider!, Microsoft.Extensions.WinForms.WinFormsUiScope!, System.Windows.Forms.ApplicationContext!>! contextFactory) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseScopedStartupForm(System.Func<System.IServiceProvider!, System.Windows.Forms.Form!>! formFactory) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!

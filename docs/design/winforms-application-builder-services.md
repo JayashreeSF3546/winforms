@@ -75,8 +75,8 @@ These API additions are prototypes under dotnet/winforms#14082 and remain subjec
 `HostApplicationBuilder`/`IHostApplicationBuilder` offer the broader property-based configuration
 experience, but `HostApplicationBuilder` does not publicly implement `IHostBuilder`; its adapter is
 internal in the inspected Hosting source. Do not use reflection to obtain it, accept an already-built
-host that bypasses coordination, or build a second provider. Environment and Properties on the
-WinForms builder remain separate future API decisions. The optional package
+host that bypasses coordination, or build a second provider. The Properties surface on the
+WinForms builder remains a separate future API decision. The optional package
 now supplies the `Logging` C# 14 extension property and VB-compatible `ConfigureLogging` callback,
 both backed by the existing staged service collection. This does not add `ILoggingBuilder` or a full
 logging dependency to the WinForms framework.
@@ -133,6 +133,20 @@ the host's command-line configuration. See the package readme for the C#/VB usag
   builder shape or add suspend/resume behavior here.
 
 ## Configuration and environment
+
+The optional `Environment` C# 14 extension property and C#/VB `ConfigureEnvironment` callback expose
+nullable `WinFormsApplicationEnvironmentOptions` overrides for environment name, application name,
+and content-root path. Null inherits the supplied host; this is not a live `IHostEnvironment`
+preview. Empty access preserves hostless behavior. Explicit values require `UseHost` and are applied
+through the abstraction-only `UseHostConfiguration` seam after the supplied host's host configuration,
+before environment creation and application providers. They intentionally outrank host command-line
+settings; leave values null to retain the host's precedence.
+
+The host constructs/owns the sole effective environment and content-root file provider. Resolve that
+environment through host DI after Build. Application configuration reload cannot reselect it.
+Options enforce owning-thread/pre-Build access even through retained references; callbacks preserve
+prior valid edits on failure. Explicit external host-configuration recipes and Environment options
+are alternative selections, while application configuration remains an independent phase.
 
 ### Construction and desktop defaults
 

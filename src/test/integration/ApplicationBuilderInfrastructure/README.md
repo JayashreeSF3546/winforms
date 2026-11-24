@@ -43,6 +43,12 @@ override file has higher precedence than the host's command-line provider. It us
 content root and disables automatic watchers. The sample's existing Reload operation reloads the
 effective host root, including this provider; no second configuration root is constructed.
 
+Both entry points explicitly stage their own assembly name as the host application name: C# uses
+`builder.Environment.ApplicationName`, while VB uses `ConfigureEnvironment(...)`. Environment name
+and content root remain unset so the selected host's desktop defaults, environment variables, and
+command-line settings retain control. The options are deferred overrides, not a live hosting
+environment; the shared session consumes the actual `IHostEnvironment` through host DI.
+
 ## Configuration and preferences
 
 - `appsettings.json` supplies the caption, bounded worker interval, and explicit offline mode.

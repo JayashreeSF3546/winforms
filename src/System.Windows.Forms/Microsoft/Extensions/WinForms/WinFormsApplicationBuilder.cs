@@ -31,6 +31,7 @@ public sealed partial class WinFormsApplicationBuilder
     private Func<IServiceProvider, Form>? _serviceFormFactory;
     private Func<IServiceProvider, WinFormsUiScope, ApplicationContext>? _scopedContextFactory;
     private IHostBuilder? _hostBuilder;
+    private IConfigurationBuilder? _hostConfiguration;
     private IConfigurationBuilder? _configuration;
     private ServiceCollection? _services;
     private WinFormsApplicationFeatures? _features;
@@ -165,6 +166,41 @@ public sealed partial class WinFormsApplicationBuilder
         }
 
         _configuration = configuration;
+
+        return this;
+    }
+
+    /// <summary>
+    ///  Selects host configuration sources to append before the host initializes its environment.
+    /// </summary>
+    /// <param name="configuration">An unbuilt configuration builder whose sources and properties are borrowed.</param>
+    /// <returns>This builder.</returns>
+    /// <remarks>
+    ///  <para>
+    ///   Sources and properties are snapshotted during Build and appended after the supplied host's own
+    ///   host configuration. Unlike UseConfiguration, this phase can select environment name, application
+    ///   name, and content root before application configuration and service registration.
+    ///  </para>
+    ///  <para>
+    ///   Nonempty sources or properties require UseHost. An empty selection preserves hostless behavior.
+    ///   The host owns the resulting environment, file provider, and configuration roots. No providers
+    ///   are loaded by this method. Do not mutate shared sources during or after application Build.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="configuration"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  Host configuration is already selected, the application builder is consumed, or the calling thread does not own it.
+    /// </exception>
+    public WinFormsApplicationBuilder UseHostConfiguration(IConfigurationBuilder configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        VerifyCanConfigure();
+        if (_hostConfiguration is not null)
+        {
+            throw new InvalidOperationException(SR.WinFormsApplication_ConfigurationAlreadySelected);
+        }
+
+        _hostConfiguration = configuration;
 
         return this;
     }
@@ -343,9 +379,7 @@ public sealed partial class WinFormsApplicationBuilder
             throw new InvalidOperationException(SR.WinFormsApplication_ServiceRegistrationRequiresHost);
         }
 
-        if (_configuration is not null
-            && (_configuration.Sources.Count > 0 || _configuration.Properties.Count > 0)
-            && _hostBuilder is null)
+        if (_hostBuilder is null && (HasConfiguration(_configuration) || HasConfiguration(_hostConfiguration)))
         {
             throw new InvalidOperationException(SR.WinFormsApplication_ConfigurationRequiresHost);
         }
@@ -364,22 +398,15 @@ public sealed partial class WinFormsApplicationBuilder
             // Generic Host build is single-use, including when its build operation fails.
             _built = true;
             _services?.MakeReadOnly();
+            if (_hostConfiguration is not null)
+            {
+                _hostBuilder.ConfigureHostConfiguration(SnapshotConfiguration(_hostConfiguration));
+            }
+
             if (_configuration is not null)
             {
-                IConfigurationSource[] sources = [.. _configuration.Sources];
-                KeyValuePair<string, object>[] properties = [.. _configuration.Properties];
-                _hostBuilder.ConfigureAppConfiguration((_, configuration) =>
-                {
-                    foreach ((string key, object value) in properties)
-                    {
-                        configuration.Properties[key] = value;
-                    }
-
-                    foreach (IConfigurationSource source in sources)
-                    {
-                        configuration.Add(source);
-                    }
-                });
+                Action<IConfigurationBuilder> configure = SnapshotConfiguration(_configuration);
+                _hostBuilder.ConfigureAppConfiguration((_, configuration) => configure(configuration));
             }
 
             if (_services is { Count: > 0 } services)
@@ -427,12 +454,35 @@ public sealed partial class WinFormsApplicationBuilder
         _serviceFormFactory = null;
         _scopedContextFactory = null;
         _hostBuilder = null;
+        _hostConfiguration = null;
         _configuration = null;
         _features = null;
         _singleInstance = null;
         _nextInstance = null;
 
         return application;
+    }
+
+    private static bool HasConfiguration(IConfigurationBuilder? configuration)
+        => configuration is not null && (configuration.Sources.Count > 0 || configuration.Properties.Count > 0);
+
+    private static Action<IConfigurationBuilder> SnapshotConfiguration(IConfigurationBuilder configuration)
+    {
+        IConfigurationSource[] sources = [.. configuration.Sources];
+        KeyValuePair<string, object>[] properties = [.. configuration.Properties];
+
+        return target =>
+        {
+            foreach ((string key, object value) in properties)
+            {
+                target.Properties[key] = value;
+            }
+
+            foreach (IConfigurationSource source in sources)
+            {
+                target.Add(source);
+            }
+        };
     }
 
     private static TForm CreateStartupForm<TForm>() where TForm : Form, new()

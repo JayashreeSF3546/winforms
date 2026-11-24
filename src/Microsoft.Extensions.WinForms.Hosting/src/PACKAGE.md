@@ -178,6 +178,65 @@ retains its separate diagnostic fallback. `ILogger` has no universal async flush
 Buffered providers must finish their documented flush operation through an application-owned
 shutdown participant before host disposal; process termination cannot guarantee delivery.
 
+### Stage environment overrides
+
+The optional package supplies the C# 14 `builder.Environment` extension property and
+`ConfigureEnvironment(...)` for both C# and VB. These expose `WinFormsApplicationEnvironmentOptions`,
+not a preview or replacement of `IHostEnvironment`.
+
+```csharp
+WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+    .UseHost(new HostBuilder().ConfigureWinFormsConfiguration(args));
+builder.Environment.EnvironmentName = Environments.Development;
+builder.Environment.ApplicationName = typeof(MainForm).Assembly.GetName().Name;
+builder.Environment.ContentRootPath = AppContext.BaseDirectory;
+builder.UseStartupForm<MainForm>();
+
+using WinFormsApplication application = builder.Build();
+IHostEnvironment environment = application.Host!.Services.GetRequiredService<IHostEnvironment>();
+application.Run();
+```
+
+```vb
+builder.ConfigureEnvironment(
+    Sub(environment)
+        environment.EnvironmentName = Environments.Development
+        environment.ApplicationName = GetType(MainForm).Assembly.GetName().Name
+        environment.ContentRootPath = AppContext.BaseDirectory
+    End Sub)
+```
+
+Import `Microsoft.Extensions.Hosting` and `Microsoft.Extensions.WinForms`. All three requested
+values initially are null: they inherit the supplied host, rather than reporting guessed defaults.
+Assign null to remove an override. Empty or whitespace values are rejected without replacing the
+previous valid selection. The last valid assignment wins. Merely accessing the options, or
+resetting every override to null, preserves hostless behavior; non-null overrides require `UseHost`.
+
+Explicit overrides are appended to **host configuration**, after the supplied host's own sources,
+before it creates its environment and selects application-name/environment-specific JSON or User
+Secrets. Consequently they override even host command-line settings or later host-builder callbacks.
+Leave values null when host command-line/environment-variable settings should win.
+These options never change process environment variables or the process current directory.
+Relative content roots retain Generic Host path resolution. No directory or file provider is
+created by the setters; the host surfaces invalid/unavailable root errors during Build.
+
+The host remains the sole owner of its effective `IHostEnvironment` and content-root file provider.
+Read effective values through host DI after Build or `HostBuilderContext.HostingEnvironment`
+during application configuration/service callbacks. Standard `IsDevelopment`, `IsStaging`,
+`IsProduction`, and `IsEnvironment` helpers operate on that effective object. Application
+configuration reload does not reconstruct host identity.
+
+Options access and mutation require the builder's owning thread before consumption, including
+retained option references. Callback failures propagate and retain prior edits without consuming
+the builder. Once host Build begins, the builder/options are consumed even on failure. No startup
+UI is created by these APIs.
+
+The core abstraction-only `UseHostConfiguration(IConfigurationBuilder)` seam can instead stage
+an explicit host-configuration recipe. Build snapshots its source list and properties; sources
+and property values are borrowed, not deeply copied. Select either this recipe or the optional
+Environment options, not both. `UseConfiguration` remains a separate application-configuration
+phase and cannot reselect host identity. These additions remain prototypes pending API review.
+
 ### Stage application configuration through the WinForms builder
 
 The optional package supplies `builder.Configuration` as a C# 14 extension property returning an

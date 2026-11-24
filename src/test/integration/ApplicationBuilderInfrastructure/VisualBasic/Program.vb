@@ -16,6 +16,10 @@ Public Module Program
     Public Function Main(args As String()) As Integer
         Return SampleApplication.Run(args, Function(session) New InfrastructureForm(session),
             Sub(builder)
+                builder.ConfigureEnvironment(
+                    Sub(environment)
+                        environment.ApplicationName = GetType(InfrastructureForm).Assembly.GetName().Name
+                    End Sub)
                 builder.ConfigureConfiguration(
                     Sub(configuration)
                         configuration.AddJsonFile("sample-overrides.json", optional:=True, reloadOnChange:=False)

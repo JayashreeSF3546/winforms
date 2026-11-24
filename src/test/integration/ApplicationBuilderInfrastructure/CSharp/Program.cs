@@ -17,6 +17,7 @@ internal static class Program
     private static int Main(string[] args)
         => SampleApplication.Run(args, session => new InfrastructureForm(session), builder =>
         {
+            builder.Environment.ApplicationName = typeof(InfrastructureForm).Assembly.GetName().Name;
             builder.Configuration.AddJsonFile("sample-overrides.json", optional: true, reloadOnChange: false);
             builder.Logging.UseWinFormsLogging();
             builder.Logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks", LogLevel.None);
