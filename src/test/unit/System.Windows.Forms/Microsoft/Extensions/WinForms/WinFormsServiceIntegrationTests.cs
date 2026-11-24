@@ -107,10 +107,10 @@ public class WinFormsServiceIntegrationTests
                 .UseApplicationContext(() => context = new ApplicationContext())
                 .UseHost(new HostBuilder().ConfigureServices((_, services) =>
                 {
-                    services.AddSingleton<ILoggerProvider>(_ => provider);
                     services.AddSingleton<IHostedService>(_ => new CallbackHostedService(
                         stop: provider.FlushAsync));
                 }))
+                .ConfigureLogging(logging => logging.Services.AddSingleton<ILoggerProvider>(_ => provider))
                 .Build();
             ILogger logger = application.Host!.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Integration");
             using WinFormsExceptionLogging logging = WinFormsExceptionLogging.Attach(application, logger,

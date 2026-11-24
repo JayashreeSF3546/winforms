@@ -75,8 +75,11 @@ These API additions are prototypes under dotnet/winforms#14082 and remain subjec
 `HostApplicationBuilder`/`IHostApplicationBuilder` offer the broader property-based configuration
 experience, but `HostApplicationBuilder` does not publicly implement `IHostBuilder`; its adapter is
 internal in the inspected Hosting source. Do not use reflection to obtain it, accept an already-built
-host that bypasses coordination, or build a second provider. Configuration, Logging, Environment,
-and Properties on the WinForms builder remain separate future API decisions.
+host that bypasses coordination, or build a second provider. Configuration, Environment,
+and Properties on the WinForms builder remain separate future API decisions. The optional package
+now supplies the `Logging` C# 14 extension property and VB-compatible `ConfigureLogging` callback,
+both backed by the existing staged service collection. This does not add `ILoggingBuilder` or a full
+logging dependency to the WinForms framework.
 
 ## Ownership and extension boundaries
 
@@ -260,6 +263,20 @@ Reuse standard `ILogger<T>`, `ILoggerFactory`, filters, structured templates, sc
 extensions. Debug and Console providers are supported through ordinary registration. File logging
 uses an established provider with application-selected path, permissions, rotation, retention, and
 failure policy; do not invent a WinForms file logger or assume the installation directory is writable.
+
+The optional builder logging prototype supplies `builder.Logging` through a C# 14 extension property
+and `ConfigureLogging(Action<ILoggingBuilder>)` for both languages. These share the existing
+`builder.Services` collection. Reading Logging alone neither registers logging infrastructure nor
+creates providers; the selected Generic Host supplies logging services and any chosen logger factory.
+`UseWinFormsLogging` selects the standard Debug provider without changing filters, clearing other
+providers, or enabling exception collection. Explicit configuration binding, reload, structured scopes,
+and third-party destinations retain Microsoft.Extensions.Logging semantics.
+
+The existing service-composition boundary is deliberate: WinForms registrations are appended to the
+supplied host. `ClearProviders` on the WinForms builder therefore affects only staged WinForms
+registrations, not providers already selected by that host. Clear host defaults on `IHostBuilder`
+itself, and configure each provider in one location to avoid duplicates across the two collections.
+No custom timestamp formatter, file/rotation implementation, or universal async flush is added.
 
 An application explicitly selecting `Host.CreateDefaultBuilder` also selects its standard providers:
 Console, Debug, EventSource, and Windows EventLog in the inspected version. They are not all

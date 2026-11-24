@@ -15,9 +15,13 @@ namespace ApplicationBuilderInfrastructure;
 /// </summary>
 public static class SampleApplication
 {
-    public static int Run(string[] args, Func<SampleSession, Form> createForm)
+    public static int Run(
+        string[] args,
+        Func<SampleSession, Form> createForm,
+        Action<WinFormsApplicationBuilder> configureLogging)
     {
         ArgumentNullException.ThrowIfNull(createForm);
+        ArgumentNullException.ThrowIfNull(configureLogging);
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -29,11 +33,6 @@ public static class SampleApplication
                 .ConfigureHostConfiguration(configuration => configuration.AddInMemoryCollection(
                     [new("hostBuilder:reloadConfigOnChange", "false")]))
                 .ConfigureWinFormsConfiguration(args)
-                .ConfigureLogging(logging =>
-                {
-                    logging.AddDebug();
-                    logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks", LogLevel.None);
-                })
                 .ConfigureServices((context, services) =>
                 {
                     services.AddOptions<SampleOptions>()
@@ -55,9 +54,10 @@ public static class SampleApplication
                     services.AddHostedService<SampleWorker>();
                     services.Configure<HostOptions>(options => options.ShutdownTimeout = Timeout.InfiniteTimeSpan);
                 });
+            WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder().UseHost(hostBuilder);
+            configureLogging(builder);
             WinFormsApplication? application = null;
-            using (application = WinFormsApplication.CreateBuilder()
-                .UseHost(hostBuilder)
+            using (application = builder
                 .UseApplicationContext(() =>
                 {
                     session = application!.Host!.Services.GetRequiredService<SampleSession>();

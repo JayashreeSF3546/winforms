@@ -2,6 +2,8 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Windows.Forms;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.WinForms;
 
 namespace ApplicationBuilderInfrastructure.CSharp;
 
@@ -12,7 +14,11 @@ internal static class Program
 {
     [STAThread]
     private static int Main(string[] args)
-        => SampleApplication.Run(args, session => new InfrastructureForm(session));
+        => SampleApplication.Run(args, session => new InfrastructureForm(session), builder =>
+        {
+            builder.Logging.UseWinFormsLogging();
+            builder.Logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks", LogLevel.None);
+        });
 }
 
 /// <summary>

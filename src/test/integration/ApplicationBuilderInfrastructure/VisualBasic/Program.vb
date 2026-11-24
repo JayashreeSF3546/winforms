@@ -4,6 +4,8 @@
 Imports System
 Imports System.Threading.Tasks
 Imports System.Windows.Forms
+Imports Microsoft.Extensions.Logging
+Imports Microsoft.Extensions.WinForms
 
 ''' <summary>
 '''  Starts the VB front end without the Visual Basic application framework or a second message loop.
@@ -11,7 +13,14 @@ Imports System.Windows.Forms
 Public Module Program
     <STAThread>
     Public Function Main(args As String()) As Integer
-        Return SampleApplication.Run(args, Function(session) New InfrastructureForm(session))
+        Return SampleApplication.Run(args, Function(session) New InfrastructureForm(session),
+            Sub(builder)
+                builder.ConfigureLogging(
+                    Sub(logging)
+                        logging.UseWinFormsLogging()
+                        logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks", LogLevel.None)
+                    End Sub)
+            End Sub)
     End Function
 End Module
 

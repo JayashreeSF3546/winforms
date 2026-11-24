@@ -62,7 +62,8 @@ public class WinFormsExceptionLoggingTests
                     }, null);
                     return context;
                 });
-            builder.Services.AddSingleton<ILoggerProvider>(_ => provider);
+            builder.Logging.UseWinFormsLogging();
+            builder.Logging.Services.AddSingleton<ILoggerProvider>(_ => provider);
             builder.Services.AddWinFormsExceptionService((_, e) =>
             {
                 e.Exception.Should().BeSameAs(original);

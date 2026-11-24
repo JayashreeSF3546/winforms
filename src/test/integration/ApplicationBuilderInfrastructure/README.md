@@ -30,6 +30,12 @@ flush is promised. The outer caller-owned diagnostics factory outlives `Run`; th
 disposed and `DiagnosticCompletion` joined before that factory is disposed. Hosted logging is owned
 by the host. A provider failure is reported independently to stderr.
 
+The C# entry point selects Debug logging through the optional C# 14 `builder.Logging` extension
+property and `UseWinFormsLogging()`. The VB entry point uses `builder.ConfigureLogging(...)` over
+the same service collection. Both retain the explicit health-category filter and the caller-owned
+factory used to report failures after `Run`; neither adds exception subscriptions or file logging
+through provider configuration.
+
 ## Configuration and preferences
 
 - `appsettings.json` supplies the caption, bounded worker interval, and explicit offline mode.

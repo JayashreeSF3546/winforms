@@ -1,6 +1,6 @@
 # Microsoft.Extensions.WinForms.Hosting
 
-Opt-in configuration defaults, typed user settings, exception logging, scoped dialogs, and health diagnostics for the WinForms Application Builder. This is a separate application
+Opt-in configuration defaults, typed user settings, standard logging configuration, exception logging, scoped dialogs, and health diagnostics for the WinForms Application Builder. This is a separate application
 NuGet dependency, not an addition to the WindowsDesktop shared framework. Existing WinForms
 applications and the hostless Application Builder do not acquire configuration providers.
 
@@ -102,6 +102,81 @@ UI scopes support synchronous `IDisposable` cleanup, not async-only disposable s
 Use these factories only at runtime; normal parameterless Designer construction and existing
 `UseStartupForm<TForm>()` behavior are unchanged. Public scoped APIs remain prototypes pending review;
 they do not establish out-of-process Designer support.
+
+### Configure standard logging
+
+The optional package supplies `builder.Logging` as a C# 14 extension property, not a new member or
+dependency of `System.Windows.Forms.dll`. Import `Microsoft.Extensions.WinForms` for the property
+and `Microsoft.Extensions.Logging` for standard configuration methods. It returns one stable
+`ILoggingBuilder` whose `Services` is the application's existing service collection. Reading the
+property alone selects no providers, initializes no logger, and preserves hostless behavior.
+Adding logging registrations requires the usual explicit `UseHost` before Build.
+
+```csharp
+IHostBuilder hostBuilder = new HostBuilder()
+    .ConfigureWinFormsConfiguration(args)
+    .ConfigureLogging((context, logging) =>
+        logging.AddConfiguration(context.Configuration.GetSection("Logging")));
+
+WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder().UseHost(hostBuilder);
+builder.Logging.UseWinFormsLogging();
+builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
+builder.UseScopedStartupForm(services =>
+    new MainForm(services.GetRequiredService<ILogger<MainForm>>()));
+
+using WinFormsApplication application = builder.Build();
+application.Run();
+```
+
+`MainForm` is application-defined, and its explicit constructor accepts `ILogger<MainForm>`.
+Call from the owning STA after application initialization. The selected host supplies
+`ILoggerFactory` and `ILogger<T>`; the extension does not build another provider or replace a
+host-selected logger factory.
+
+VB uses the ordinary `ConfigureLogging` extension method over that same logging builder.
+The callback runs immediately; failures propagate without consuming the application builder.
+Registrations made before a callback failure remain in the collection.
+
+```vb
+builder.ConfigureLogging(
+    Sub(logging)
+        logging.UseWinFormsLogging()
+        logging.SetMinimumLevel(LogLevel.Information)
+        logging.AddFilter("Microsoft", LogLevel.Warning)
+    End Sub)
+```
+
+`UseWinFormsLogging()` opts into the standard Debug provider only. Debug output requires an attached
+debugger. Repeating the helper on the same builder does not add duplicate Debug providers.
+It preserves filters and other providers; it adds no Console, EventLog, file, network, telemetry,
+or exception subscriptions. Exception routing still requires `AddWinFormsExceptionService` with
+explicit application policy. Merely configuring destinations does not handle application failures.
+
+Standard `SetMinimumLevel`, `AddFilter`, `AddConfiguration`, `BeginScope`, structured messages,
+event IDs, provider-specific options, and application-selected providers use the host's normal
+logging pipeline. Configuration binding/reload must be explicitly selected as above; the
+configuration-only WinForms host helper does not bind logging automatically. Normal application
+log calls control their own exception/data disclosure; filters are not a redaction mechanism.
+
+**Supplied host boundary:** WinForms registrations are appended to the supplied host. Consequently,
+`builder.Logging.ClearProviders()` clears only the WinForms builder's registrations, not providers
+already configured on that host. Clear those using `hostBuilder.ConfigureLogging(logging =>
+logging.ClearProviders())` before passing the host to WinForms. Select each provider in one place:
+adding Debug independently to both the host and WinForms builder can produce duplicate registrations.
+This also applies to hosts created with `Host.CreateDefaultBuilder`, which select their own providers.
+
+File logging remains an explicit third-party provider choice. Configure its storage path, access
+permissions, rotation, retention, privacy, and failure policy; do not assume the installation directory
+is writable. Timestamp formatting is provider-specific; no custom Debug formatter or file logger
+is introduced. For example, an explicitly selected standard SimpleConsole provider supports its own
+timestamp options, but it is not installed by `UseWinFormsLogging`.
+
+Host-created providers remain alive through hosted shutdown and application-stopped diagnostics,
+then follow normal host/container disposal. Caller-supplied provider instances retain their
+documented external ownership. Standard logging failures propagate; the explicit exception adapter
+retains its separate diagnostic fallback. `ILogger` has no universal async flush contract.
+Buffered providers must finish their documented flush operation through an application-owned
+shutdown participant before host disposal; process termination cannot guarantee delivery.
 
 ### Configure the selected host
 
