@@ -4,7 +4,10 @@ Status: research and architecture recommendation for
 [dotnet/winforms#14948](https://github.com/dotnet/winforms/issues/14948).
 An internal contract prototype for dotnet/winforms#14949 is described below.
 The subsequent dotnet/winforms#14950 section records explicit scope-aware activation.
-This document does not approve or implement a public DI contract.
+The explicit scoped factory paths, UI/form lifetime types, and application UI-scope accessor are
+now public prototypes under dotnet/winforms#14082, pending API review. The optional hosting package
+also offers `AddWinFormsDialogs` over this coordinator. Earlier research and implementation sections
+below describe their original internal-prototype stage, not approval of a shipping DI contract.
 
 Parent story: [dotnet/winforms#14947](https://github.com/dotnet/winforms/issues/14947).
 Proposal: [dotnet/winforms#14082](https://github.com/dotnet/winforms/issues/14082).

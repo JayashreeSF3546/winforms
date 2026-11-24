@@ -203,6 +203,7 @@ public sealed partial class WinFormsApplicationBuilder
 
         // Application setters mutate process/thread state and cannot be rolled back after failure.
         _built = true;
+        _services?.MakeReadOnly();
         configuration.Apply();
         _startupConfiguration = null;
     }

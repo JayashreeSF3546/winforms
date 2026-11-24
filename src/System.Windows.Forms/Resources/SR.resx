@@ -165,6 +165,12 @@
   <data name="WinFormsApplication_ServiceActivationRequiresHost" xml:space="preserve">
     <value>The runtime service startup factory requires a host. Select a host builder with UseHost before building the application.</value>
   </data>
+  <data name="WinFormsApplication_ServiceRegistrationRequiresHost" xml:space="preserve">
+    <value>Service registrations require a host. Select an unbuilt host builder with UseHost before building the application.</value>
+  </data>
+  <data name="WinFormsApplication_UiScopeUnavailable" xml:space="preserve">
+    <value>The UI scope is not available. Select UseScopedStartupForm or UseScopedApplicationContext and wait for scoped startup activation before creating UI.</value>
+  </data>
   <data name="WinFormsApplication_SynchronizationContextUnavailable" xml:space="preserve">
     <value>The Windows Forms application requires automatic synchronization-context installation and either a default context or a usable WindowsFormsSynchronizationContext owned by the current thread.</value>
   </data>

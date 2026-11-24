@@ -15,8 +15,13 @@ namespace Microsoft.Extensions.WinForms;
 ///   Composition and synchronous cleanup run on the owning STA. The host provider is borrowed.
 ///   Async-only services are unsupported; container disposal failures are surfaced, not retried.
 ///  </para>
+///  <para>
+///   The application creates and owns this coordinator when scoped startup is selected. Do not dispose
+///   it independently during a run. Create fresh forms through factories rather than resolving
+///   container-owned UI. Forms must complete service-dependent cleanup before calling base.Dispose.
+///  </para>
 /// </remarks>
-internal sealed class WinFormsUiScope : IDisposable
+public sealed class WinFormsUiScope : IDisposable
 {
     private readonly Thread _ownerThread = Thread.CurrentThread;
     private readonly IServiceProvider _services;
@@ -81,7 +86,26 @@ internal sealed class WinFormsUiScope : IDisposable
         return context!;
     }
 
-    internal WinFormsFormScope CreateForm(
+    /// <summary>
+    ///  Creates and tracks an unshown form with a distinct service scope.
+    /// </summary>
+    /// <param name="factory">Creates a fresh, owning-thread form using its scoped services.</param>
+    /// <param name="owner">An active form scope from this coordinator, or null for an independent form.</param>
+    /// <returns>The lifetime owner of the form and its scoped services.</returns>
+    /// <remarks>
+    ///  <para>
+    ///   The factory must not show the form, return a container-owned form, or create it on another thread.
+    ///   Factory and cleanup failures propagate. Each form's scope is independent of its owner's DI scope;
+    ///   lifetime ownership determines cleanup ordering, not scoped-service sharing.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">The coordinator, owner, or returned form is disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  Activation is attempted on the wrong thread, at design time, or during shutdown;
+    ///  the owner belongs to another coordinator; or the returned form cannot transfer ownership.
+    /// </exception>
+    public WinFormsFormScope CreateForm(
         Func<IServiceProvider, Form> factory,
         WinFormsFormScope? owner = null)
     {
@@ -166,6 +190,16 @@ internal sealed class WinFormsUiScope : IDisposable
         _stopping = true;
     }
 
+    /// <summary>
+    ///  Disposes tracked forms and then application-scoped services on the owning thread.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   The application normally calls this during teardown. Active modal invocations retain their
+    ///   service scopes until they unwind. Cleanup failures propagate after independent forms are processed.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The calling thread does not own this coordinator.</exception>
     public void Dispose()
     {
         VerifyAccess();

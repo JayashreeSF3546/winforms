@@ -57,13 +57,26 @@ on `IHostBuilder`, `IServiceCollection`, `IConfigurationBuilder`, and `ILoggingB
 stream. Exact names, signatures, assembly placement, and provider-package dependencies need review
 in the relevant implementation issue. Third-party providers must not need WinForms internals.
 
-`HostApplicationBuilder`/`IHostApplicationBuilder` offer a useful property-based configuration
+The service-registration prototype now exposes `WinFormsApplicationBuilder.Services` as a deferred
+`IServiceCollection`. Build appends its descriptors after the selected `IHostBuilder`'s service
+configuration, preserving the existing host-factory adapter, provider factory, and shutdown barrier.
+Nonempty registrations require an explicit `UseHost`; reading an empty collection preserves hostless
+behavior. Registrations become read-only when Build consumes the builder. The coordinated application
+is available through DI as `WinFormsApplication`, without transferring its disposal ownership to DI.
+The optional package adds `AddWinFormsUserSettingsService<T>` over the existing typed JSON service
+and `AddWinFormsExceptionService` over the existing explicit exception policy and diagnostic fallback.
+Public `UseScopedStartupForm`/`UseScopedApplicationContext` factory paths and `WinFormsUiScope`/
+`WinFormsFormScope` expose the existing synchronous lifetime coordinator without changing
+parameterless startup. `WinFormsApplication.UiScope` borrows that coordinator during active scoped
+execution. `AddWinFormsDialogs` registers a replaceable `IWinFormsDialogService`; every dialog uses
+the same tracked tree with a distinct service scope and optional explicit form-scope owner.
+These API additions are prototypes under dotnet/winforms#14082 and remain subject to review.
+
+`HostApplicationBuilder`/`IHostApplicationBuilder` offer the broader property-based configuration
 experience, but `HostApplicationBuilder` does not publicly implement `IHostBuilder`; its adapter is
 internal in the inspected Hosting source. Do not use reflection to obtain it, accept an already-built
-host that bypasses coordination, or build a second provider to expose those properties. A future
-property-based WinForms builder must first reconcile the existing host-factory/barrier integration
-with the lifetime owners and be separately API-reviewed. It is not required for initial provider
-integration.
+host that bypasses coordination, or build a second provider. Configuration, Logging, Environment,
+and Properties on the WinForms builder remain separate future API decisions.
 
 ## Ownership and extension boundaries
 

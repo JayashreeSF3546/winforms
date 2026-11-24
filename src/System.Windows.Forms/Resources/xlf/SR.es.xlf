@@ -11564,6 +11564,11 @@ El seguimiento de la pila donde tuvo lugar la operación no válida fue:
         <target state="new">The runtime service startup factory requires a host. Select a host builder with UseHost before building the application.</target>
         <note />
       </trans-unit>
+      <trans-unit id="WinFormsApplication_ServiceRegistrationRequiresHost">
+        <source>Service registrations require a host. Select an unbuilt host builder with UseHost before building the application.</source>
+        <target state="new">Service registrations require a host. Select an unbuilt host builder with UseHost before building the application.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="WinFormsApplication_SingleInstanceAlreadyClaimed">
         <source>The single-instance primary lease has already been selected, transferred, or stopped.</source>
         <target state="new">The single-instance primary lease has already been selected, transferred, or stopped.</target>
@@ -11607,6 +11612,11 @@ El seguimiento de la pila donde tuvo lugar la operación no válida fue:
       <trans-unit id="WinFormsApplication_UiInitializationRegistration">
         <source>One UI initialization and cleanup pair may be registered during startup activation, the started notification, or UI dispatch, before stopping, using a standard application context without a modal, MDI, or owned main form.</source>
         <target state="new">One UI initialization and cleanup pair may be registered during startup activation, the started notification, or UI dispatch, before stopping, using a standard application context without a modal, MDI, or owned main form.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="WinFormsApplication_UiScopeUnavailable">
+        <source>The UI scope is not available. Select UseScopedStartupForm or UseScopedApplicationContext and wait for scoped startup activation before creating UI.</source>
+        <target state="new">The UI scope is not available. Select UseScopedStartupForm or UseScopedApplicationContext and wait for scoped startup activation before creating UI.</target>
         <note />
       </trans-unit>
       <trans-unit id="WinFormsApplication_UiShutdownInterrupted">

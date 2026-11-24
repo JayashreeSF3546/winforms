@@ -1,4 +1,10 @@
 #nullable enable
+Microsoft.Extensions.DependencyInjection.WinFormsServiceCollectionExtensions
+static Microsoft.Extensions.DependencyInjection.WinFormsServiceCollectionExtensions.AddWinFormsDialogs(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Microsoft.Extensions.DependencyInjection.WinFormsServiceCollectionExtensions.AddWinFormsExceptionService(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Threading.ThreadExceptionEventHandler! handleThreadException, System.Action<Microsoft.Extensions.WinForms.WinFormsLoggingFailure!>! reportLoggingFailure, System.Action<Microsoft.Extensions.WinForms.WinFormsExceptionLoggingOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Microsoft.Extensions.DependencyInjection.WinFormsServiceCollectionExtensions.AddWinFormsUserSettingsService<T>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! applicationId, int schemaVersion, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T!>! typeInfo, System.Func<T!>! createDefaults, System.Action<Microsoft.Extensions.WinForms.JsonUserSettingsOptions<T!>!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+Microsoft.Extensions.WinForms.IWinFormsDialogService
+Microsoft.Extensions.WinForms.IWinFormsDialogService.ShowDialog(System.Func<System.IServiceProvider!, System.Windows.Forms.Form!>! formFactory, Microsoft.Extensions.WinForms.WinFormsFormScope? owner = null) -> System.Windows.Forms.DialogResult
 Microsoft.Extensions.DependencyInjection.WinFormsHealthServiceCollectionExtensions
 static Microsoft.Extensions.DependencyInjection.WinFormsHealthServiceCollectionExtensions.AddWinFormsHealthDiagnostics(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder!
 Microsoft.Extensions.WinForms.WinFormsHealthDiagnostics

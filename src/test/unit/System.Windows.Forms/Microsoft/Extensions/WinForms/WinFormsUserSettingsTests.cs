@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.DotNet.RemoteExecutor;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.WinForms;
 
 namespace System.Windows.Forms.Tests;
@@ -15,6 +16,44 @@ namespace System.Windows.Forms.Tests;
 [Collection("Sequential")]
 public class WinFormsUserSettingsTests
 {
+    [WinFormsFact]
+    public async Task BuilderRegistration_UsesExistingTypedSettingsWithoutEagerStorageOrDefaults()
+    {
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("BuilderSettings-");
+        string root = Path.Combine(directory.FullName, "not-created");
+        int defaults = 0;
+        try
+        {
+            WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+                .UseApplicationContext(() => new ApplicationContext())
+                .UseHost(new HostBuilder());
+            IServiceCollection services = builder.Services;
+            services.AddWinFormsUserSettingsService("builder-settings", 1, SettingsJsonContext.Default.SettingsModel,
+                () =>
+                {
+                    defaults++;
+                    return new SettingsModel { Value = 7 };
+                }, options => options.StorageDirectory = root).Should().BeSameAs(services);
+            using WinFormsApplication application = builder.Build();
+            var settings = application.Host!.Services.GetRequiredService<IUserSettingsService<SettingsModel>>();
+            settings.Should().BeOfType<JsonUserSettingsService<SettingsModel>>();
+            application.Host.Services.GetRequiredService<IUserSettingsService<SettingsModel>>().Should().BeSameAs(settings);
+            defaults.Should().Be(0);
+            Directory.Exists(root).Should().BeFalse();
+
+            (await settings.LoadAsync(TestContext.Current.CancellationToken)).Value.Should().Be(7);
+
+            defaults.Should().Be(1);
+            UserSettingsCommit commit = await settings.SaveAsync(new() { Value = 17 }, TestContext.Current.CancellationToken);
+            await commit.NotificationCompletion;
+            (await settings.LoadAsync(TestContext.Current.CancellationToken)).Value.Should().Be(17);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("../other")]
     [InlineData("CON")]

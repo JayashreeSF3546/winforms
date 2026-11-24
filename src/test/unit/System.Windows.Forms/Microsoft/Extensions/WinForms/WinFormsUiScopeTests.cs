@@ -21,6 +21,234 @@ namespace System.Windows.Forms.Tests;
 public class WinFormsUiScopeTests
 {
     [WinFormsFact]
+    public void DialogRegistration_IsIdempotentAndPreservesApplicationReplacement()
+    {
+        Assert.Throws<ArgumentNullException>("services", () =>
+            WinFormsServiceCollectionExtensions.AddWinFormsDialogs(null!));
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+            .UseHost(new HostBuilder())
+            .UseScopedStartupForm(_ => new Form());
+        IServiceCollection services = builder.Services;
+        var replacement = Moq.Mock.Of<IWinFormsDialogService>();
+        services.AddSingleton(replacement);
+        services.AddWinFormsDialogs().Should().BeSameAs(services);
+        services.AddWinFormsDialogs();
+        using WinFormsApplication application = builder.Build();
+
+        application.Host!.Services.GetRequiredService<IWinFormsDialogService>().Should().BeSameAs(replacement);
+        services.Count(descriptor => descriptor.ServiceType == typeof(IWinFormsDialogService)).Should().Be(1);
+    }
+
+    [WinFormsFact]
+    public void DialogService_UnavailableScopeAndDisposedApplication_RejectBeforeFactory()
+    {
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+            .UseHost(new HostBuilder())
+            .UseStartupForm<Form>();
+        builder.Services.AddWinFormsDialogs();
+        using WinFormsApplication application = builder.Build();
+        var dialogs = application.Host!.Services.GetRequiredService<IWinFormsDialogService>();
+        int calls = 0;
+        Form CreateDialog(IServiceProvider _)
+        {
+            calls++;
+            return new Form();
+        }
+
+        Assert.Throws<ArgumentNullException>("formFactory", () => dialogs.ShowDialog(null!));
+        Assert.Throws<InvalidOperationException>(() => application.UiScope);
+        Assert.Throws<InvalidOperationException>(() => dialogs.ShowDialog(CreateDialog));
+        application.ActivateStartup();
+        Assert.Throws<InvalidOperationException>(() => dialogs.ShowDialog(CreateDialog));
+        application.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => application.UiScope);
+        Assert.Throws<ObjectDisposedException>(() => dialogs.ShowDialog(CreateDialog));
+        Assert.Equal(0, calls);
+    }
+
+    [WinFormsFact]
+    public void DialogService_WrongThreadStoppingAndForeignOwner_RejectBeforeFactory()
+    {
+        List<string> log = [];
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+            .UseHost(new HostBuilder())
+            .UseScopedApplicationContext((_, scopes) => new ApplicationContext(CreateForm(scopes, "main").Form));
+        builder.Services.AddSingleton(new DisposalLog(log));
+        builder.Services.AddSingleton<RootDependency>();
+        builder.Services.AddScoped<Dependency>();
+        builder.Services.AddWinFormsDialogs();
+        using WinFormsApplication application = builder.Build();
+        var dialogs = application.Host!.Services.GetRequiredService<IWinFormsDialogService>();
+        Assert.Throws<InvalidOperationException>(() => application.UiScope);
+        application.ActivateStartup();
+        WinFormsUiScope uiScope = application.UiScope;
+        int calls = 0;
+        Form CreateDialog(IServiceProvider _)
+        {
+            calls++;
+            return new Form();
+        }
+
+        RunOnSta(() =>
+        {
+            Assert.Throws<InvalidOperationException>(() => application.UiScope);
+            Assert.Throws<InvalidOperationException>(() => dialogs.ShowDialog(CreateDialog));
+        });
+        using WinFormsUiScope otherApplication = new(application.Host.Services);
+        WinFormsFormScope foreignOwner = CreateForm(otherApplication, "foreign");
+        Assert.Throws<InvalidOperationException>(() => dialogs.ShowDialog(CreateDialog, foreignOwner));
+        uiScope.BeginStopping();
+        Assert.Throws<InvalidOperationException>(() => application.UiScope);
+        Assert.Throws<InvalidOperationException>(() => dialogs.ShowDialog(CreateDialog));
+        Assert.Equal(0, calls);
+        otherApplication.Dispose();
+    }
+
+    [WinFormsFact]
+    public void DialogService_FactoryAndCleanupFailures_PreserveBothAndAllowFurtherActivation()
+    {
+        List<string> log = [];
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+            .UseHost(new HostBuilder())
+            .UseScopedApplicationContext((_, scopes) => new ApplicationContext(CreateForm(scopes, "main").Form));
+        builder.Services.AddSingleton(new DisposalLog(log));
+        builder.Services.AddSingleton<RootDependency>();
+        builder.Services.AddScoped<Dependency>();
+        builder.Services.AddWinFormsDialogs();
+        using WinFormsApplication application = builder.Build();
+        application.ActivateStartup();
+        var dialogs = application.Host!.Services.GetRequiredService<IWinFormsDialogService>();
+        InvalidOperationException original = new("Dialog construction failed.");
+        InvalidOperationException cleanup = new("Dialog scope disposal failed.");
+        Dependency? dependency = null;
+
+        AggregateException failure = Assert.Throws<AggregateException>(() => dialogs.ShowDialog(services =>
+        {
+            dependency = services.GetRequiredService<Dependency>();
+            dependency.DisposeFailure = cleanup;
+            throw original;
+        }));
+
+        Assert.Equal<Exception>([original, cleanup], failure.InnerExceptions);
+        Assert.Equal(1, dependency!.DisposeCount);
+        using WinFormsFormScope next = CreateForm(application.UiScope, "next");
+        Assert.False(next.Form.IsDisposed);
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    public void DialogService_RealRun_IsolatesScopesAndRetainsOwnerUntilModalReturn(
+        bool componentManager, bool disposeOwnerDuringModal, bool owned)
+    {
+        using AppContextSwitchScope switchScope = new("Switch.System.Windows.Forms.EnableMsoComponentManager", componentManager);
+        RunOnSta(() =>
+        {
+            List<string> log = [];
+            ScopedForm? main = null;
+            Dependency? applicationDependency = null;
+            Dependency? dialogDependency = null;
+            Exception? callbackFailure = null;
+            WinFormsApplication? application = null;
+            WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+                .UseHost(new HostBuilder())
+                .UseScopedApplicationContext((services, scopes) =>
+                {
+                    Assert.Same(scopes, application!.UiScope);
+                    applicationDependency = services.GetRequiredService<Dependency>();
+                    applicationDependency.Name = "application";
+                    var dialogs = services.GetRequiredService<IWinFormsDialogService>();
+                    Assert.Same(dialogs, application.Host!.Services.GetRequiredService<IWinFormsDialogService>());
+                    WinFormsFormScope owner = CreateForm(scopes, "main");
+                    main = (ScopedForm)owner.Form;
+                    main.Shown += (_, _) => main.BeginInvoke(() =>
+                    {
+                        try
+                        {
+                            int dialogCount = disposeOwnerDuringModal ? 1 : 2;
+                            for (int i = 0; i < dialogCount; i++)
+                            {
+                                Dependency? previous = dialogDependency;
+                                ScopedForm? dialog = null;
+                                DialogResult result = dialogs.ShowDialog(provider =>
+                                {
+                                    dialogDependency = provider.GetRequiredService<Dependency>();
+                                    Assert.NotSame(previous, dialogDependency);
+                                    Assert.NotSame(applicationDependency, dialogDependency);
+                                    Assert.NotSame(main.Dependency, dialogDependency);
+                                    dialog = new ScopedForm(dialogDependency, "dialog");
+                                    dialog.Shown += (_, _) => dialog.BeginInvoke(() =>
+                                    {
+                                        try
+                                        {
+                                            Assert.Same(owned ? main : null, dialog.Owner);
+                                            if (disposeOwnerDuringModal)
+                                            {
+                                                owner.Dispose();
+                                                Assert.Equal(0, main.Dependency.DisposeCount);
+                                                Assert.Equal(0, dialogDependency.DisposeCount);
+                                            }
+                                            else
+                                            {
+                                                dialog.DialogResult = DialogResult.OK;
+                                            }
+                                        }
+                                        catch (Exception exception)
+                                        {
+                                            callbackFailure = exception;
+                                            dialog.Close();
+                                        }
+                                    });
+                                    return dialog;
+                                }, owned ? owner : null);
+                                Assert.True(dialog!.IsDisposed);
+                                Assert.Equal(1, dialogDependency!.DisposeCount);
+                                Assert.Equal(disposeOwnerDuringModal ? 1 : 0, main.Dependency.DisposeCount);
+                                Assert.Equal(0, applicationDependency.DisposeCount);
+                                if (!disposeOwnerDuringModal)
+                                {
+                                    Assert.Equal(DialogResult.OK, result);
+                                }
+                            }
+                        }
+                        catch (Exception exception)
+                        {
+                            callbackFailure ??= exception;
+                        }
+                        finally
+                        {
+                            main.Close();
+                        }
+                    });
+                    return new ApplicationContext(main);
+                });
+            builder.Services.AddSingleton(new DisposalLog(log));
+            builder.Services.AddSingleton<RootDependency>();
+            builder.Services.AddScoped<Dependency>();
+            builder.Services.AddWinFormsDialogs();
+            using (application = builder.Build())
+            {
+                application.Run(TestContext.Current.CancellationToken);
+            }
+
+            if (callbackFailure is not null)
+            {
+                ExceptionDispatchInfo.Throw(callbackFailure);
+            }
+
+            Assert.Equal(1, main!.Dependency.DisposeCount);
+            Assert.Equal(1, applicationDependency!.DisposeCount);
+            Assert.True(log.IndexOf("dialog service") < log.IndexOf("main service"));
+            Assert.True(log.IndexOf("main service") < log.IndexOf("application service"));
+            Assert.Equal("host", log[^1]);
+        });
+    }
+
+    [WinFormsFact]
     public void DirectDispose_ReleasesFormScopeAfterBorrowingControlsAndComponents()
     {
         List<string> log = [];

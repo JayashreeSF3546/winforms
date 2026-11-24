@@ -38,6 +38,7 @@ internal sealed class WinFormsApplicationHost(IHost inner, WinFormsApplication a
             services.Remove(descriptor);
             services.AddSingleton<IHost>(provider =>
                 adapter = new WinFormsApplicationHost((IHost)factory(provider), application));
+            services.AddSingleton(application);
             services.AddSingleton<IHostedService>(new WinFormsHostStopBarrier(application));
         });
 

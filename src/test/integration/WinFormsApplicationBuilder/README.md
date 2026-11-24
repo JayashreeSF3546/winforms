@@ -55,6 +55,8 @@ $env:DOTNET_ROOT = Join-Path $PWD '.dotnet'
 
 `background` needs no form activation through DI: the sample registers only its background service.
 The real host is supplied with `UseHost(IHostBuilder)` and remains driven by the application.
+The C# background scenario uses `builder.Services` to register its worker directly; these
+registrations join the selected host's container and retain its lifetime ownership.
 Do not also call `Host.RunAsync` or start another message loop.
 
 Never synchronously wait for a stop task in a UI event handler, or capture a continuation to a

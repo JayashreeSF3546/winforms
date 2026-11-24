@@ -16,6 +16,123 @@ namespace System.Windows.Forms.Tests;
 [Collection("Sequential")]
 public class WinFormsExceptionLoggingTests
 {
+    [Fact]
+    public void ServiceRegistration_InvalidArgumentsOrConfiguration_DoesNotRegisterServices()
+    {
+        IServiceCollection services = new ServiceCollection();
+        ThreadExceptionEventHandler handler = (_, _) => { };
+        Action<WinFormsLoggingFailure> fallback = _ => { };
+        Assert.Throws<ArgumentNullException>("services", () =>
+            WinFormsServiceCollectionExtensions.AddWinFormsExceptionService(null!, handler, fallback));
+        Assert.Throws<ArgumentNullException>("handleThreadException", () =>
+            services.AddWinFormsExceptionService(null!, fallback));
+        Assert.Throws<ArgumentNullException>("reportLoggingFailure", () =>
+            services.AddWinFormsExceptionService(handler, null!));
+        InvalidOperationException expected = new("Configuration failed.");
+        Assert.Throws<InvalidOperationException>(() =>
+            services.AddWinFormsExceptionService(handler, fallback, _ => throw expected)).Should().BeSameAs(expected);
+        services.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ServiceRegistration_RealRun_ActivatesOnceAndPreservesLifetimeAndStartupFailures(bool failStartup)
+    {
+        RunOnThread(() =>
+        {
+            RecordingProvider provider = new();
+            InvalidOperationException original = new("Startup or UI failure.");
+            int handled = 0;
+            WinFormsExceptionLoggingOptions? configured = null;
+            WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+                .UseHost(new HostBuilder())
+                .UseApplicationContext(() =>
+                {
+                    if (failStartup)
+                    {
+                        throw original;
+                    }
+
+                    ApplicationContext context = new();
+                    SynchronizationContext.Current!.Post(_ =>
+                    {
+                        Application.OnThreadException(original);
+                        context.ExitThread();
+                    }, null);
+                    return context;
+                });
+            builder.Services.AddSingleton<ILoggerProvider>(_ => provider);
+            builder.Services.AddWinFormsExceptionService((_, e) =>
+            {
+                e.Exception.Should().BeSameAs(original);
+                handled++;
+            }, failure => throw new InvalidOperationException("Unexpected logging failure.", failure.Exception),
+                options => configured = options).Should().BeSameAs(builder.Services);
+            builder.Services.AddWinFormsExceptionService((_, _) =>
+                throw new InvalidOperationException("The second registration must not replace the first."),
+                _ => throw new InvalidOperationException("Unexpected logging failure."));
+            configured!.IncludeExceptionDetails = true;
+            using WinFormsApplication application = builder.Build();
+            provider.Disposed.Should().BeFalse();
+
+            if (failStartup)
+            {
+                Assert.Throws<InvalidOperationException>(() => application.Run(TestContext.Current.CancellationToken))
+                    .Should().BeSameAs(original);
+            }
+            else
+            {
+                application.Run(TestContext.Current.CancellationToken);
+            }
+
+            handled.Should().Be(failStartup ? 0 : 1);
+            provider.Disposed.Should().BeTrue();
+            provider.SourcesAtDisposal.Should().Equal(failStartup
+                ? [WinFormsDiagnosticSource.ApplicationStopping, WinFormsDiagnosticSource.ApplicationStopped]
+                : [WinFormsDiagnosticSource.ApplicationStarted, WinFormsDiagnosticSource.ThreadException,
+                    WinFormsDiagnosticSource.ApplicationStopping, WinFormsDiagnosticSource.ApplicationStopped]);
+            var logger = (RecordingLogger)provider.CreateLogger("test");
+            logger.Entries.Should().OnlyContain(entry => entry.Exception == null);
+        });
+    }
+
+    [Fact]
+    public void ServiceRegistration_DiagnosticFallbackFailure_PropagatesAfterCleanup()
+    {
+        RunOnThread(() =>
+        {
+            RecordingProvider provider = new();
+            var logger = (RecordingLogger)provider.CreateLogger("test");
+            IOException providerFailure = new("Logging failed.");
+            ArgumentException fallbackFailure = new("Fallback failed.");
+            WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+                .UseHost(new HostBuilder())
+                .UseApplicationContext(() =>
+                {
+                    ApplicationContext context = new();
+                    SynchronizationContext.Current!.Post(_ =>
+                    {
+                        logger.Failure = providerFailure;
+                        Application.OnThreadException(new InvalidOperationException("UI failure."));
+                        logger.Failure = null;
+                        context.ExitThread();
+                    }, null);
+                    return context;
+                });
+            builder.Services.AddSingleton<ILoggerProvider>(_ => provider);
+            builder.Services.AddWinFormsExceptionService((_, _) => { }, _ => throw fallbackFailure);
+            using WinFormsApplication application = builder.Build();
+
+            AggregateException failure = Assert.Throws<AggregateException>(() =>
+                application.Run(TestContext.Current.CancellationToken));
+
+            failure.Flatten().InnerExceptions.Should().Contain(providerFailure).And.Contain(fallbackFailure);
+            provider.Disposed.Should().BeTrue();
+            provider.SourcesAtDisposal.Should().Contain(WinFormsDiagnosticSource.ApplicationStopped);
+        });
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

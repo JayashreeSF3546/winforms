@@ -70,9 +70,9 @@ internal static class Program
                 builder.UseApplicationContext(() => context = new SwitchingContext());
                 break;
             case "background":
-                builder.UseHost(new HostBuilder().ConfigureServices((_, services) =>
-                    services.AddSingleton<IHostedService>(provider => new SampleWorker(
-                        provider.GetRequiredService<IHostApplicationLifetime>(), uiReady.Task, smoke))));
+                builder.UseHost(new HostBuilder());
+                builder.Services.AddSingleton<IHostedService>(provider => new SampleWorker(
+                    provider.GetRequiredService<IHostApplicationLifetime>(), uiReady.Task, smoke));
                 builder.UseApplicationContext(() => new ApplicationContext(new MainForm(
                     "Background work stops the host after five updates. Close early to cancel it.",
                     "Close window",

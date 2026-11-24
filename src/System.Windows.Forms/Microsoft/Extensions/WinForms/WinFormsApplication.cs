@@ -210,6 +210,33 @@ public sealed class WinFormsApplication : IDisposable
     /// </remarks>
     public IHost? Host => _host;
 
+    /// <summary>
+    ///  Gets the application-owned UI scope during scoped startup and execution.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   Select UseScopedStartupForm or UseScopedApplicationContext on the builder. Access this
+    ///   coordinator on the owning thread after scoped activation begins and before stopping.
+    ///   Do not dispose the application-owned coordinator independently during a run.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The application or its UI scope is disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  Scoped startup has not activated, the calling thread does not own the application, or stopping has begun.
+    /// </exception>
+    public WinFormsUiScope UiScope
+    {
+        get
+        {
+            VerifyAccess();
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            WinFormsUiScope scope = _uiScopes
+                ?? throw new InvalidOperationException(SR.WinFormsApplication_UiScopeUnavailable);
+            scope.VerifyCanActivate();
+            return scope;
+        }
+    }
+
     internal bool IsRunning => Volatile.Read(ref _running);
 
     internal void SetHost(WinFormsApplicationHost host)

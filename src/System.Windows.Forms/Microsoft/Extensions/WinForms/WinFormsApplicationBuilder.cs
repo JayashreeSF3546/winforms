@@ -4,6 +4,7 @@
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Windows.Forms;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace Microsoft.Extensions.WinForms;
@@ -29,6 +30,7 @@ public sealed partial class WinFormsApplicationBuilder
     private Func<IServiceProvider, Form>? _serviceFormFactory;
     private Func<IServiceProvider, WinFormsUiScope, ApplicationContext>? _scopedContextFactory;
     private IHostBuilder? _hostBuilder;
+    private ServiceCollection? _services;
     private WinFormsApplicationFeatures? _features;
     private WinFormsSingleInstance? _singleInstance;
     private EventHandler<WinFormsNextInstanceRequest>? _nextInstance;
@@ -36,6 +38,29 @@ public sealed partial class WinFormsApplicationBuilder
 
     internal WinFormsApplicationBuilder()
     {
+    }
+
+    /// <summary>
+    ///  Gets the services to add to the application's selected host.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   Select an unbuilt host with <see cref="UseHost"/> before building an application with service registrations.
+    ///   Registrations are appended after the host builder's own service configuration and become read-only
+    ///   when Build consumes the builder. Access this property on the builder's owning thread before Build.
+    ///   Reading an empty collection does not enable hosting.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    ///  The builder has been built or the calling thread does not own it.
+    /// </exception>
+    public IServiceCollection Services
+    {
+        get
+        {
+            VerifyCanConfigure();
+            return _services ??= new ServiceCollection();
+        }
     }
 
     /// <summary>
@@ -186,18 +211,53 @@ public sealed partial class WinFormsApplicationBuilder
     }
 
     /// <summary>
-    ///  Selects opt-in, synchronous scoped activation with base-last form disposal.
+    ///  Selects a startup form factory with its own dependency injection scope.
     /// </summary>
-    internal WinFormsApplicationBuilder UseScopedStartupForm(Func<IServiceProvider, Form> formFactory)
+    /// <param name="formFactory">
+    ///  Creates a fresh, unshown form on the owning STA using its form-scoped services.
+    /// </param>
+    /// <returns>This builder.</returns>
+    /// <remarks>
+    ///  <para>
+    ///   Select a host with <see cref="UseHost"/> before Build. The factory runs after host startup
+    ///   and synchronization-context installation, not during Build. Construct the form explicitly;
+    ///   do not return a container-owned or previously scoped form.
+    ///  </para>
+    ///  <para>
+    ///   Forms must perform service-dependent cleanup before calling base.Dispose. UI scopes use
+    ///   synchronous disposal; async-only disposable services are unsupported.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="formFactory"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  Startup UI is already selected, the builder has been built, or the calling thread does not own it.
+    /// </exception>
+    public WinFormsApplicationBuilder UseScopedStartupForm(Func<IServiceProvider, Form> formFactory)
     {
         ArgumentNullException.ThrowIfNull(formFactory);
         return UseScopedApplicationContext((_, scopes) => new ApplicationContext(scopes.CreateForm(formFactory).Form));
     }
 
     /// <summary>
-    ///  Selects an application-scope context factory and explicit form lifetime coordinator.
+    ///  Selects a context factory with application-scoped services and explicit form lifetime management.
     /// </summary>
-    internal WinFormsApplicationBuilder UseScopedApplicationContext(
+    /// <param name="contextFactory">
+    ///  Creates a fresh context on the owning STA. Create its main form through the supplied UI scope.
+    /// </param>
+    /// <returns>This builder.</returns>
+    /// <remarks>
+    ///  <para>
+    ///   Select a host with <see cref="UseHost"/> before Build. The factory is deferred until startup
+    ///   activation. The application owns the context and UI scope. Each form created through the
+    ///   coordinator has a separate service scope; it does not inherit application-scoped instances.
+    ///   Forms require base-last disposal, and async-only disposable scoped services are unsupported.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="contextFactory"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  Startup UI is already selected, the builder has been built, or the calling thread does not own it.
+    /// </exception>
+    public WinFormsApplicationBuilder UseScopedApplicationContext(
         Func<IServiceProvider, WinFormsUiScope, ApplicationContext> contextFactory)
     {
         ArgumentNullException.ThrowIfNull(contextFactory);
@@ -240,6 +300,11 @@ public sealed partial class WinFormsApplicationBuilder
             throw new InvalidOperationException(SR.WinFormsApplication_ServiceActivationRequiresHost);
         }
 
+        if (_services is { Count: > 0 } && _hostBuilder is null)
+        {
+            throw new InvalidOperationException(SR.WinFormsApplication_ServiceRegistrationRequiresHost);
+        }
+
         if (_startupForm is not null)
         {
             WinFormsApplicationOptions.ValidateStartupForm(_startupForm);
@@ -253,6 +318,18 @@ public sealed partial class WinFormsApplicationBuilder
         {
             // Generic Host build is single-use, including when its build operation fails.
             _built = true;
+            _services?.MakeReadOnly();
+            if (_services is { Count: > 0 } services)
+            {
+                _hostBuilder.ConfigureServices((_, hostServices) =>
+                {
+                    foreach (ServiceDescriptor descriptor in services)
+                    {
+                        hostServices.Add(descriptor);
+                    }
+                });
+            }
+
             WinFormsApplicationHost adapter = WinFormsApplicationHost.Build(_hostBuilder, application);
             try
             {
@@ -266,6 +343,7 @@ public sealed partial class WinFormsApplicationBuilder
         }
 
         _built = true;
+        _services?.MakeReadOnly();
         try
         {
             application.AttachSingleInstance(_singleInstance, _nextInstance);

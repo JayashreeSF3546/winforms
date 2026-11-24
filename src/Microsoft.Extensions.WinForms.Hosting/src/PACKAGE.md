@@ -1,6 +1,6 @@
 # Microsoft.Extensions.WinForms.Hosting
 
-Opt-in configuration defaults, typed user settings, exception logging, and health diagnostics for the WinForms Application Builder. This is a separate application
+Opt-in configuration defaults, typed user settings, exception logging, scoped dialogs, and health diagnostics for the WinForms Application Builder. This is a separate application
 NuGet dependency, not an addition to the WindowsDesktop shared framework. Existing WinForms
 applications and the hostless Application Builder do not acquire configuration providers.
 
@@ -15,6 +15,95 @@ Builder prototype in the framework/runtime, not just this package. The framework
 is referenced privately for compilation; it is not bundled or added as a fictitious NuGet dependency.
 
 ## Configure an application
+
+### Register services through the WinForms builder
+
+`WinFormsApplicationBuilder.Services` accepts standard Microsoft.Extensions.DependencyInjection
+registrations and the optional desktop helpers below. Keep the unbuilt `UseHost` selection:
+registrations are appended to that host's service collection, not a second service provider.
+The collection becomes read-only when Build consumes the builder. Merely reading an empty
+collection does not enable hosting; nonempty registrations without `UseHost` fail at Build.
+
+```csharp
+WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+    .UseHost(new HostBuilder().ConfigureWinFormsConfiguration(args))
+    .UseStartupForm<MainForm>();
+
+builder.Services.AddWinFormsUserSettingsService(
+    "MyDesktopApplication", 1, PreferencesJsonContext.Default.Preferences,
+    () => new Preferences());
+builder.Services.AddWinFormsExceptionService(
+    (_, arguments) => HandleUiException(arguments.Exception),
+    failure => ReportLoggingFailure(failure));
+builder.Services.AddHostedService<RefreshWorker>();
+
+using WinFormsApplication application = builder.Build();
+application.Run();
+```
+
+`Preferences`, `PreferencesJsonContext`, `RefreshWorker`, `MainForm`, and the two policy callbacks
+are application-defined. The settings helper delegates to `AddJsonUserSettings` and retains its
+explicit loading, saving, migration, identity, and serialization requirements. The exception
+helper activates the existing `WinFormsExceptionLogging` with the host before startup UI, then
+removes subscriptions with application teardown. Repeated exception registrations retain the first
+policy. Configure logging destinations on the host as usual; this helper does not choose providers
+or change `Application.SetUnhandledExceptionMode`. Do not also call `WinFormsExceptionLogging.Attach`
+for the same application. Diagnostic fallback failures propagate after UI cleanup.
+
+These are additions to the prototype API and remain subject to API review.
+
+### Activate forms and dialogs with scoped services
+
+Use explicit factories to select constructor injection without changing service-free startup.
+`UseScopedStartupForm(services => new MainForm(...))` creates a dedicated startup-form scope.
+`UseScopedApplicationContext` additionally supplies application-scoped services and the public
+`WinFormsUiScope` coordinator for navigation, independent windows, and explicit owner scopes:
+
+```csharp
+WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+    .UseHost(new HostBuilder());
+builder.Services.AddScoped<EditorSession>();
+builder.Services.AddWinFormsDialogs();
+builder.UseScopedApplicationContext((services, scopes) =>
+{
+    IWinFormsDialogService dialogs = services.GetRequiredService<IWinFormsDialogService>();
+    WinFormsFormScope main = scopes.CreateForm(provider =>
+        new MainForm(provider.GetRequiredService<EditorSession>()));
+    ((MainForm)main.Form).SettingsRequested += (_, _) =>
+        dialogs.ShowDialog(provider =>
+            new SettingsForm(provider.GetRequiredService<EditorSession>()), main);
+    return new ApplicationContext(main.Form);
+});
+
+using WinFormsApplication application = builder.Build();
+application.Run();
+```
+
+`MainForm`, its `SettingsRequested` event, `SettingsForm`, and `EditorSession` are application-defined.
+Each form/dialog receives a separate scope, not the owner's scoped instances. Pass shared typed
+collaborators explicitly when sharing is intentional. Factories must construct fresh, unshown
+forms; do not resolve container-owned forms from DI. `WinFormsFormScope.Assign` can initialize
+existing designer-created children with their form's typed dependencies without replacing them.
+
+`WinFormsFormScope.Show` supports modeless windows. `ShowDialog` disposes the dialog and its scope
+when the modal invocation returns or fails; owner services stay alive until modal descendants
+unwind. Hiding a window, recreating its handle, or canceling closing does not dispose its scope.
+`WinFormsApplication.UiScope` exposes the same application-owned coordinator on the owning STA
+during scoped activation/execution; it is unavailable before activation, without scoped startup,
+or during shutdown. Do not independently dispose that application-owned coordinator during a run.
+
+`AddWinFormsDialogs` registers a replaceable singleton without creating UI, scopes, or another
+provider. Calls use the application's existing coordinator and reject wrong-thread, stopping,
+disposed, or foreign-owner usage before invoking the factory. A pre-registered
+`IWinFormsDialogService` replacement is preserved.
+
+**Lifetime constraints:** forms must finish service-dependent disposal before `base.Dispose`.
+UI scopes support synchronous `IDisposable` cleanup, not async-only disposable services.
+Use these factories only at runtime; normal parameterless Designer construction and existing
+`UseStartupForm<TForm>()` behavior are unchanged. Public scoped APIs remain prototypes pending review;
+they do not establish out-of-process Designer support.
+
+### Configure the selected host
 
 Call `ConfigureWinFormsConfiguration` once on a fresh `HostBuilder`, before customizations. Do not
 combine it with `Host.CreateDefaultBuilder` or `ConfigureDefaults`: those already install providers.

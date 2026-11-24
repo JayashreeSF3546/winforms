@@ -17,7 +17,7 @@ namespace Microsoft.Extensions.WinForms;
 ///   the invocation unwinds, so no child scope can outlive its logical parent scope.
 ///  </para>
 /// </remarks>
-internal sealed class WinFormsFormScope : IDisposable
+public sealed class WinFormsFormScope : IDisposable
 {
     private static readonly int s_propAssignmentOwner = PropertyStore.CreateKey();
     private readonly object _assignmentOwner = new();
@@ -44,9 +44,35 @@ internal sealed class WinFormsFormScope : IDisposable
         form.RuntimeDispose = DisposeFromForm;
     }
 
-    internal Form Form { get; }
+    /// <summary>
+    ///  Gets the form owned by this scope.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   Access UI only on its owning thread. The form remains available for inspection after disposal.
+    ///  </para>
+    /// </remarks>
+    public Form Form { get; }
 
-    internal void Assign<TComponent>(
+    /// <summary>
+    ///  Explicitly initializes an existing component using the form's scoped services.
+    /// </summary>
+    /// <typeparam name="TComponent">The existing control or component type.</typeparam>
+    /// <param name="component">The component that borrows this form's services.</param>
+    /// <param name="assignServices">Assigns typed dependencies after the component's construction.</param>
+    /// <remarks>
+    ///  <para>
+    ///   The component retains its existing UI ownership and must not dispose borrowed services.
+    ///   The callback defines its initialization contract, including rejecting repeated initialization.
+    ///   Callback failures propagate without disposing the caller-owned component.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ObjectDisposedException">The form scope, component, or application scope is disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  The component has another owner, or runtime assignment is unavailable on this thread or during shutdown.
+    /// </exception>
+    public void Assign<TComponent>(
         TComponent component,
         Action<TComponent, IServiceProvider> assignServices)
         where TComponent : class, IComponent
@@ -73,7 +99,20 @@ internal sealed class WinFormsFormScope : IDisposable
         VerifyActive();
     }
 
-    internal void Show()
+    /// <summary>
+    ///  Shows the form modelessly with its explicit owner, when selected.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   Hiding the form, recreating its handle, or canceling a close does not release its services.
+    ///   The scope ends with actual form disposal or application teardown.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">This form scope or its owner is disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  The caller is not the owning thread, the application is stopping, or the form is already modal.
+    /// </exception>
+    public void Show()
     {
         VerifyCanShow();
         List<Exception> failures = [];
@@ -96,7 +135,21 @@ internal sealed class WinFormsFormScope : IDisposable
         }
     }
 
-    internal DialogResult ShowDialog()
+    /// <summary>
+    ///  Shows the form modally and disposes it and its service scope when the invocation unwinds.
+    /// </summary>
+    /// <returns>The form's modal result.</returns>
+    /// <remarks>
+    ///  <para>
+    ///   Invoke on the owning STA. Modal UI and cleanup failures propagate. Disposed owners retain
+    ///   their services until their active modal descendants unwind.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">This form scope or its owner is disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///  The caller is not the owning thread, the application is stopping, or the form cannot be shown modally.
+    /// </exception>
+    public DialogResult ShowDialog()
     {
         VerifyCanShow();
         List<Exception> failures = [];
@@ -176,6 +229,17 @@ internal sealed class WinFormsFormScope : IDisposable
         WinFormsUiScope.ThrowFailures(failures);
     }
 
+    /// <summary>
+    ///  Disposes descendant forms, this form, and then its scoped services on the owning thread.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   Disposal is idempotent. Active modal invocations retain scoped services until they unwind.
+    ///   Forms must complete service-dependent cleanup before calling base.Dispose.
+    ///   UI and service cleanup failures propagate without retrying container disposal.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The calling thread does not own this form scope.</exception>
     public void Dispose()
     {
         _application.VerifyAccess();

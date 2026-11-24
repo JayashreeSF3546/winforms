@@ -1,6 +1,8 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.WinForms;
 
 namespace System.Windows.Forms.Tests;
@@ -10,6 +12,101 @@ namespace System.Windows.Forms.Tests;
 /// </summary>
 public class WinFormsApplicationBuilderTests
 {
+    [Fact]
+    public void Services_EmptyCollection_PreservesHostlessBuildAndBecomesReadOnly()
+    {
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+            .UseApplicationContext(() => new ApplicationContext());
+        IServiceCollection services = builder.Services;
+        builder.Services.Should().BeSameAs(services);
+
+        using WinFormsApplication application = builder.Build();
+
+        application.Host.Should().BeNull();
+        services.IsReadOnly.Should().BeTrue();
+        Assert.Throws<InvalidOperationException>(() => services.AddSingleton(new object()));
+        Assert.Throws<InvalidOperationException>(() => builder.Services);
+    }
+
+    [Fact]
+    public void Services_WithoutHost_RejectsBuildWithoutConsumingRegistrations()
+    {
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+            .UseApplicationContext(() => new ApplicationContext());
+        object expected = new();
+        IServiceCollection services = builder.Services;
+        services.AddSingleton(expected);
+
+        Assert.Throws<InvalidOperationException>(() => builder.Build());
+
+        services.IsReadOnly.Should().BeFalse();
+        builder.UseHost(new HostBuilder());
+        using WinFormsApplication application = builder.Build();
+        application.Host!.Services.GetRequiredService<object>().Should().BeSameAs(expected);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Services_UseSelectedHost_AppendRegistrationsAndShareProviderOwnership(bool selectHostFirst)
+    {
+        int created = 0;
+        TrackingService? service = null;
+        IHostBuilder hostBuilder = new HostBuilder().ConfigureServices(services =>
+            services.AddSingleton<object>(new object()));
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+            .UseApplicationContext(() => new ApplicationContext());
+        if (selectHostFirst)
+        {
+            builder.UseHost(hostBuilder);
+        }
+
+        IServiceCollection registrations = builder.Services;
+        object expected = new();
+        registrations.AddSingleton(expected);
+        registrations.AddSingleton(_ =>
+        {
+            created++;
+            return service = new TrackingService();
+        });
+        if (!selectHostFirst)
+        {
+            builder.UseHost(hostBuilder);
+        }
+
+        using WinFormsApplication application = builder.Build();
+        created.Should().Be(0);
+        registrations.IsReadOnly.Should().BeTrue();
+        IServiceProvider provider = application.Host!.Services;
+        provider.GetRequiredService<object>().Should().BeSameAs(expected);
+        provider.GetServices<object>().Should().HaveCount(2);
+        provider.GetRequiredService<IHost>().Should().BeSameAs(application.Host);
+        provider.GetRequiredService<WinFormsApplication>().Should().BeSameAs(application);
+        provider.GetRequiredService<TrackingService>().Should().BeSameAs(service);
+        provider.GetRequiredService<TrackingService>().Should().BeSameAs(service);
+        created.Should().Be(1);
+
+        application.Dispose();
+        service!.DisposeCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void Services_HostBuildFailure_FreezesRetainedCollectionAndConsumesBuilder()
+    {
+        InvalidOperationException expected = new("Host build failed.");
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+            .UseApplicationContext(() => new ApplicationContext())
+            .UseHost(new HostBuilder().ConfigureServices((_, _) => throw expected));
+        IServiceCollection services = builder.Services;
+        services.AddSingleton(new object());
+
+        Assert.Throws<InvalidOperationException>(() => builder.Build()).Should().BeSameAs(expected);
+
+        services.IsReadOnly.Should().BeTrue();
+        Assert.Throws<InvalidOperationException>(() => services.Clear());
+        Assert.Throws<InvalidOperationException>(() => builder.Build());
+    }
+
     [WinFormsFact]
     public void Build_GenericStartup_IsDeferredAndActivatedOnce()
     {
@@ -304,6 +401,7 @@ public class WinFormsApplicationBuilderTests
         {
             exceptions.Add(Record.Exception(() => unbuilt.Build()));
             exceptions.Add(Record.Exception(() => unbuilt.UseStartupForm<Form>()));
+            exceptions.Add(Record.Exception(() => unbuilt.Services));
             exceptions.Add(Record.Exception(() => application.ActivateStartup()));
             exceptions.Add(Record.Exception(() => application.Dispose()));
             exceptions.Add(Record.Exception(() => application.Run(TestContext.Current.CancellationToken)));
@@ -312,7 +410,7 @@ public class WinFormsApplicationBuilderTests
         thread.Start();
         thread.Join();
 
-        exceptions.Should().HaveCount(5);
+        exceptions.Should().HaveCount(6);
         exceptions.Should().AllBeOfType<InvalidOperationException>();
         using WinFormsApplication secondApplication = unbuilt.Build();
         application.ActivateStartup();
@@ -351,6 +449,16 @@ public class WinFormsApplicationBuilderTests
                 builder.UseApplicationContext(() => new ApplicationContext());
                 break;
         }
+    }
+
+    /// <summary>
+    ///  Tracks disposal of a singleton created by the application's provider.
+    /// </summary>
+    private sealed class TrackingService : IDisposable
+    {
+        internal int DisposeCount { get; private set; }
+
+        public void Dispose() => DisposeCount++;
     }
 
     /// <summary>

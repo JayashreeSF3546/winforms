@@ -6,8 +6,10 @@ Microsoft.Extensions.WinForms.WinFormsApplication.Lifetime.get -> Microsoft.Exte
 Microsoft.Extensions.WinForms.WinFormsApplication.Run() -> void
 Microsoft.Extensions.WinForms.WinFormsApplication.Run(System.Threading.CancellationToken cancellationToken) -> void
 Microsoft.Extensions.WinForms.WinFormsApplication.StopAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Microsoft.Extensions.WinForms.WinFormsApplication.UiScope.get -> Microsoft.Extensions.WinForms.WinFormsUiScope!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Build() -> Microsoft.Extensions.WinForms.WinFormsApplication!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Services.get -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseApplicationContext(System.Func<System.Windows.Forms.ApplicationContext!>! contextFactory) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseColorMode(System.Windows.Forms.SystemColorMode colorMode) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseDefaultFont(System.Drawing.Font! font) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
@@ -15,6 +17,8 @@ Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseFormRevealMode(Syste
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseHighDpiMode(System.Windows.Forms.HighDpiMode highDpiMode) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseHost(Microsoft.Extensions.Hosting.IHostBuilder! hostBuilder) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseLegacyVisualStyles() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseScopedApplicationContext(System.Func<System.IServiceProvider!, Microsoft.Extensions.WinForms.WinFormsUiScope!, System.Windows.Forms.ApplicationContext!>! contextFactory) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseScopedStartupForm(System.Func<System.IServiceProvider!, System.Windows.Forms.Form!>! formFactory) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseStartupForm(System.Windows.Forms.Form! startupForm) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseStartupForm<TForm>() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseTextRendering(bool useCompatibleTextRendering) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
@@ -25,6 +29,15 @@ Microsoft.Extensions.WinForms.WinFormsApplicationLifetime
 Microsoft.Extensions.WinForms.WinFormsApplicationLifetime.ApplicationStarted -> System.EventHandler?
 Microsoft.Extensions.WinForms.WinFormsApplicationLifetime.ApplicationStopped -> System.EventHandler?
 Microsoft.Extensions.WinForms.WinFormsApplicationLifetime.ApplicationStopping -> System.EventHandler?
+Microsoft.Extensions.WinForms.WinFormsFormScope
+Microsoft.Extensions.WinForms.WinFormsFormScope.Assign<TComponent>(TComponent! component, System.Action<TComponent!, System.IServiceProvider!>! assignServices) -> void
+Microsoft.Extensions.WinForms.WinFormsFormScope.Dispose() -> void
+Microsoft.Extensions.WinForms.WinFormsFormScope.Form.get -> System.Windows.Forms.Form!
+Microsoft.Extensions.WinForms.WinFormsFormScope.Show() -> void
+Microsoft.Extensions.WinForms.WinFormsFormScope.ShowDialog() -> System.Windows.Forms.DialogResult
+Microsoft.Extensions.WinForms.WinFormsUiScope
+Microsoft.Extensions.WinForms.WinFormsUiScope.CreateForm(System.Func<System.IServiceProvider!, System.Windows.Forms.Form!>! factory, Microsoft.Extensions.WinForms.WinFormsFormScope? owner = null) -> Microsoft.Extensions.WinForms.WinFormsFormScope!
+Microsoft.Extensions.WinForms.WinFormsUiScope.Dispose() -> void
 static Microsoft.Extensions.WinForms.WinFormsApplication.CreateBuilder() -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 override System.Windows.Forms.GroupBox.OnPaintBackground(System.Windows.Forms.PaintEventArgs! pevent) -> void
 override System.Windows.Forms.UpDownBase.OnParentFontChanged(System.EventArgs! e) -> void
