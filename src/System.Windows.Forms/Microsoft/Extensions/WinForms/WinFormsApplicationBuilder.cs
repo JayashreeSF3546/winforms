@@ -34,6 +34,7 @@ public sealed partial class WinFormsApplicationBuilder
     private IConfigurationBuilder? _hostConfiguration;
     private IConfigurationBuilder? _configuration;
     private ServiceCollection? _services;
+    private Dictionary<object, object>? _properties;
     private WinFormsApplicationFeatures? _features;
     private WinFormsSingleInstance? _singleInstance;
     private EventHandler<WinFormsNextInstanceRequest>? _nextInstance;
@@ -63,6 +64,34 @@ public sealed partial class WinFormsApplicationBuilder
         {
             VerifyCanConfigure();
             return _services ??= new ServiceCollection();
+        }
+    }
+
+    /// <summary>
+    ///  Gets application-builder-local state for coordinating extensions.
+    /// </summary>
+    /// <remarks>
+    ///  <para>
+    ///   Use private object keys to avoid collisions between unrelated extensions. Entries are not copied
+    ///   to the selected host's Properties, configuration, or services and do not require hosting.
+    ///   Stored objects remain caller-owned; neither Build nor application disposal disposes them.
+    ///  </para>
+    ///  <para>
+    ///   Access this property on the owning thread before Build. Retained dictionaries follow standard
+    ///   Dictionary semantics and remain mutable after the builder is consumed; later edits do not
+    ///   configure a built application. The dictionary is not thread-safe, and values are not cloned.
+    ///  </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    ///  The builder is consumed or the calling thread does not own it.
+    /// </exception>
+    public IDictionary<object, object> Properties
+    {
+        get
+        {
+            VerifyCanConfigure();
+
+            return _properties ??= new Dictionary<object, object>();
         }
     }
 

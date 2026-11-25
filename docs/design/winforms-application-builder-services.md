@@ -75,8 +75,8 @@ These API additions are prototypes under dotnet/winforms#14082 and remain subjec
 `HostApplicationBuilder`/`IHostApplicationBuilder` offer the broader property-based configuration
 experience, but `HostApplicationBuilder` does not publicly implement `IHostBuilder`; its adapter is
 internal in the inspected Hosting source. Do not use reflection to obtain it, accept an already-built
-host that bypasses coordination, or build a second provider. The Properties surface on the
-WinForms builder remains a separate future API decision. The optional package
+host that bypasses coordination, or build a second provider. The core builder now exposes a local
+`Properties` dictionary for extension coordination, independently of hosting. The optional package
 now supplies the `Logging` C# 14 extension property and VB-compatible `ConfigureLogging` callback,
 both backed by the existing staged service collection. This does not add `ILoggingBuilder` or a full
 logging dependency to the WinForms framework.
@@ -93,6 +93,14 @@ root. `Sources.Clear()` affects staged sources only, and staged providers can in
 the host's command-line configuration. See the package readme for the C#/VB usage and ownership contract.
 
 ## Ownership and extension boundaries
+
+`WinFormsApplicationBuilder.Properties` is a builder-local `IDictionary<object, object>`. Entries
+are not merged with `IHostBuilder.Properties` or `HostBuilderContext.Properties`, do not select
+hosting, and are not configuration or DI registrations. Prefer private shared object keys.
+Values are borrowed and never automatically disposed. The property enforces owning-thread/pre-Build
+access; retained dictionaries preserve standard mutability after consumption but cannot reconfigure
+a built application. The bag is neither thread-safe nor transactional and remains a prototype
+pending API review.
 
 - **Configuration:** Generic Host owns its configuration root, providers, reload registrations, and
   disposal. WinForms supplies explicit desktop defaults where selected, not a second root. Consumers

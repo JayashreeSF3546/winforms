@@ -9,6 +9,7 @@ Microsoft.Extensions.WinForms.WinFormsApplication.StopAsync(System.Threading.Can
 Microsoft.Extensions.WinForms.WinFormsApplication.UiScope.get -> Microsoft.Extensions.WinForms.WinFormsUiScope!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Build() -> Microsoft.Extensions.WinForms.WinFormsApplication!
+Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Properties.get -> System.Collections.Generic.IDictionary<object!, object!>!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.Services.get -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseApplicationContext(System.Func<System.Windows.Forms.ApplicationContext!>! contextFactory) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!
 Microsoft.Extensions.WinForms.WinFormsApplicationBuilder.UseColorMode(System.Windows.Forms.SystemColorMode colorMode) -> Microsoft.Extensions.WinForms.WinFormsApplicationBuilder!

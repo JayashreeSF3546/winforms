@@ -13,6 +13,113 @@ namespace System.Windows.Forms.Tests;
 public class WinFormsApplicationBuilderTests
 {
     [Fact]
+    public void Properties_HostlessBuild_PreservesLocalStateWithoutOwningStoredObjects()
+    {
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+            .UseApplicationContext(() => new ApplicationContext());
+        IDictionary<object, object> properties = builder.Properties;
+        using TrackingService value = new();
+        object key = new();
+        properties.Add(key, value);
+        builder.Properties.Should().BeSameAs(properties);
+        builder.Properties[key].Should().BeSameAs(value);
+        using WinFormsApplication application = builder.Build();
+
+        application.Host.Should().BeNull();
+        application.Dispose();
+        value.DisposeCount.Should().Be(0);
+        properties[key].Should().BeSameAs(value);
+        properties.Remove(key).Should().BeTrue();
+        properties.Add(key, new object());
+        Assert.Throws<InvalidOperationException>(() => builder.Properties);
+    }
+
+    [Fact]
+    public void Properties_AreIsolatedFromOtherBuildersAndTheSelectedHost()
+    {
+        object key = new();
+        object hostValue = new();
+        object localValue = new();
+        object hostOnly = new();
+        object localOnly = new();
+        IHostBuilder hostBuilder = new HostBuilder();
+        hostBuilder.Properties[key] = hostValue;
+        hostBuilder.Properties[hostOnly] = new object();
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+            .UseApplicationContext(() => new ApplicationContext())
+            .UseHost(hostBuilder);
+        builder.Properties[key] = localValue;
+        builder.Properties[localOnly] = new object();
+        WinFormsApplicationBuilder other = WinFormsApplication.CreateBuilder()
+            .UseApplicationContext(() => new ApplicationContext());
+        other.Properties.Should().BeEmpty();
+        builder.Properties.ContainsKey(hostOnly).Should().BeFalse();
+        hostBuilder.ConfigureServices((context, _) =>
+        {
+            context.Properties[key].Should().BeSameAs(hostValue);
+            context.Properties.ContainsKey(localOnly).Should().BeFalse();
+        });
+
+        using WinFormsApplication application = builder.Build();
+        using WinFormsApplication otherApplication = other.Build();
+        hostBuilder.Properties[key].Should().BeSameAs(hostValue);
+        application.Host!.Services.GetService(localValue.GetType()).Should().BeNull();
+    }
+
+    [Fact]
+    public void Properties_BuildValidationFailure_PreservesConfigurableState()
+    {
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder();
+        object key = new();
+        object value = new();
+        builder.Properties[key] = value;
+
+        Assert.Throws<InvalidOperationException>(() => builder.Build());
+
+        builder.Properties[key].Should().BeSameAs(value);
+        builder.UseApplicationContext(() => new ApplicationContext());
+        using WinFormsApplication application = builder.Build();
+        application.Host.Should().BeNull();
+    }
+
+    [Fact]
+    public void Properties_HostBuildFailure_DoesNotDisposeEntriesOrMakeRetainedStateHostState()
+    {
+        InvalidOperationException expected = new("Host build failed.");
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+            .UseApplicationContext(() => new ApplicationContext())
+            .UseHost(new HostBuilder().ConfigureServices((_, _) => throw expected));
+        using TrackingService value = new();
+        IDictionary<object, object> properties = builder.Properties;
+        properties[value] = value;
+
+        Assert.Throws<InvalidOperationException>(() => builder.Build()).Should().BeSameAs(expected);
+
+        value.DisposeCount.Should().Be(0);
+        properties[value].Should().BeSameAs(value);
+        properties.Clear();
+        Assert.Throws<InvalidOperationException>(() => builder.Properties);
+    }
+
+    [WinFormsFact]
+    public async Task Properties_WrongThreadAccess_RejectsWithoutChangingLocalState()
+    {
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()
+            .UseApplicationContext(() => new ApplicationContext());
+        object key = new();
+        object value = new();
+        builder.Properties[key] = value;
+
+        await Task.Run(() =>
+            Assert.Throws<InvalidOperationException>(() => builder.Properties),
+            TestContext.Current.CancellationToken);
+
+        builder.Properties[key].Should().BeSameAs(value);
+        using WinFormsApplication application = builder.Build();
+        application.Host.Should().BeNull();
+    }
+
+    [Fact]
     public void Services_EmptyCollection_PreservesHostlessBuildAndBecomesReadOnly()
     {
         WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder()

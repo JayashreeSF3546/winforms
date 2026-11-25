@@ -178,6 +178,40 @@ retains its separate diagnostic fallback. `ILogger` has no universal async flush
 Buffered providers must finish their documented flush operation through an application-owned
 shutdown participant before host disposal; process termination cannot guarantee delivery.
 
+### Coordinate builder extensions with local properties
+
+The core `WinFormsApplicationBuilder.Properties` property exposes a stable
+`IDictionary<object, object>` for extension-specific composition state. It requires no optional
+package or host. Use a private, shared object key per extension to avoid name collisions:
+
+```csharp
+// Inside an extension with a private static readonly object s_registrationKey = new();
+if (!builder.Properties.ContainsKey(s_registrationKey))
+{
+    RegisterApplicationFeature(builder);
+    builder.Properties[s_registrationKey] = true;
+}
+```
+
+```vb
+' Inside an extension with a Private Shared ReadOnly s_registrationKey As New Object().
+If Not builder.Properties.ContainsKey(s_registrationKey) Then
+    RegisterApplicationFeature(builder)
+    builder.Properties(s_registrationKey) = True
+End If
+```
+
+The registration helper is application-defined. Mark completion only after successful registration;
+the bag does not roll back partial work if an extension fails. This is local extension state, not
+configuration, a service locator, persistent user settings, or a copy of `IHostBuilder.Properties`.
+Even identical keys in the host and WinForms bags remain independent. Stored objects are borrowed:
+the builder/application does not clone, serialize, register, or dispose them.
+
+Property access requires the owning thread before Build. Retained dictionaries remain ordinary
+mutable, non-thread-safe dictionaries after consumption; later edits do not configure a built
+application. Coordinate extension setup on the owning thread and manage stored object lifetimes
+explicitly. This API remains a prototype pending review.
+
 ### Stage environment overrides
 
 The optional package supplies the C# 14 `builder.Environment` extension property and
