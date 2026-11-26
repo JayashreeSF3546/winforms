@@ -6,6 +6,11 @@ Use C# and VB basic templates. Hybrid remains activation-gated and cannot be
 included in browser/runtime acceptance until its public lifecycle dependencies
 are available. These checks do not change template payloads or shipping APIs.
 
+The current templates follow minimal startup sample commit `63577553`.
+The preparation script probes the real `Form1` window only. Startup options validation and
+its error dialog are no longer generated; descriptions and results for `startup-error` below
+apply only to the earlier configuration-rich template.
+
 ## Prepare an isolated workspace
 
 First run the [lifecycle matrix](README.md#automated-lifecycle-matrix). Use its

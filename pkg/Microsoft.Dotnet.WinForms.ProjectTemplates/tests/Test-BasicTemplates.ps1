@@ -109,11 +109,7 @@ try {
             '--name', $case.Name, '--output', $destination, '--no-restore', '--no-update-check') + $hiveArguments)
         $extension = $case.Extension
         $expected = @("$($case.Name).${extension}proj", "Program.$extension", "Form1.$extension",
-            "Form1.Designer.$extension", "ApplicationOptions.$extension", "UserPreferences.$extension",
-            'README.md', 'appsettings.json')
-        if ($case.Language -eq 'C#') {
-            $expected += 'PreferencesJsonContext.cs'
-        }
+            "Form1.Designer.$extension", "StartupPreferences.$extension", 'README.md')
         $actual = @(Get-ChildItem $destination -Recurse -File | ForEach-Object {
             [IO.Path]::GetRelativePath($destination, $_.FullName)
         })
@@ -126,9 +122,13 @@ try {
             'Generated projects must not embed repository references or build imports.'
         $hosting = $project.SelectSingleNode("//PackageReference[@Include='Microsoft.Extensions.WinForms.Hosting']")
         Assert-Condition ($hosting.Version -eq '12.0.0-dev') 'Expected the explicitly pinned prototype hosting version.'
-        $configuration = Get-Content (Join-Path $destination 'appsettings.json') -Raw | ConvertFrom-Json
-        Assert-Condition (-not [string]::IsNullOrWhiteSpace($configuration.Application.Title)) 'Missing application title.'
         $program = Get-Content (Join-Path $destination "Program.$extension") -Raw
+        Assert-Condition ($program -match 'AddWinFormsUserSettingsService' -and
+            $program -match 'AddWinFormsExceptionService' -and
+            $program -match 'UseWinFormsLogging' -and
+            $program -match 'UseStartupForm') 'Missing the basic startup sample APIs.'
+        Assert-Condition ($program -notmatch 'UseApplicationContext|AddOptions|ConfigureWinFormsConfiguration') `
+            'The minimal template must not add options or configuration examples.'
         $identity = [regex]::Match($program, 'WinFormsApp\.[0-9a-fA-F-]{36}').Value
         Assert-Condition ($identity.Length -gt 0 -and $identities.Add($identity)) `
             'Each generated application must have a distinct, stable settings-ID literal.'
@@ -156,10 +156,16 @@ try {
         }
     }
     Invoke-DotNet -Arguments (@('new', 'update', '--check-only') + $hiveArguments)
-    Invoke-DotNet -Arguments (@('new', 'install', $TemplatePackage, '--force') + $hiveArguments)
+    Invoke-DotNet -Arguments (@('new', 'uninstall', 'Microsoft.Dotnet.WinForms.ProjectTemplates') + $hiveArguments)
+    $installed = $false
+    Invoke-DotNet -Arguments (@('new', 'install', $TemplatePackage) + $hiveArguments)
+    $installed = $true
     $replacementCatalog = & $DotNet new list @hiveArguments 2>&1
     Assert-Condition ($LASTEXITCODE -eq 0 -and ($replacementCatalog -join "`n") -ceq $initialCatalog) `
         'Replacing the same package must preserve the template catalog.'
+    Invoke-DotNet -Arguments (@('new', 'winforms-builder', '--language', 'C#',
+        '--name', 'ReinstalledCSharp', '--output', (Join-Path $output 'ReinstalledCSharp'),
+        '--no-restore', '--no-update-check') + $hiveArguments)
     foreach ($file in $snapshots.Keys) {
         Assert-Condition ((Get-FileHash $file -Algorithm SHA256).Hash -eq $snapshots[$file]) `
             "Package replacement modified an existing generated file: $file"

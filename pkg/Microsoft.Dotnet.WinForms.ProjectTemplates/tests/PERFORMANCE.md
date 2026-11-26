@@ -5,6 +5,11 @@ This development-only comparison supports
 It runs actual, unmodified generated entry points, not the lifecycle smoke entry points.
 No benchmark package, product dependency, template default, or machine policy is changed.
 
+The current minimal templates follow commit `63577553` and have no JSON/options setup.
+The runner now compares only classic and basic apps with the `Form1` window title.
+The watcher comparisons and recorded measurements later in this document are historical
+evidence from the earlier configuration-rich payload, not results for the current template.
+
 ## Comparisons and prerequisites
 
 The runner creates current SDK `winforms` C#/VB apps in an isolated template hive and copies
@@ -21,11 +26,9 @@ generated startup conventions; the builder payload retains its explicit STA entr
 The framework and hosting package must be built in Release. A fresh, short private package cache
 avoids accidentally reusing the Debug hosting package with the same development version.
 
-Basic defaults include the host, configuration/options, Debug logging provider, and lazy typed
-settings registration. JSON change watchers are disabled by the generated entry point. An
-additional `basic-watchers` measurement uses the **same published app** with the public
-`--hostBuilder:reloadConfigOnChange=true` option. It measures opt-in watcher startup/resource and
-shutdown cost, not file-change delivery latency. It does not duplicate publish files.
+Basic defaults include the host, Debug logging provider, exception service, lazy typed settings
+registration, and fluent startup configuration. The plain host adds no JSON configuration or
+watchers, so the runner no longer creates `basic-watchers` cases or `optional-comparisons.csv`.
 
 Registered settings are not loaded or saved by this empty app. No debugger is attached, and the
 Debug provider is not a durable logging sink. The basic-minus-current delta is the combined cost

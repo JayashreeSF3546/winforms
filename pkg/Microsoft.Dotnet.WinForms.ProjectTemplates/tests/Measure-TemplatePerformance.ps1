@@ -174,14 +174,6 @@ try {
                     Executable = (Join-Path $publish "$name.exe"); Inventory = $inventory
                     RuntimeConfig = $runtimeConfig
                 })
-                if ($variant -eq 'basic') {
-                    $cases.Add([pscustomobject]@{
-                        Case = "$language-basic-watchers-$deployment"; Language = $language
-                        Variant = 'basic-watchers'; Deployment = $deployment
-                        Executable = (Join-Path $publish "$name.exe"); Inventory = $inventory
-                        RuntimeConfig = $runtimeConfig
-                    })
-                }
                 Write-Output "PUBLISHED $id"
             }
         }
@@ -217,13 +209,13 @@ try {
         $ordered = @($cases.ToArray())
         if ($round % 2 -eq 0) { [Array]::Reverse($ordered) }
         foreach ($case in $ordered) {
-            $title = if ($case.Variant -eq 'current') { 'Form1' } else { "Template performance $([Guid]::NewGuid().ToString('N'))" }
-            $profile = if ($case.Variant -eq 'basic-watchers') { 'watchers' } else { 'default' }
+            $title = 'Form1'
+            $profile = 'default'
             $result = Invoke-CommandChecked $Driver @('measure', $case.Executable, $title, "$IdleMilliseconds", $profile) "$($case.Case)-round$round" 90 |
                 ConvertFrom-Json
             if ($result.Outcome -ne 'Passed' -or $result.ExitCode -ne 0 -or $result.StartupMilliseconds -le 0 -or
                 $result.ShutdownMilliseconds -le 0 -or $result.Settled.PrivateBytes -le 0 -or $result.Settled.WorkingSetBytes -le 0 -or
-                $result.WatchersOverride -ne ($case.Variant -eq 'basic-watchers')) {
+                $result.WatchersOverride -ne $false) {
                 throw "Invalid measurement: $($case.Case)"
             }
             $samples.Add([pscustomobject]@{
@@ -267,14 +259,6 @@ try {
         [pscustomobject]$row
     }
     $comparisons | Export-Csv (Join-Path $output 'comparisons.csv') -NoTypeInformation
-    $optional = foreach ($watchers in $summary | Where-Object Variant -EQ 'basic-watchers') {
-        $defaults = @($summary | Where-Object { $_.Variant -eq 'basic' -and $_.Language -eq $watchers.Language -and $_.Deployment -eq $watchers.Deployment })
-        if ($defaults.Count -ne 1) { throw 'Missing matching basic defaults.' }
-        $row = [ordered]@{ Language = $watchers.Language; Deployment = $watchers.Deployment }
-        foreach ($metric in $metrics) { $row["Delta$metric"] = $watchers.$metric - $defaults[0].$metric }
-        [pscustomobject]$row
-    }
-    $optional | Export-Csv (Join-Path $output 'optional-comparisons.csv') -NoTypeInformation
     foreach ($file in $sourceHashes.Keys) {
         if ((Get-FileHash $file).Hash -ne $sourceHashes[$file]) { throw "Original source changed: $file" }
     }

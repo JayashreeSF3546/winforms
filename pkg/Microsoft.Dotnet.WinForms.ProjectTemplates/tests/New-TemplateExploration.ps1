@@ -109,7 +109,7 @@ try {
         $rid = 'win-' + [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
         $application = Join-Path $LifecycleOutput "publish\$name\$rid\fdd\$name.exe"
         if (-not (Test-Path -LiteralPath $application)) { throw "Missing native published application: $application" }
-        foreach ($scenario in @('window', 'startup-error')) {
+        foreach ($scenario in @('window')) {
             $id = "$language-$scenario"
             $start = [Diagnostics.ProcessStartInfo]::new($Driver)
             $start.UseShellExecute = $false

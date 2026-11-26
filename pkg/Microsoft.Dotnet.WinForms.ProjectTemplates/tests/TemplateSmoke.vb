@@ -2,47 +2,59 @@
 ' The .NET Foundation licenses this file to you under the MIT license.
 
 Imports System
+Imports System.Collections.Generic
+Imports System.Diagnostics
 Imports System.IO
 Imports System.Linq
-Imports System.Text.Json
-Imports Microsoft.Extensions.Configuration
+Imports System.Runtime.ExceptionServices
+Imports System.Threading.Tasks
 Imports Microsoft.Extensions.DependencyInjection
 Imports Microsoft.Extensions.Hosting
 Imports Microsoft.Extensions.Logging
-Imports Microsoft.Extensions.Options
 Imports Microsoft.Extensions.WinForms
 
 ''' <summary>
-'''  Exercises the generated VB composition without a C# helper or application test switches.
+'''  Exercises the generated entry point and observes its host without adding application test hooks.
 ''' </summary>
-Friend Module TemplateSmoke
+Friend NotInheritable Class TemplateSmoke
+    Implements IObserver(Of DiagnosticListener), IObserver(Of KeyValuePair(Of String, Object)), IDisposable
+
+    Private ReadOnly _subscriptions As New List(Of IDisposable)()
+    Private ReadOnly _listeners As IDisposable
+    Private _host As IHost
+
+    Private Sub New()
+        _listeners = DiagnosticListener.AllListeners.Subscribe(Me)
+    End Sub
+
     <STAThread>
-    Public Function Main(args As String()) As Integer
+    Public Shared Function Main(args As String()) As Integer
         Try
-            Select Case args.Single()
+            Dim scenario As String = args.Single()
+            Select Case scenario
                 Case "services"
-                    CheckServices()
-                Case "invalid-options"
-                    Using host As IHost = Program.CreateHostBuilder({"--Application:Title="}).Build()
-                        Dim rejected As Boolean = False
-                        Try
-                            host.StartAsync().GetAwaiter().GetResult()
-                        Catch exception As OptionsValidationException
-                            rejected = True
-                        End Try
-                        Check(rejected, "Invalid options must fail host startup.")
-                    End Using
+                    Dim directoryPath As String = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "WinForms", Program.SettingsApplicationId)
+                    Check(Not Directory.Exists(directoryPath), "The settings test requires a newly generated application identity.")
+                    Try
+                        CheckUi(scenario)
+                    Finally
+                        If Directory.Exists(directoryPath) Then
+                            Directory.Delete(directoryPath, recursive:=True)
+                        End If
+                    End Try
                 Case "designer"
                     Using form As New Form1()
                         Check(Not form.IsHandleCreated AndAlso form.Text = "Form1", "Parameterless construction must be UI-only.")
                     End Using
                 Case "ui", "host-stop"
-                    CheckUi(args(0) = "host-stop")
+                    CheckUi(scenario)
                 Case Else
                     Throw New ArgumentException("Unknown template smoke scenario.")
             End Select
 
-            Console.WriteLine($"PASS VB: {args(0)}")
+            Console.WriteLine($"PASS VB: {scenario}")
 
             Return 0
         Catch exception As Exception
@@ -52,115 +64,104 @@ Friend Module TemplateSmoke
         End Try
     End Function
 
-    Private Sub CheckServices()
-        Const prefix As String = "WinFormsApp."
-        Dim identity As Guid
-        Check(Program.SettingsApplicationId.StartsWith(prefix, StringComparison.Ordinal) AndAlso
-              Guid.TryParse(Program.SettingsApplicationId.Substring(prefix.Length), identity), "Invalid generated settings identity.")
-        Dim directoryPath As String = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                                                   "WinForms", Program.SettingsApplicationId)
-        Check(Not Directory.Exists(directoryPath), "The settings test requires a newly generated, unused application identity.")
-        Try
-            Using host As IHost = Program.CreateHostBuilder(Array.Empty(Of String)()).Build()
-                host.StartAsync().GetAwaiter().GetResult()
-                Using document As JsonDocument = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "appsettings.json")))
-                    Dim title As String = document.RootElement.GetProperty("Application").GetProperty("Title").GetString()
-                    Check(host.Services.GetRequiredService(Of IOptions(Of ApplicationOptions))().Value.Title = title,
-                          "Deployment JSON was not applied.")
-                End Using
-                Check(host.Services.GetRequiredService(Of IConfiguration)()("hostBuilder:reloadConfigOnChange") = "false",
-                      "Watchers must default off.")
-                Dim settings = host.Services.GetRequiredService(Of IUserSettingsService(Of UserPreferences))()
-                Check(Not Directory.Exists(directoryPath), "Registration/resolution must not create storage.")
-                Check(settings.LoadAsync().GetAwaiter().GetResult().LastFolder = String.Empty, "Incorrect fresh preferences.")
-                Dim commit As UserSettingsCommit = settings.SaveAsync(New UserPreferences With {.LastFolder = "template-test"}).
-                    GetAwaiter().GetResult()
-                commit.NotificationCompletion.GetAwaiter().GetResult()
-                Check(settings.LoadAsync().GetAwaiter().GetResult().LastFolder = "template-test", "Settings round trip failed.")
-                host.StopAsync().GetAwaiter().GetResult()
-            End Using
-        Finally
-            If Directory.Exists(directoryPath) Then
-                Directory.Delete(directoryPath, recursive:=True)
-            End If
-        End Try
-
-        Dim previous As String = Environment.GetEnvironmentVariable("Application__Title")
-        Try
-            Environment.SetEnvironmentVariable("Application__Title", "environment-title")
-            CheckTitle(Array.Empty(Of String)(), "environment-title")
-            CheckTitle({"--Application:Title=command-title"}, "command-title")
-        Finally
-            Environment.SetEnvironmentVariable("Application__Title", previous)
-        End Try
+    Private Shared Sub CheckServices(host As IHost)
+        Check(host.Services.GetServices(Of ILoggerProvider)().
+            OfType(Of Microsoft.Extensions.Logging.Debug.DebugLoggerProvider)().Count() = 1,
+            "The WinForms logging helper must register one Debug provider.")
+        host.Services.GetRequiredService(Of WinFormsExceptionLogging)()
+        Dim settings = host.Services.GetRequiredService(Of IUserSettingsService(Of StartupPreferences))()
+        Task.Run(
+            Async Function()
+                Check((Await settings.LoadAsync()).UseCompactLayout, "Incorrect fresh preferences.")
+                Dim commit As UserSettingsCommit = Await settings.SaveAsync(
+                    New StartupPreferences With {.UseCompactLayout = False})
+                Await commit.NotificationCompletion
+                Check(Not (Await settings.LoadAsync()).UseCompactLayout, "Settings round trip failed.")
+            End Function).GetAwaiter().GetResult()
     End Sub
 
-    Private Sub CheckTitle(args As String(), expected As String)
-        Using host As IHost = Program.CreateHostBuilder(args).Build()
-            host.StartAsync().GetAwaiter().GetResult()
-            Check(host.Services.GetRequiredService(Of IOptions(Of ApplicationOptions))().Value.Title = expected,
-                  "Configuration precedence failed.")
-            host.StopAsync().GetAwaiter().GetResult()
+    Private Shared Sub CheckUi(scenario As String)
+        Using capture As New TemplateSmoke()
+            Dim dispatched As Boolean = False
+            Dim disposed As Boolean = False
+            Dim failure As Exception = Nothing
+            Dim idle As EventHandler =
+                Sub(sender, arguments)
+                    If dispatched OrElse Application.OpenForms.Count = 0 Then
+                        Return
+                    End If
+
+                    dispatched = True
+                    Dim form As Form = Application.OpenForms(0)
+                    AddHandler form.Disposed, Sub(disposedSender, disposedArguments) disposed = True
+                    Try
+                        Check(TypeOf form Is Form1 AndAlso form.Text = "Form1", "The generated startup form was not shown.")
+                        Check(Application.HighDpiMode = HighDpiMode.SystemAware AndAlso
+                              Application.DefaultFormRevealMode = FormRevealMode.Deferred AndAlso
+                              Application.DefaultVisualStylesMode = VisualStylesMode.Net11,
+                              "The fluent startup configuration was not applied.")
+                        Dim host As IHost = capture._host
+                        Check(host IsNot Nothing, "The generated host was not built.")
+                        If scenario = "services" Then
+                            CheckServices(host)
+                        End If
+
+                        If scenario = "host-stop" Then
+                            host.Services.GetRequiredService(Of IHostApplicationLifetime)().StopApplication()
+                        Else
+                            form.Close()
+                        End If
+                    Catch exception As Exception
+                        failure = exception
+                        form.Close()
+                    End Try
+                End Sub
+            AddHandler Application.Idle, idle
+            Try
+                Program.Main()
+            Finally
+                RemoveHandler Application.Idle, idle
+            End Try
+
+            If failure IsNot Nothing Then
+                ExceptionDispatchInfo.Throw(failure)
+            End If
+
+            Check(dispatched AndAlso disposed AndAlso Application.OpenForms.Count = 0, "UI dispatch/cleanup failed.")
         End Using
     End Sub
 
-    Private Sub CheckUi(hostStop As Boolean)
-        Dim dispatched As Boolean = False
-        Dim disposed As Boolean = False
-        Dim titleMatches As Boolean = False
-        Dim lifetime As IHostApplicationLifetime = Nothing
-        Dim idle As EventHandler =
-            Sub(sender, arguments)
-                If dispatched OrElse Application.OpenForms.Count = 0 Then
-                    Return
-                End If
-
-                dispatched = True
-                Dim form As Form = Application.OpenForms(0)
-                titleMatches = TypeOf form Is Form1 AndAlso form.Text = "template-ui"
-                AddHandler form.Disposed, Sub(disposedSender, disposedArguments) disposed = True
-                If hostStop Then
-                    lifetime.StopApplication()
-                Else
-                    form.Close()
-                End If
-            End Sub
-        AddHandler Application.Idle, idle
-        Try
-            Dim args As String() = {"--Application:Title=template-ui"}
-            If hostStop Then
-                Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException)
-                Application.SetHighDpiMode(HighDpiMode.SystemAware)
-                Application.EnableVisualStyles()
-                Application.SetCompatibleTextRenderingDefault(False)
-                Dim winFormsApplication As WinFormsApplication = Nothing
-                winFormsApplication = WinFormsApplication.CreateBuilder().
-                    UseHost(Program.CreateHostBuilder(args)).
-                    UseApplicationContext(
-                        Function()
-                            Dim services As IServiceProvider = winFormsApplication.Host.Services
-
-                            Return New ApplicationContext(New Form1(services.GetRequiredService(Of IOptions(Of ApplicationOptions))().Value,
-                                                                   services.GetRequiredService(Of ILogger(Of Form1))()))
-                        End Function).
-                    Build()
-                Using winFormsApplication
-                    lifetime = winFormsApplication.Host.Services.GetRequiredService(Of IHostApplicationLifetime)()
-                    winFormsApplication.Run()
-                End Using
-            Else
-                Check(Program.Main(args) = 0, "Generated Main failed.")
-            End If
-        Finally
-            RemoveHandler Application.Idle, idle
-        End Try
-
-        Check(dispatched AndAlso titleMatches AndAlso disposed AndAlso Application.OpenForms.Count = 0, "UI dispatch/cleanup failed.")
-    End Sub
-
-    Private Sub Check(condition As Boolean, message As String)
+    Private Shared Sub Check(condition As Boolean, message As String)
         If Not condition Then
             Throw New InvalidOperationException(message)
         End If
     End Sub
-End Module
+
+    Public Sub OnNext(listener As DiagnosticListener) Implements IObserver(Of DiagnosticListener).OnNext
+        If listener.Name = "Microsoft.Extensions.Hosting" Then
+            _subscriptions.Add(listener.Subscribe(Me))
+        End If
+    End Sub
+
+    Public Sub OnNext(notification As KeyValuePair(Of String, Object)) Implements IObserver(Of KeyValuePair(Of String, Object)).OnNext
+        If notification.Key = "HostBuilt" AndAlso TypeOf notification.Value Is IHost Then
+            _host = DirectCast(notification.Value, IHost)
+        End If
+    End Sub
+
+    Public Sub OnCompleted() Implements IObserver(Of DiagnosticListener).OnCompleted,
+        IObserver(Of KeyValuePair(Of String, Object)).OnCompleted
+    End Sub
+
+    Public Sub OnError(exception As Exception) Implements IObserver(Of DiagnosticListener).OnError,
+        IObserver(Of KeyValuePair(Of String, Object)).OnError
+        ExceptionDispatchInfo.Throw(exception)
+    End Sub
+
+    Public Sub Dispose() Implements IDisposable.Dispose
+        _listeners.Dispose()
+        For Each subscription As IDisposable In _subscriptions
+            subscription.Dispose()
+        Next
+    End Sub
+End Class

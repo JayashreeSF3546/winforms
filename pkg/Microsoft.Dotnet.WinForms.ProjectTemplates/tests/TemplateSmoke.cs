@@ -1,43 +1,49 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System.Text.Json;
-using Microsoft.Extensions.Configuration;
+using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Microsoft.Extensions.WinForms;
 
 /// <summary>
-///  Exercises the generated C# composition without adding test switches to the application.
+///  Exercises the generated entry point and observes its host without adding application test hooks.
 /// </summary>
-internal static class TemplateSmoke
+internal sealed class TemplateSmoke : IObserver<DiagnosticListener>, IObserver<KeyValuePair<string, object?>>, IDisposable
 {
+    private readonly List<IDisposable> _subscriptions = [];
+    private readonly IDisposable _listeners;
+    private IHost? _host;
+
+    private TemplateSmoke()
+    {
+        _listeners = DiagnosticListener.AllListeners.Subscribe(this);
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
         try
         {
-            switch (args.Single())
+            string scenario = args.Single();
+            switch (scenario)
             {
                 case "services":
-                    CheckServices();
-                    break;
-                case "invalid-options":
-                    using (IHost host = Program.CreateHostBuilder(["--Application:Title="]).Build())
+                    string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "WinForms", Program.SettingsApplicationId);
+                    Check(!Directory.Exists(directory), "The settings test requires a newly generated application identity.");
+                    try
                     {
-                        bool rejected = false;
-                        try
+                        CheckUi(scenario);
+                    }
+                    finally
+                    {
+                        if (Directory.Exists(directory))
                         {
-                            host.StartAsync().GetAwaiter().GetResult();
+                            Directory.Delete(directory, recursive: true);
                         }
-                        catch (OptionsValidationException)
-                        {
-                            rejected = true;
-                        }
-
-                        Check(rejected, "Invalid options must fail host startup.");
                     }
 
                     break;
@@ -50,13 +56,13 @@ internal static class TemplateSmoke
                     break;
                 case "ui":
                 case "host-stop":
-                    CheckUi(args[0] == "host-stop");
+                    CheckUi(scenario);
                     break;
                 default:
                     throw new ArgumentException("Unknown template smoke scenario.");
             }
 
-            Console.WriteLine($"PASS C#: {args[0]}");
+            Console.WriteLine($"PASS C#: {scenario}");
 
             return 0;
         }
@@ -68,67 +74,28 @@ internal static class TemplateSmoke
         }
     }
 
-    private static void CheckServices()
+    private static void CheckServices(IHost host)
     {
-        const string prefix = "WinFormsApp.";
-        Check(Program.SettingsApplicationId.StartsWith(prefix, StringComparison.Ordinal)
-            && Guid.TryParse(Program.SettingsApplicationId[prefix.Length..], out _), "Invalid generated settings identity.");
-        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "WinForms", Program.SettingsApplicationId);
-        Check(!Directory.Exists(directory), "The settings test requires a newly generated, unused application identity.");
-        try
+        Check(host.Services.GetServices<ILoggerProvider>()
+            .OfType<Microsoft.Extensions.Logging.Debug.DebugLoggerProvider>().Count() == 1,
+            "The WinForms logging helper must register one Debug provider.");
+        _ = host.Services.GetRequiredService<WinFormsExceptionLogging>();
+        var settings = host.Services.GetRequiredService<IUserSettingsService<StartupPreferences>>();
+        Task.Run(async () =>
         {
-            using (IHost host = Program.CreateHostBuilder([]).Build())
-            {
-                host.StartAsync().GetAwaiter().GetResult();
-                using JsonDocument document = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "appsettings.json")));
-                string? title = document.RootElement.GetProperty("Application").GetProperty("Title").GetString();
-                Check(host.Services.GetRequiredService<IOptions<ApplicationOptions>>().Value.Title == title, "Deployment JSON was not applied.");
-                Check(host.Services.GetRequiredService<IConfiguration>()["hostBuilder:reloadConfigOnChange"] == "false", "Watchers must default off.");
-                var settings = host.Services.GetRequiredService<IUserSettingsService<UserPreferences>>();
-                Check(!Directory.Exists(directory), "Registration/resolution must not create storage.");
-                Check(settings.LoadAsync().GetAwaiter().GetResult().LastFolder == string.Empty, "Incorrect fresh preferences.");
-                UserSettingsCommit commit = settings.SaveAsync(new UserPreferences { LastFolder = "template-test" }).GetAwaiter().GetResult();
-                commit.NotificationCompletion.GetAwaiter().GetResult();
-                Check(settings.LoadAsync().GetAwaiter().GetResult().LastFolder == "template-test", "Settings round trip failed.");
-                host.StopAsync().GetAwaiter().GetResult();
-            }
-        }
-        finally
-        {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, recursive: true);
-            }
-        }
-
-        string? previous = Environment.GetEnvironmentVariable("Application__Title");
-        try
-        {
-            Environment.SetEnvironmentVariable("Application__Title", "environment-title");
-            CheckTitle([], "environment-title");
-            CheckTitle(["--Application:Title=command-title"], "command-title");
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("Application__Title", previous);
-        }
+            Check((await settings.LoadAsync()).UseCompactLayout, "Incorrect fresh preferences.");
+            UserSettingsCommit commit = await settings.SaveAsync(new StartupPreferences { UseCompactLayout = false });
+            await commit.NotificationCompletion;
+            Check(!(await settings.LoadAsync()).UseCompactLayout, "Settings round trip failed.");
+        }).GetAwaiter().GetResult();
     }
 
-    private static void CheckTitle(string[] args, string expected)
+    private static void CheckUi(string scenario)
     {
-        using IHost host = Program.CreateHostBuilder(args).Build();
-        host.StartAsync().GetAwaiter().GetResult();
-        Check(host.Services.GetRequiredService<IOptions<ApplicationOptions>>().Value.Title == expected, "Configuration precedence failed.");
-        host.StopAsync().GetAwaiter().GetResult();
-    }
-
-    private static void CheckUi(bool hostStop)
-    {
+        using TemplateSmoke capture = new();
         bool dispatched = false;
         bool disposed = false;
-        bool titleMatches = false;
-        IHostApplicationLifetime? lifetime = null;
+        Exception? failure = null;
         EventHandler idle = (_, _) =>
         {
             if (dispatched || Application.OpenForms.Count == 0)
@@ -138,51 +105,51 @@ internal static class TemplateSmoke
 
             dispatched = true;
             Form form = Application.OpenForms[0]!;
-            titleMatches = form is Form1 && form.Text == "template-ui";
             form.Disposed += (_, _) => disposed = true;
-            if (hostStop)
+            try
             {
-                lifetime!.StopApplication();
+                Check(form is Form1 && form.Text == "Form1", "The generated startup form was not shown.");
+                Check(Application.HighDpiMode == HighDpiMode.SystemAware
+                    && Application.DefaultFormRevealMode == FormRevealMode.Deferred
+                    && Application.DefaultVisualStylesMode == VisualStylesMode.Net11,
+                    "The fluent startup configuration was not applied.");
+                IHost host = capture._host ?? throw new InvalidOperationException("The generated host was not built.");
+                if (scenario == "services")
+                {
+                    CheckServices(host);
+                }
+
+                if (scenario == "host-stop")
+                {
+                    host.Services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+                }
+                else
+                {
+                    form.Close();
+                }
             }
-            else
+            catch (Exception exception)
             {
+                failure = exception;
                 form.Close();
             }
         };
         Application.Idle += idle;
         try
         {
-            string[] args = ["--Application:Title=template-ui"];
-            if (hostStop)
-            {
-                Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
-                ApplicationConfiguration.Initialize();
-                WinFormsApplication? application = null;
-                using (application = WinFormsApplication.CreateBuilder()
-                    .UseHost(Program.CreateHostBuilder(args))
-                    .UseApplicationContext(() =>
-                    {
-                        IServiceProvider services = application!.Host!.Services;
-
-                        return new ApplicationContext(new Form1(services.GetRequiredService<IOptions<ApplicationOptions>>().Value,
-                            services.GetRequiredService<ILogger<Form1>>()));
-                    }).Build())
-                {
-                    lifetime = application.Host!.Services.GetRequiredService<IHostApplicationLifetime>();
-                    application.Run();
-                }
-            }
-            else
-            {
-                Check(Program.Main(args) == 0, "Generated Main failed.");
-            }
+            Program.Main();
         }
         finally
         {
             Application.Idle -= idle;
         }
 
-        Check(dispatched && titleMatches && disposed && Application.OpenForms.Count == 0, "UI dispatch/cleanup failed.");
+        if (failure is not null)
+        {
+            ExceptionDispatchInfo.Throw(failure);
+        }
+
+        Check(dispatched && disposed && Application.OpenForms.Count == 0, "UI dispatch/cleanup failed.");
     }
 
     private static void Check(bool condition, string message)
@@ -190,6 +157,37 @@ internal static class TemplateSmoke
         if (!condition)
         {
             throw new InvalidOperationException(message);
+        }
+    }
+
+    public void OnNext(DiagnosticListener listener)
+    {
+        if (listener.Name == "Microsoft.Extensions.Hosting")
+        {
+            _subscriptions.Add(listener.Subscribe(this));
+        }
+    }
+
+    public void OnNext(KeyValuePair<string, object?> notification)
+    {
+        if (notification.Key == "HostBuilt" && notification.Value is IHost host)
+        {
+            _host = host;
+        }
+    }
+
+    public void OnCompleted()
+    {
+    }
+
+    public void OnError(Exception error) => ExceptionDispatchInfo.Throw(error);
+
+    public void Dispose()
+    {
+        _listeners.Dispose();
+        foreach (IDisposable subscription in _subscriptions)
+        {
+            subscription.Dispose();
         }
     }
 }

@@ -223,8 +223,7 @@ try {
                 "-p:RestorePackagesPath=$packageCache") + $offlineCommon) "$name-cached-offline-restore"
             $null = Invoke-CheckedProcess $DotNet (@('build', $project, '--no-restore') + $common) "$name-build"
             $application = Join-Path $directory "bin\Debug\net12.0-windows\$name.exe"
-            $title = "$name-default"
-            $null = Invoke-CheckedProcess $application @("--Application:Title=$title") "$name-default-run" -WindowTitle $title
+            $null = Invoke-CheckedProcess $application @() "$name-default-run" -WindowTitle 'Form1'
             Assert-SourceUnchanged $directory $before
         }
     }
@@ -237,7 +236,7 @@ try {
             $null = Invoke-CheckedProcess $DotNet (@('build', $project, '--no-restore', '-p:TemplateSmoke=true',
                 "-p:OutputPath=$fixture") + $common) "$name-fixture-build"
         }
-        foreach ($scenario in @('services', 'invalid-options', 'designer', 'ui', 'host-stop')) {
+        foreach ($scenario in @('services', 'designer', 'ui', 'host-stop')) {
             Invoke-Case "$name-$scenario" {
                 $result = Invoke-CheckedProcess (Join-Path $fixture "$name.exe") @($scenario) "$name-$scenario"
                 Assert-Condition ($result.Errors.Length -eq 0 -and $result.Text -match "PASS (C#|VB): $scenario") `
@@ -256,7 +255,7 @@ try {
                     $null = Invoke-CheckedProcess $DotNet (@('publish', $project, '--no-restore', '-o', $publish) +
                         $publishArguments + $common) "$id-publish"
                     foreach ($expected in @("$name.exe", "$name.dll", "$name.runtimeconfig.json",
-                        'appsettings.json', 'Microsoft.Extensions.WinForms.Hosting.dll')) {
+                        'Microsoft.Extensions.WinForms.Hosting.dll')) {
                         Assert-Condition (Test-Path -LiteralPath (Join-Path $publish $expected)) "Missing published file: $id/$expected"
                     }
                     $runtimeConfig = Get-Content (Join-Path $publish "$name.runtimeconfig.json") -Raw | ConvertFrom-Json
@@ -273,9 +272,8 @@ try {
                 }
                 if ($rid -eq $nativeRid) {
                     Invoke-Case "$id-published-run" {
-                        $title = "$id-published"
-                        $result = Invoke-CheckedProcess (Join-Path $publish "$name.exe") @("--Application:Title=$title") `
-                            "$id-published-run" -WindowTitle $title
+                        $result = Invoke-CheckedProcess (Join-Path $publish "$name.exe") @() `
+                            "$id-published-run" -WindowTitle 'Form1'
                         Assert-Condition ($result.Errors.Length -eq 0) "Published application wrote errors: $id"
                     }
                 }

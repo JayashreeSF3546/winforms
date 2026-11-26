@@ -15,32 +15,30 @@ prototype. Shipping package/API/SDK approval is still required.
 
 ## Startup and ownership
 
-`Program.cs` initializes the STA UI, configures one host, and passes the unbuilt host builder to
-the WinForms runner. The deferred context factory constructs the Form only after host startup
-and options validation. The runner owns the context, Form, host, and container-created services.
-Do not separately build/run that host or create another service provider.
+The entry point follows the startup sample in commit `63577553`: it creates a builder with
+`UseHost(new HostBuilder())`, registers settings and exception services through `builder.Services`,
+and calls `builder.Logging.UseWinFormsLogging()`.
 
-The public parameterless Form constructor is for ordinary UI/Designer construction. Runtime
-dependencies are passed through its typed constructor, outside Designer-managed code.
-No settings, host, or network work runs in `InitializeComponent`. The Designer creates a `.resx`
-when resources are needed; it owns that resource file and `Form1.Designer.cs`.
+`UseStartupForm<Form1>()` defers the parameterless form constructor until startup.
+The fluent chain selects DPI, color, text rendering, visual styles, reveal mode, font, and exception
+routing before `Build` and `Run`. Do not also call `ApplicationConfiguration.Initialize()`.
+The runner owns the form, host, and container-created services. Do not separately build/run the host.
 
-Configuration starts at the application directory, not the current working directory.
-`appsettings.json` is copied to build/publish output. Environment variables such as
-`Application__Title` and command-line arguments such as `--Application:Title="My application"`
-override deployment JSON. `Application:Title` must not be empty. Configuration file watchers
-are disabled by default; enabling reload requires deliberate UI-thread marshaling.
+The form remains blank and Designer-compatible. No host or settings work runs in `InitializeComponent`.
+There is no application-context factory, constructor injection, options model, or `appsettings.json`.
+The plain `HostBuilder` does not add JSON, environment-variable, or command-line configuration defaults.
 
-The host uses configuration-filtered debug logging. View it with an attached debugger; no file,
-console, or remote logging destination is implied. Startup/run/shutdown failures are traced,
-shown to the user, and return a nonzero exit code. Unexpected UI exceptions are not silently
-continued. Additional logging providers and exception policies are explicit application choices.
+Debug logging requires an attached debugger. The explicit UI-exception handler writes the exception
+type to standard error and exits the UI thread; logging failures also write to standard error.
+A `WinExe` does not normally have a visible console. Durable logging, error dialogs, and custom exit
+codes are application choices, not additional template behavior.
 
 ## User settings
 
-`UserPreferences` is an example model, registered with source-generated JSON metadata.
+`StartupPreferences.UseCompactLayout` defaults to `true`, matching the reference sample.
+`StartupPreferencesJsonContext` supplies source-generated JSON metadata.
 Registration creates no directory or file and does not load, apply, or save preferences.
-Resolve `IUserSettingsService<UserPreferences>` in the composition root and pass it to the UI
+Resolve `IUserSettingsService<StartupPreferences>` in the composition root and pass it to the UI
 when implementing explicit asynchronous user commands. Keep the settings service host-owned.
 
 Store data is under `%LOCALAPPDATA%\WinForms\<SettingsApplicationId>`, unless deliberately configured

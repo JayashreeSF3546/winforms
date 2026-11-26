@@ -6,6 +6,11 @@ extends them for dotnet/winforms#14969.
 Use Windows x64, PowerShell 7, and an interactive desktop; do not interact with automated test windows.
 Run the following commands from the repository root.
 
+The current payload follows startup-only sample commit `63577553`. It has a plain `HostBuilder`,
+`UseStartupForm`, optional settings/exception registrations, and fluent startup defaults.
+It does not include JSON configuration, an options model, or a startup-error dialog.
+Historical results below describe the earlier configuration-rich payload, not new acceptance evidence.
+
 The [gated Hybrid scaffold checks](#gated-hybrid-scaffold) below also cover source-only isolation
 for dotnet/winforms#14967. They do not enable Hybrid template discovery or browser activation.
 
@@ -17,8 +22,8 @@ Visual Studio or clean-machine testing with a compilation/parameterless-construc
 
 For dotnet/winforms#14971, the [performance guide](PERFORMANCE.md) compares actual generated
 basic apps against current SDK template payloads on a matched Release prototype stack. It covers
-startup/shutdown, process resources, FDD/SCD file/assembly/size inventories, and opt-in JSON watcher
-cost. Hybrid and remote execution remain explicit acceptance gaps, not synthetic measurements.
+startup/shutdown, process resources, and FDD/SCD file/assembly/size inventories.
+Hybrid and remote execution remain explicit acceptance gaps, not synthetic measurements.
 
 ## Automated lifecycle matrix
 
@@ -48,14 +53,14 @@ Do not interact with its automatically opened windows.
 - Creation covers C#/VB and names containing spaces/punctuation, exact file manifests, framework
   rejection, unique settings IDs, unchanged classic payloads, and Hybrid exclusion.
 - Package lifecycle checks update availability without applying a remote update, replaces the
-  exact same local version with `--force`, and uninstalls in `finally`. It verifies stable discovery,
+  exact same local version by uninstalling/reinstalling, and uninstalls in `finally`. It verifies stable discovery,
   unchanged generated source, and removal from discovery. **This is not a two-version upgrade or
   downgrade test**; that requires a separately versioned published artifact.
 - Restore covers a deliberate empty-source/empty-cache failure and a subsequent cached restore
   with all feeds cleared. NuGet auditing is disabled only for those explicitly offline checks,
   since advisory lookups would otherwise make them network-dependent.
 - All four generated projects build and run with their actual entry points. Native C#/VB
-  fixtures cover configuration/settings, invalid startup options, parameterless construction,
+  fixtures cover settings/logging/exception services, parameterless construction,
   UI-origin stop, and host-origin stop, without modifying template payloads.
 - C#/VB publish as framework-dependent and self-contained for `win-x64`, `win-x86`, and
   `win-arm64` by default. Apphost/runtime PE machine types, published manifests/runtime files,
@@ -63,7 +68,7 @@ Do not interact with its automatically opened windows.
   checked. Only the native OS architecture executes; other architecture runs are explicitly
   **NotRun**, never counted as passes. `-RuntimeIdentifiers win-x64` selects a smaller local matrix
   on x64; the selected list must include the native architecture.
-- Executed publishes must display the configured real main-window title, accept normal close,
+- Executed publishes must display the real `Form1` main window, accept normal close,
   and exit zero. The test driver does not add shutdown switches to production startup.
 
 Each run retains `results.json`, JUnit `results.xml`, `environment.json`, per-command stdout/stderr,
@@ -121,6 +126,12 @@ projects, and uninstalls in `finally`. It checks exact generated-file manifests,
 identities, framework restrictions, absence of repository project imports/references, and
 byte-for-byte preservation of classic payloads. It does not change the user's installed templates.
 All checks passed. Copy the retained generation path printed at the end into `$generated` below.
+
+The smoke fixtures execute the generated `Program.Main` and observe its host through the Generic
+Host diagnostic listener, without adding test hooks to generated code. This covers the settings
+registration on `builder.Services`, the exception service, and the Debug provider selected by the
+WinForms logging helper. The `ui` scenario checks fluent startup defaults; the `designer` scenario
+remains parameterless and does not build a host.
 
 ## Explicit prototype consumer harness
 
@@ -211,21 +222,20 @@ function Invoke-TemplateScenario([string] $Executable, [string] $Scenario) {
 
 foreach ($name in @('BasicCSharp', 'BasicVisualBasic')) {
     $executable = Join-Path $generated "$name\bin\Debug\net12.0-windows\$name.exe"
-    foreach ($scenario in @('services', 'invalid-options', 'designer', 'ui', 'host-stop')) {
+    foreach ($scenario in @('services', 'designer', 'ui', 'host-stop')) {
         Invoke-TemplateScenario $executable $scenario
     }
 }
 ```
 
-Both fixture builds and all ten runtime cases passed.
+The current minimal payload has eight runtime cases across the two language fixtures.
 
 | Scenario | Expected result |
 |---|---|
-| `services` | Deployment JSON loads from the executable directory; environment overrides JSON and CLI overrides environment; watchers remain off; settings resolution creates no storage; defaults/save/load work. |
-| `invalid-options` | An empty title raises options validation during host startup, before Form creation. |
+| `services` | The generated host contains the settings service, exception logging, and one Debug provider; settings defaults/save/load work. |
 | `designer` | Public parameterless construction retains the default title and creates no handle. This does not replace actual VS Designer testing. |
-| `ui` | Actual generated `Program.Main` displays the configured typed Form; closing it disposes the UI and returns zero. |
-| `host-stop` | Host lifetime stop closes/disposes the typed Form and leaves no open Forms. |
+| `ui` | Actual generated `Program.Main` applies startup defaults and displays `Form1`; closing it disposes the UI. |
+| `host-stop` | Host lifetime stop closes/disposes `Form1` and leaves no open forms. |
 
 The settings scenario requires an unused generated application ID and removes only its newly owned
 settings directory after the host is disposed. Never run it against an application identity with
@@ -255,14 +265,13 @@ without changing its startup, use a different working directory and close its re
 ```powershell
 foreach ($name in @('BasicCSharp', 'BasicVisualBasic')) {
     foreach ($mode in @('fdd', 'scd')) {
-        $title = "$name-$mode-published"
+        $title = 'Form1'
         $start = [Diagnostics.ProcessStartInfo]::new(
             (Join-Path $generated "publish\$name\$mode\$name.exe"))
         $start.UseShellExecute = $false
         $start.WorkingDirectory = $PWD.Path
         $start.Environment['DOTNET_ROOT'] = (Split-Path $dotnet)
         $start.Environment['DOTNET_ROOT_X64'] = (Split-Path $dotnet)
-        $start.ArgumentList.Add("--Application:Title=$title")
         $process = [Diagnostics.Process]::Start($start)
         try {
             if (-not $process.WaitForInputIdle(30000)) { throw 'Input-idle timeout.' }

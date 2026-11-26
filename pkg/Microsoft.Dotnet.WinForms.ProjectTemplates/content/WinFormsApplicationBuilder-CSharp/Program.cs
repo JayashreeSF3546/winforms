@@ -1,77 +1,52 @@
-﻿using System.Diagnostics;
-using Microsoft.Extensions.Configuration;
+﻿using System.Windows.Forms.VisualStyles;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Microsoft.Extensions.WinForms;
 
 namespace Company.WinFormsBuilderApp1;
 
 /// <summary>
-///  Composes one host and starts the owning STA message loop.
+///  Configures optional builder services and startup defaults before creating the main form.
 /// </summary>
 internal static class Program
 {
     internal const string SettingsApplicationId = "WinFormsApp.9e5e07e6-0d1b-4661-9395-454a2335f647";
 
     [STAThread]
-    internal static int Main(string[] args)
+    internal static void Main()
     {
-        try
-        {
-            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
-            ApplicationConfiguration.Initialize();
-            WinFormsApplication? application = null;
-            using (application = WinFormsApplication.CreateBuilder()
-                .UseHost(CreateHostBuilder(args))
-                .UseApplicationContext(() =>
-                {
-                    IServiceProvider services = application!.Host!.Services;
-                    var options = services.GetRequiredService<IOptions<ApplicationOptions>>();
-                    var logger = services.GetRequiredService<ILogger<Form1>>();
+        WinFormsApplicationBuilder builder = WinFormsApplication.CreateBuilder().UseHost(new HostBuilder());
 
-                    return new ApplicationContext(new Form1(options.Value, logger));
-                })
-                .Build())
-            {
-                application.Run();
-            }
+        builder.Services.AddWinFormsUserSettingsService(
+            applicationId: SettingsApplicationId,
+            schemaVersion: 1,
+            typeInfo: StartupPreferencesJsonContext.Default.StartupPreferences,
+            createDefaults: static () => new StartupPreferences());
+        builder.Services.AddWinFormsExceptionService(
+            handleThreadException: HandleThreadException,
+            reportLoggingFailure: static failure => Console.Error.WriteLine(
+                $"LOGGING FAILURE {failure.Source}: {failure.Exception.GetType().Name}"));
+        builder.Logging.UseWinFormsLogging();
 
-            return 0;
-        }
-        catch (Exception exception) when (exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
-        {
-            Trace.TraceError(exception.ToString());
-            MessageBox.Show(exception.Message, "Application error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        builder.UseStartupForm<Form1>()
+            .UseHighDpiMode(HighDpiMode.SystemAware)
+            .UseColorMode(SystemColorMode.System)
+            .UseTextRendering(false)
+            .UseLegacyVisualStyles()
+            .UseFormRevealMode(FormRevealMode.Deferred)
+            .UseVisualStylesMode(VisualStylesMode.Net11)
+            .UseDefaultFont(SystemFonts.DefaultFont)
+            .UseUnhandledExceptionMode(UnhandledExceptionMode.CatchException)
+            .UseVisualStyleState(VisualStyleState.ClientAndNonClientAreasEnabled);
 
-            return 1;
-        }
+        using WinFormsApplication app = builder.Build();
+        app.Run();
     }
 
-    internal static IHostBuilder CreateHostBuilder(string[] args)
-        => new HostBuilder()
-            .ConfigureHostConfiguration(configuration => configuration.AddInMemoryCollection(
-                new Dictionary<string, string?> { ["hostBuilder:reloadConfigOnChange"] = "false" }))
-            .ConfigureWinFormsConfiguration(args)
-            .UseDefaultServiceProvider(options =>
-            {
-                options.ValidateScopes = true;
-                options.ValidateOnBuild = true;
-            })
-            .ConfigureLogging((context, logging) => logging
-                .AddConfiguration(context.Configuration.GetSection("Logging"))
-                .AddDebug())
-            .ConfigureServices((context, services) =>
-            {
-                services.AddOptions<ApplicationOptions>()
-                    .Bind(context.Configuration.GetSection("Application"))
-                    .Validate(options => !string.IsNullOrWhiteSpace(options.Title), "Application:Title must not be empty.")
-                    .ValidateOnStart();
-                services.AddJsonUserSettings(
-                    applicationId: SettingsApplicationId,
-                    schemaVersion: 1,
-                    typeInfo: PreferencesJsonContext.Default.UserPreferences,
-                    createDefaults: () => new UserPreferences());
-            });
+    private static void HandleThreadException(object? sender, ThreadExceptionEventArgs e)
+    {
+        Console.Error.WriteLine($"UI FAILURE {e.Exception.GetType().Name}");
+        Application.ExitThread();
+    }
 }

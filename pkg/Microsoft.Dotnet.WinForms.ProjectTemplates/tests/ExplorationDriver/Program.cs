@@ -41,7 +41,7 @@ internal static partial class Program
 
     private static void Inspect(string executable, string scenario)
     {
-        string title = $"Template exploration {Guid.NewGuid():N}";
+        string title = "Form1";
         ProcessStartInfo start = new(executable)
         {
             UseShellExecute = false,
