@@ -805,7 +805,7 @@ public class ContainerControl : ScrollableControl, IContainerControl
         // It means the form is designed on the monitor that has same settings as the monitor that
         // it is being run.
         if (!_state[s_stateScalingChild]
-            && !performLayout
+            && (!performLayout || AutoScaleMode == AutoScaleMode.Dpi)
             && AutoScaleMode != AutoScaleMode.None && AutoScaleMode != AutoScaleMode.Inherit
             && _state[s_stateScalingNeededOnLayout]
             && (AutoScaleFactor.Width != 1.0F || AutoScaleFactor.Height != 1.0F)

@@ -571,14 +571,20 @@ public class ContainerControlTests
     }
 
     [WinFormsTheory]
-    [InlineData(false, true, 1F)]
-    [InlineData(false, true, 3F)]
-    [InlineData(true, true, 1F)]
-    [InlineData(true, true, 3F)]
-    [InlineData(false, false, 3F)]
-    [InlineData(true, false, 3F)]
+    [InlineData(false, true, 1F, false)]
+    [InlineData(false, true, 3F, false)]
+    [InlineData(true, true, 1F, false)]
+    [InlineData(true, true, 3F, false)]
+    [InlineData(false, false, 3F, false)]
+    [InlineData(true, false, 3F, false)]
+    [InlineData(false, true, 1F, true)]
+    [InlineData(false, true, 3F, true)]
+    [InlineData(true, true, 1F, true)]
+    [InlineData(true, true, 3F, true)]
+    [InlineData(false, false, 3F, true)]
+    [InlineData(true, false, 3F, true)]
     public void ContainerControl_DpiScaling_GroupBoxChildHasExpectedSize(
-        bool radioButton, bool autoSize, float designScale)
+        bool radioButton, bool autoSize, float designScale, bool performLayout)
     {
         using Form form = new();
         using GroupBox group = new();
@@ -601,8 +607,12 @@ public class ContainerControlTests
             current.Width * designScale,
             current.Height * designScale);
 
-        group.ResumeLayout(false);
-        group.PerformLayout();
+        group.ResumeLayout(performLayout);
+        if (!performLayout)
+        {
+            group.PerformLayout();
+        }
+
         form.ResumeLayout(false);
 
         Size expected = autoSize
@@ -618,16 +628,22 @@ public class ContainerControlTests
     }
 
     [WinFormsTheory]
-    [InlineData(false, AutoScaleMode.None, 1F)]
-    [InlineData(true, AutoScaleMode.None, 1F)]
-    [InlineData(false, AutoScaleMode.Inherit, 3F)]
-    [InlineData(true, AutoScaleMode.Inherit, 3F)]
-    [InlineData(false, AutoScaleMode.Font, 2F)]
-    [InlineData(true, AutoScaleMode.Font, 2F)]
-    [InlineData(false, AutoScaleMode.Dpi, 2F)]
-    [InlineData(true, AutoScaleMode.Dpi, 2F)]
+    [InlineData(false, AutoScaleMode.None, 1F, false)]
+    [InlineData(true, AutoScaleMode.None, 1F, false)]
+    [InlineData(false, AutoScaleMode.Inherit, 3F, false)]
+    [InlineData(true, AutoScaleMode.Inherit, 3F, false)]
+    [InlineData(false, AutoScaleMode.Font, 2F, false)]
+    [InlineData(true, AutoScaleMode.Font, 2F, false)]
+    [InlineData(false, AutoScaleMode.Dpi, 2F, false)]
+    [InlineData(true, AutoScaleMode.Dpi, 2F, false)]
+    [InlineData(false, AutoScaleMode.None, 1F, true)]
+    [InlineData(true, AutoScaleMode.None, 1F, true)]
+    [InlineData(false, AutoScaleMode.Inherit, 3F, true)]
+    [InlineData(true, AutoScaleMode.Inherit, 3F, true)]
+    [InlineData(false, AutoScaleMode.Dpi, 2F, true)]
+    [InlineData(true, AutoScaleMode.Dpi, 2F, true)]
     public void ContainerControl_DpiScaling_NestedGroupBoxRespectsAutoScaleMode(
-        bool radioButton, AutoScaleMode autoScaleMode, float expectedScale)
+        bool radioButton, AutoScaleMode autoScaleMode, float expectedScale, bool performLayout)
     {
         using Form form = new();
         using UserControl container = new();
@@ -665,7 +681,7 @@ public class ContainerControlTests
         SizeF formDimensions = form.CurrentAutoScaleDimensions;
         form.AutoScaleDimensions = new SizeF(formDimensions.Width * 3F, formDimensions.Height * 3F);
 
-        group.ResumeLayout(false);
+        group.ResumeLayout(performLayout);
 
         Rectangle expectedBounds = new(
             (int)(72F / expectedScale),
@@ -676,7 +692,11 @@ public class ContainerControlTests
         Assert.Equal(expectedBounds, group.Bounds);
         Assert.Equal(expectedLocation, child.Location);
 
-        group.PerformLayout();
+        if (!performLayout)
+        {
+            group.PerformLayout();
+        }
+
         panel.ResumeLayout(false);
         container.ResumeLayout(false);
         form.ResumeLayout(false);
@@ -687,9 +707,11 @@ public class ContainerControlTests
     }
 
     [WinFormsTheory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void ContainerControl_DpiScaling_GroupBoxNestedInPanelHasExpectedSize(bool radioButton)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void ContainerControl_DpiScaling_GroupBoxNestedInPanelHasExpectedSize(bool radioButton, bool performLayout)
     {
         using Form form = new();
         using Panel panel = new();
@@ -714,12 +736,16 @@ public class ContainerControlTests
         SizeF current = form.CurrentAutoScaleDimensions;
         form.AutoScaleDimensions = new SizeF(current.Width * 3F, current.Height * 3F);
 
-        group.ResumeLayout(false);
+        group.ResumeLayout(performLayout);
 
         Assert.Equal(new Size(200, 100), group.Size);
         Assert.Equal(new Point(24, 32), child.Location);
 
-        group.PerformLayout();
+        if (!performLayout)
+        {
+            group.PerformLayout();
+        }
+
         panel.ResumeLayout(false);
         form.ResumeLayout(false);
 
@@ -751,10 +777,9 @@ public class ContainerControlTests
     public void ContainerControl_OnChildLayoutResuming_DpiScaling_DoesNotCreateChildCollection(
         bool performLayout, float designScale)
     {
-        using ContainerControl control = new()
-        {
-            AutoScaleMode = AutoScaleMode.Dpi
-        };
+        using ContainerControl control = new();
+        control.SuspendLayout();
+        control.AutoScaleMode = AutoScaleMode.Dpi;
         SizeF current = control.CurrentAutoScaleDimensions;
         control.AutoScaleDimensions = new SizeF(
             current.Width * designScale,
@@ -766,6 +791,34 @@ public class ContainerControlTests
         control.OnChildLayoutResuming(child, performLayout);
 
         Assert.Null(child.ChildControls);
+    }
+
+    [WinFormsTheory]
+    [InlineData(AutoScaleMode.Font, false, 200)]
+    [InlineData(AutoScaleMode.Font, true, 600)]
+    [InlineData(AutoScaleMode.Dpi, false, 200)]
+    [InlineData(AutoScaleMode.Dpi, true, 200)]
+    public void ContainerControl_OnChildLayoutResuming_ScalingPreservesFontModeBehavior(
+        AutoScaleMode autoScaleMode, bool performLayout, int expectedWidth)
+    {
+        using ContainerControl control = new();
+        using GroupBox group = new();
+        using CheckBox child = new();
+        control.SuspendLayout();
+        group.SuspendLayout();
+        group.Size = new Size(600, 300);
+        child.AutoSize = true;
+        child.Text = "Option";
+        group.Controls.Add(child);
+        control.Controls.Add(group);
+
+        control.AutoScaleMode = autoScaleMode;
+        SizeF current = control.CurrentAutoScaleDimensions;
+        control.AutoScaleDimensions = new SizeF(current.Width * 3F, current.Height * 3F);
+
+        control.OnChildLayoutResuming(group, performLayout);
+
+        Assert.Equal(expectedWidth, group.Width);
     }
 
     [WinFormsFact]
