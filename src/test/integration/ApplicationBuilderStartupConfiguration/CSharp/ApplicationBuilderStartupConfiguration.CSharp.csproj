@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>$(NetCurrent)</TargetFramework>
+    <TargetFramework>$(NetCurrent)-windows7.0</TargetFramework>
+    <DisableTransitiveFrameworkReferences>true</DisableTransitiveFrameworkReferences>
     <OutputType>WinExe</OutputType>
     <IsTestUtilityProject>true</IsTestUtilityProject>
     <IsPackable>false</IsPackable>
@@ -9,6 +10,7 @@
     <UpdateXlfOnBuild>false</UpdateXlfOnBuild>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\..\..\Microsoft.Extensions.WinForms.Hosting\src\Microsoft.Extensions.WinForms.Hosting.csproj" />
     <ProjectReference Include="..\..\..\..\System.Windows.Forms\System.Windows.Forms.csproj" />
   </ItemGroup>
 </Project>

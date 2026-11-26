@@ -53,7 +53,7 @@ internal sealed class MainForm : Form
                 $"DefaultFormRevealMode: {Application.DefaultFormRevealMode}",
                 $"DefaultVisualStylesMode: {Application.DefaultVisualStylesMode}",
                 $"Inherited Font: {Font.Name}, {Font.SizeInPoints} pt",
-                "UnhandledExceptionMode: ThrowException (configured; no public getter)",
+                "UnhandledExceptionMode: CatchException (configured; no public getter)",
                 $"VisualStyleState: {Application.VisualStyleState}"
             ]
         };
